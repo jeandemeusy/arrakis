@@ -174,9 +174,9 @@ export default function Dashboard({ data }: { data: DashboardData }) {
           note={`${volume(data.totals.gigabytesTotal)} cumulative`}
         />
         <Metric
-          eyebrow="ALL-TIME CLIENTS"
-          figure={count(data.totals.allTimeUsers)}
-          note={`${count(data.totals.relayers7d)} relayers served them this week`}
+          eyebrow="NEW CLIENTS · 30 DAYS"
+          figure={count(data.totals.deployments30d)}
+          note={`${count(data.totals.deployments7d)} in the last 7 days`}
         />
       </section>
 
@@ -187,9 +187,9 @@ export default function Dashboard({ data }: { data: DashboardData }) {
             <h2>Unique active users</h2>
           </div>
           <p>
-            A user is a VPN client that paid for a session in the window—an account that
-            opened a channel and settled tickets on it, and that never announced itself
-            as relay infrastructure.
+            A user is a VPN client—an account that bound a key but never announced an
+            address, so it is not relay infrastructure—that either settled tickets on
+            one of its channels inside the window or was first deployed inside it.
           </p>
         </div>
         <div className="chart-card main-chart">
@@ -201,7 +201,8 @@ export default function Dashboard({ data }: { data: DashboardData }) {
             <div className="legend">
               <i className="actual" />
               30-day <i className="target" />
-              7-day
+              7-day <i className="deployments" />
+              New clients
             </div>
           </div>
           <ResponsiveContainer width="100%" height={330}>
@@ -243,6 +244,15 @@ export default function Dashboard({ data }: { data: DashboardData }) {
                 strokeWidth={1.5}
                 dot={false}
               />
+              <Line
+                type="monotone"
+                dataKey="deployments"
+                name="New clients (30d)"
+                stroke="#4c8f7b"
+                strokeWidth={1.5}
+                strokeDasharray="4 4"
+                dot={false}
+              />
             </ComposedChart>
           </ResponsiveContainer>
           {!hasUsers && (
@@ -252,7 +262,8 @@ export default function Dashboard({ data }: { data: DashboardData }) {
           )}
           <p className="chart-note">
             Each point counts distinct clients over the preceding 30 and 7 days, so the
-            two lines converge when activity is concentrated in a single week.
+            two lines converge when activity is concentrated in a single week. New
+            clients counts first deployments in the same 30-day window.
           </p>
         </div>
       </section>
@@ -264,8 +275,9 @@ export default function Dashboard({ data }: { data: DashboardData }) {
             <h2>Relayed traffic</h2>
           </div>
           <p>
-            Each redemption settles a batch of tickets, and each ticket accounts for 650
-            bytes scaled by the winning probability in force when it was redeemed.
+            A ticket is issued per packet but only wins with probability p, so each
+            redemption stands in for 650&nbsp;bytes divided by the winning probability
+            in force at its block.
           </p>
         </div>
         <div className="chart-split">
@@ -345,7 +357,7 @@ export default function Dashboard({ data }: { data: DashboardData }) {
           <Metric
             eyebrow="TOTAL REDEMPTIONS"
             figure={count(data.totals.redemptionsTotal)}
-            note={`${count(data.totals.ticketsTotal)} tickets settled`}
+            note={`${count(data.totals.ticketsTotal)} tickets settled across them`}
           />
           <Metric
             eyebrow="TOTAL DATA RELAYED"
@@ -515,6 +527,11 @@ export default function Dashboard({ data }: { data: DashboardData }) {
               note="Distinct destinations, last 7 days"
             />
             <Metric
+              eyebrow="CLIENTS DEPLOYED"
+              figure={count(data.totals.clientsDeployed)}
+              note={`${count(data.totals.allTimeUsers)} have paid for a session`}
+            />
+            <Metric
               eyebrow="INDEXED SAFES"
               figure={count(data.safes)}
               note={`${compactToken(data.safeBalance)} held`}
@@ -557,9 +574,9 @@ export default function Dashboard({ data }: { data: DashboardData }) {
             <span>03</span>
             <h3>Data volume</h3>
             <p>
-              Each settled ticket accounts for 650 bytes scaled by the network winning
-              probability, read from the oracle&rsquo;s update history so every redemption
-              uses the value in force at its block.
+              Each redemption accounts for 650 / (2<sup>30</sup> &times; p) GB, where p is
+              the winning probability from the oracle&rsquo;s update history at that block.
+              Redemptions predating the first update are excluded.
             </p>
           </div>
         </div>

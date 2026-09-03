@@ -86,11 +86,19 @@ whose ticket index exceeds its predecessor's (within the same channel epoch) is
 therefore a redemption, and the increment is the number of tickets it settled.
 See [`sql/v1/redemptions.sql`](./sql/v1/redemptions.sql).
 
-**Active users.** Distinct client accounts that settled a redemption inside the
-window, plotted per day over trailing 7- and 30-day windows.
+**Active users.** A client is an account that bound a key (`account`, written from
+`KeyBinding`) but never announced an address (`announcement`, written from
+`AddressAnnouncement`). It is active in a window when it settled a redemption on
+one of its channels inside that window, or when it was first deployed inside it —
+so a new client registers on deployment rather than only once its first tickets
+are redeemed. Windows are inclusive of both endpoints: 7 days is `day-6..day`,
+30 days is `day-30..day`.
 
-**Data volume.** Each settled ticket accounts for `650 / 2^30` GB scaled by the
-network winning probability in force at the redemption's block. Blokli keeps only
+**Data volume.** A ticket is issued per packet but only wins with probability `p`,
+so a redeemed ticket stands in for `1/p` packets of 650 bytes. Each redemption
+therefore accounts for `650 / (2^30 * p)` GB, with `p` the winning probability in
+force at that redemption's block. Redemptions predating the first oracle update
+have no probability on record and are excluded rather than guessed. Blokli keeps only
 the current probability in `chain_info`, so the timeline is recovered by decoding
 `WinProbUpdated` logs from the raw `log` table
 ([`sql/v1/win-prob-updates.sql`](./sql/v1/win-prob-updates.sql)); the 7-byte

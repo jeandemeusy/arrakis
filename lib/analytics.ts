@@ -7,19 +7,27 @@ import { Pool, type QueryResultRow } from "pg";
 
 import { resolveBlockClock, type BlockClock } from "./rpc";
 
-/** Payload a single redeemed ticket accounts for, before the win-probability scale. */
-const GIGABYTES_PER_TICKET = 650 / 2 ** 30;
+/**
+ * Payload one redemption accounts for, before the win-probability scale.
+ *
+ * A ticket is issued per packet but only wins with probability p, so a redeemed
+ * ticket stands in for 1/p packets of 650 bytes: 650 / (2^30 * p) gigabytes.
+ */
+const GIGABYTES_PER_REDEMPTION = 650 / 2 ** 30;
 /** Gnosis block cadence, used to place blocks in time when no RPC is configured. */
 const BLOCK_SECONDS = 5;
 const DAY_SECONDS = 86_400;
+// Trailing windows are inclusive of both endpoints: 7 days is day-6..day and
+// 30 days is day-30..day, matching how the published Dune queries slice them.
 const WEEK_DAYS = 7;
-const MONTH_DAYS = 30;
+const MONTH_DAYS = 31;
 const RELAYER_LIMIT = 12;
 
 export type ActiveUserPoint = {
   date: string;
   weekly: number;
   monthly: number;
+  deployments: number;
 };
 
 export type WeekPoint = {
@@ -64,6 +72,9 @@ export type AnalyticsSnapshot = {
     gigabytesTotal: number | null;
     ticketsTotal: number | null;
     relayers7d: number | null;
+    deployments7d: number | null;
+    deployments30d: number | null;
+    clientsDeployed: number | null;
   };
   warnings: string[];
 };
@@ -82,6 +93,11 @@ type RedemptionRow = QueryResultRow & {
   destination: Buffer;
   published_block: string;
   tickets: string;
+};
+
+type DeploymentRow = QueryResultRow & {
+  account: Buffer;
+  published_block: string;
 };
 
 type WinProbRow = QueryResultRow & {
@@ -161,17 +177,26 @@ function decodeWinProbability(bytes: Buffer): number {
   return new DataView(buffer).getFloat64(0) - 1;
 }
 
-/** Step function over the win-probability timeline, newest update at or before a block. */
+/**
+ * Step function over the win-probability timeline: the newest update at or before
+ * a block. Redemptions preceding the first update have no probability on record
+ * and resolve to zero, which excludes them from volume rather than guessing.
+ */
 function winProbabilityAt(timeline: Array<[number, number]>, fallback: number) {
   if (!timeline.length) return () => fallback;
   return (block: number) => {
-    let value = fallback;
+    let value = 0;
     for (const [updatedAt, probability] of timeline) {
       if (updatedAt > block) break;
       value = probability;
     }
     return value;
   };
+}
+
+/** Volume a redemption accounts for; a zero or unknown probability contributes none. */
+function redemptionVolume(probability: number): number {
+  return probability > 0 ? GIGABYTES_PER_REDEMPTION / probability : 0;
 }
 
 function dayIndex(timestamp: number): number {
@@ -190,11 +215,14 @@ function estimatedClock(latestBlock: number): BlockClock {
 /**
  * Daily snapshots of the trailing 7- and 30-day active-user counts.
  *
- * A user is the source of a client channel that settled a redemption inside the
- * window: the session was paid for, so the client was online and relaying traffic.
+ * A client is active in a window when it settled a redemption on one of its
+ * channels inside that window, or when it was first deployed inside it. Counting
+ * the deployment day means a freshly deployed client registers immediately rather
+ * than only once its first tickets are redeemed.
  */
 function activeUserSeries(
   actorsByDay: Map<number, Set<string>>,
+  deploymentsByDay: Map<number, number>,
   lastDay: number,
 ): ActiveUserPoint[] {
   const days = [...actorsByDay.keys()].sort((a, b) => a - b);
@@ -204,7 +232,9 @@ function activeUserSeries(
   for (let day = days[0]; day <= lastDay; day += 1) {
     const weekly = new Set<string>();
     const monthly = new Set<string>();
+    let deployments = 0;
     for (let offset = 0; offset < MONTH_DAYS; offset += 1) {
+      deployments += deploymentsByDay.get(day - offset) ?? 0;
       const actors = actorsByDay.get(day - offset);
       if (!actors) continue;
       for (const actor of actors) {
@@ -212,7 +242,12 @@ function activeUserSeries(
         if (offset < WEEK_DAYS) weekly.add(actor);
       }
     }
-    points.push({ date: isoDate(day), weekly: weekly.size, monthly: monthly.size });
+    points.push({
+      date: isoDate(day),
+      weekly: weekly.size,
+      monthly: monthly.size,
+      deployments,
+    });
   }
   return points;
 }
@@ -284,11 +319,12 @@ async function querySnapshot(): Promise<AnalyticsSnapshot> {
   const summary = summaryResult.rows[0];
   if (!summary) throw new Error("Blokli chain_info is not initialized");
 
-  const [channelBalances, safeBalances, redemptionRows, winProbRows] =
+  const [channelBalances, safeBalances, redemptionRows, deploymentRows, winProbRows] =
     await Promise.allSettled([
       db.query<{ balance: Buffer }>(await sql("channel-balances")),
       db.query<{ balance: Buffer }>(await sql("safe-balances")),
       db.query<RedemptionRow>(await sql("redemptions")),
+      db.query<DeploymentRow>(await sql("client-deployments")),
       db.query<WinProbRow>(await sql("win-prob-updates")),
     ]);
 
@@ -296,6 +332,11 @@ async function querySnapshot(): Promise<AnalyticsSnapshot> {
     redemptionRows.status === "fulfilled" ? redemptionRows.value.rows : [];
   if (redemptionRows.status === "rejected") {
     warnings.push("Redemption history is unavailable; usage panels are empty.");
+  }
+  const rawDeployments =
+    deploymentRows.status === "fulfilled" ? deploymentRows.value.rows : [];
+  if (deploymentRows.status === "rejected") {
+    warnings.push("Client deployments are unavailable; active users count redemptions only.");
   }
 
   // chain_info holds only the current winning probability. The raw log table, when
@@ -326,7 +367,10 @@ async function querySnapshot(): Promise<AnalyticsSnapshot> {
   const probabilityAt = winProbabilityAt(timeline, fallbackWinProb);
 
   const latestBlock = Number(summary.block_number);
-  const blocks = rawRedemptions.map((row) => Number(row.published_block));
+  const blocks = [
+    ...rawRedemptions.map((row) => Number(row.published_block)),
+    ...rawDeployments.map((row) => Number(row.published_block)),
+  ];
   const firstBlock = blocks.length ? Math.min(...blocks) : latestBlock;
 
   let timebase: AnalyticsSnapshot["timebase"] = "estimated";
@@ -349,7 +393,7 @@ async function querySnapshot(): Promise<AnalyticsSnapshot> {
       block,
       day: dayIndex(clock(block)),
       tickets,
-      gigabytes: tickets * GIGABYTES_PER_TICKET * probabilityAt(block),
+      gigabytes: redemptionVolume(probabilityAt(block)),
     };
   });
 
@@ -360,13 +404,28 @@ async function querySnapshot(): Promise<AnalyticsSnapshot> {
     actorsByDay.set(redemption.day, actors);
   }
 
+  // A client's deployment day counts as activity in its own right, so add it to
+  // the actor set as well as reporting it as a deployment.
+  const deploymentsByDay = new Map<number, number>();
+  for (const row of rawDeployments) {
+    const day = dayIndex(clock(Number(row.published_block)));
+    deploymentsByDay.set(day, (deploymentsByDay.get(day) ?? 0) + 1);
+    const actors = actorsByDay.get(day) ?? new Set<string>();
+    actors.add(hex(row.account));
+    actorsByDay.set(day, actors);
+  }
+
   const lastDay = dayIndex(clock(latestBlock));
-  const activeUsers = activeUserSeries(actorsByDay, lastDay);
+  const activeUsers = activeUserSeries(actorsByDay, deploymentsByDay, lastDay);
   const weeks = weeklySeries(redemptions);
   const recent = redemptions.filter((redemption) => redemption.day > lastDay - WEEK_DAYS);
   const relayers = relayerDistribution(recent);
   const latest = activeUsers.at(-1);
   const hasUsage = redemptionRows.status === "fulfilled";
+  let latestWeekDeployments = 0;
+  for (let offset = 0; offset < WEEK_DAYS; offset += 1) {
+    latestWeekDeployments += deploymentsByDay.get(lastDay - offset) ?? 0;
+  }
   const sum = (rows: Redemption[], pick: (row: Redemption) => number) =>
     rows.reduce((total, row) => total + pick(row), 0);
 
@@ -399,6 +458,9 @@ async function querySnapshot(): Promise<AnalyticsSnapshot> {
       gigabytesTotal: hasUsage ? sum(redemptions, (row) => row.gigabytes) : null,
       ticketsTotal: hasUsage ? sum(redemptions, (row) => row.tickets) : null,
       relayers7d: hasUsage ? new Set(recent.map((row) => row.destination)).size : null,
+      deployments7d: latestWeekDeployments,
+      deployments30d: latest?.deployments ?? null,
+      clientsDeployed: rawDeployments.length || null,
     },
     warnings,
   };
@@ -430,6 +492,9 @@ function unavailable(message: string): AnalyticsSnapshot {
       gigabytesTotal: null,
       ticketsTotal: null,
       relayers7d: null,
+      deployments7d: null,
+      deployments30d: null,
+      clientsDeployed: null,
     },
     warnings: [message],
   };

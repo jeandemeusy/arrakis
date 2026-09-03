@@ -303,6 +303,9 @@ main {
   margin: 8px 10px 0;
   max-width: 690px;
 }
+.legend i.deployments {
+  background: #4c8f7b;
+}
 .chart-split {
   display: grid;
   grid-template-columns: 1fr 1fr;
