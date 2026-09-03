@@ -183,11 +183,6 @@ main {
   letter-spacing: -0.06em;
   color: var(--yellow);
 }
-.mau-number span {
-  font-family: Arial, sans-serif;
-  font-size: 30px;
-  margin-left: 5px;
-}
 .mau-footer {
   display: flex;
   justify-content: space-between;
@@ -308,64 +303,39 @@ main {
   margin: 8px 10px 0;
   max-width: 690px;
 }
-.milestones {
-  background: #fbf9f3;
-  padding: 32px 28px;
+.relayer-list {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
 }
-.milestone {
+.relayer-list li {
   display: grid;
-  grid-template-columns: 24px 1fr;
-  gap: 17px;
-  min-height: 112px;
-}
-.milestone-line {
-  display: flex;
-  flex-direction: column;
+  grid-template-columns: 132px 1fr 48px;
   align-items: center;
+  gap: 14px;
+  padding: 9px 0;
+  border-bottom: 1px solid #ece8de;
 }
-.milestone-line span {
-  width: 23px;
-  height: 23px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid #aba89f;
-  border-radius: 50%;
-  font-size: 9px;
+.relayer-list li:last-child {
+  border-bottom: none;
 }
-.milestone-line span.complete {
+.relayer-list code {
+  font-size: 11px;
+  color: #55534e;
+}
+.relayer-bar {
+  display: block;
+  height: 7px;
+  background: #f0ece2;
+}
+.relayer-bar i {
+  display: block;
+  height: 100%;
   background: var(--yellow);
-  border-color: var(--yellow);
 }
-.milestone-line i {
-  flex: 1;
-  border-left: 1px solid #ccc8be;
-}
-.milestone:last-child .milestone-line i {
-  display: none;
-}
-.milestone small {
-  color: #98958e;
-  font-size: 9px;
-  letter-spacing: 0.1em;
-}
-.milestone h3 {
-  margin: 4px 0;
-  font-family: Georgia, serif;
-  font-size: 21px;
-  font-weight: 400;
-}
-.milestone strong {
+.relayer-list strong {
   font-size: 12px;
-}
-.milestone em {
-  float: right;
-  font-style: normal;
-  background: #e8e4da;
-  padding: 4px 7px;
-  font-size: 8px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
+  text-align: right;
 }
 .network-grid {
   display: grid;
@@ -392,6 +362,8 @@ main {
   white-space: nowrap;
 }
 .data-warning {
+  list-style: none;
+  padding: 0;
   color: #805f00;
   font-size: 10px;
   line-height: 1.5;
