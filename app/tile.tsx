@@ -7,7 +7,7 @@ import {
   type ReactElement,
   type ReactNode,
 } from 'react';
-import { Download, Maximize, X } from 'lucide-react';
+import { Download, Maximize, Search, X } from 'lucide-react';
 
 const PAPER = '#fffdf8';
 const INK = '#17191c';
@@ -228,6 +228,14 @@ export type TileProps = {
   title: string;
   eyebrow?: string;
   badge?: ReactNode;
+  /** Row count shown beside the search, as a table's own summary of itself. */
+  rowCount?: number;
+  /** Filter box under the table, for the table variants. */
+  search?: {
+    value: string;
+    onChange: (value: string) => void;
+    placeholder?: string;
+  };
   legend?: LegendEntry[];
   /**
    * Whether the legend belongs in the card header. Off for the relayer charts,
@@ -266,6 +274,8 @@ export function Tile({
   title,
   eyebrow,
   badge,
+  rowCount,
+  search,
   legend,
   showLegend = true,
   note,
@@ -305,6 +315,32 @@ export function Tile({
     </div>
   );
 
+  // A table has a footer strip, so the controls join it and cannot overlap the
+  // pager. A chart has none, so they float over its bottom-right corner.
+  const hasFoot = Boolean(search || footer || rowCount !== undefined);
+  const actions = (
+    <div className="chart-actions">
+      {canDownload && (
+        <button
+          type="button"
+          onClick={download}
+          aria-label={`Download ${title}`}
+          title={`Download ${title}`}
+        >
+          <Download size={14} aria-hidden="true" />
+        </button>
+      )}
+      <button
+        type="button"
+        onClick={() => onExpand(id)}
+        aria-label={`Enlarge ${title}`}
+        title={`Enlarge ${title}`}
+      >
+        <Maximize size={14} aria-hidden="true" />
+      </button>
+    </div>
+  );
+
   return (
     <div className={`chart-card ${className ?? ''}`}>
       {isNumber ? (
@@ -328,32 +364,36 @@ export function Tile({
               <ChartLegend items={legend} />
             </div>
           )}
+          {(search || footer || rowCount !== undefined) && (
+            <div className="tile-foot">
+              {rowCount !== undefined && (
+                <span className="tile-rows">
+                  {new Intl.NumberFormat('en-US').format(rowCount)} rows
+                </span>
+              )}
+              {search && (
+                <label className="tile-search">
+                  <Search size={13} aria-hidden="true" />
+                  <span className="sr-only">Search {title}</span>
+                  <input
+                    type="search"
+                    value={search.value}
+                    placeholder={search.placeholder ?? 'Search…'}
+                    onChange={(event) => search.onChange(event.target.value)}
+                  />
+                </label>
+              )}
+              <div className="tile-foot-end">
+                {footer}
+                {actions}
+              </div>
+            </div>
+          )}
           {note}
-          {footer}
         </>
       )}
 
-      <div className="chart-actions">
-        {canDownload && (
-          <button
-            type="button"
-            onClick={download}
-            aria-label={`Download ${title}`}
-            title={`Download ${title}`}
-          >
-            <Download size={14} aria-hidden="true" />
-          </button>
-        )}
-        <button
-          type="button"
-          onClick={() => onExpand(id)}
-          aria-label={`Enlarge ${title}`}
-          title={`Enlarge ${title}`}
-        >
-          <Maximize size={14} aria-hidden="true" />
-        </button>
-      </div>
-
+      {!hasFoot && actions}
       <dialog
         ref={dialog}
         className="modal"

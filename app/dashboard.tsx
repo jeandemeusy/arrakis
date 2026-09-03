@@ -15,7 +15,13 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { Database, ExternalLink, ShieldCheck } from 'lucide-react';
+import {
+  ChevronLeft,
+  ChevronRight,
+  Database,
+  ExternalLink,
+  ShieldCheck,
+} from 'lucide-react';
 
 import type { Dashboard as DashboardPayload } from '@/lib/analytics';
 import { COMBINED } from '@/lib/constants';
@@ -175,6 +181,16 @@ function formatDay(value: unknown) {
   return DAY.format(new Date(`${value}T00:00:00Z`));
 }
 
+/**
+ * Search matches any field the row displays, case-insensitively, so pasting a
+ * partial address finds it wherever it appears.
+ */
+function matches(query: string, ...fields: string[]) {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return true;
+  return fields.some((field) => field.toLowerCase().includes(needle));
+}
+
 function formatTimestamp(value: string) {
   return TIMESTAMP.format(new Date(value)).replace(',', '');
 }
@@ -186,40 +202,69 @@ function formatTimestamp(value: string) {
  * ranking window while deep in a list lands on the last available page instead of
  * an empty one.
  */
+/**
+ * The pages to offer, with gaps closed by an ellipsis.
+ *
+ * Always shows the first and last page and the ones either side of the current
+ * one, so the control keeps a stable width however deep the list runs.
+ */
+function pageList(page: number, pages: number): Array<number | null> {
+  if (pages <= 7) return Array.from({ length: pages }, (_, index) => index);
+  const wanted = new Set([0, pages - 1, page - 1, page, page + 1]);
+  const shown = [...wanted].filter((n) => n >= 0 && n < pages).sort((a, b) => a - b);
+  return shown.flatMap((n, index) =>
+    index > 0 && n - shown[index - 1] > 1 ? [null, n] : [n],
+  );
+}
+
 function Pager({
   page,
   pages,
-  total,
   onChange,
   label,
 }: {
   page: number;
   pages: number;
-  total: number;
   onChange: (page: number) => void;
   label: string;
 }) {
   if (pages <= 1) return null;
-  const first = page * PAGE_SIZE + 1;
-  const last = Math.min(total, (page + 1) * PAGE_SIZE);
   return (
     <nav className="pager" aria-label={label}>
-      <span>
-        {count(first)}–{count(last)} of {count(total)}
-      </span>
       <button
         type="button"
+        className="pager-step"
         onClick={() => onChange(page - 1)}
         disabled={page === 0}
+        aria-label="Previous page"
       >
-        Previous
+        <ChevronLeft size={14} aria-hidden="true" />
       </button>
+      {pageList(page, pages).map((entry, index) =>
+        entry === null ? (
+          <span key={`gap-${index}`} className="pager-gap">
+            …
+          </span>
+        ) : (
+          <button
+            key={entry}
+            type="button"
+            className={entry === page ? 'pager-page active' : 'pager-page'}
+            aria-current={entry === page ? 'page' : undefined}
+            onClick={() => onChange(entry)}
+          >
+            {entry + 1}
+          </button>
+        ),
+      )}
       <button
         type="button"
+        className="pager-step"
         onClick={() => onChange(page + 1)}
         disabled={page >= pages - 1}
+        aria-label="Next page"
       >
-        Next
+        <ChevronRight size={14} aria-hidden="true" />
       </button>
     </nav>
   );
@@ -272,6 +317,9 @@ export default function Dashboard({
   const [deploymentPage, setDeploymentPage] = useState(0);
   const [feedPage, setFeedPage] = useState(0);
   const [enlarged, setEnlarged] = useState<string | null>(null);
+  const [clientQuery, setClientQuery] = useState('');
+  const [deploymentQuery, setDeploymentQuery] = useState('');
+  const [feedQuery, setFeedQuery] = useState('');
   const [network, setNetwork] = useState(dashboard.defaultNetwork);
 
   // Every network's snapshot is already on the page, so switching is instant.
@@ -330,10 +378,28 @@ export default function Dashboard({
     label: shortAddress(relayer.address),
   }));
 
+  const rankOf = new Map(rankedClients.map((client, index) => [client.key, index + 1]));
+  const visibleClients = rankedClients.filter((client) =>
+    matches(clientQuery, client.address, client.network),
+  );
+  const visibleDeployments = data.deployments.filter((row) =>
+    matches(deploymentQuery, row.address, row.network, formatTimestamp(row.timestamp)),
+  );
+  const visibleRedemptions = data.recentRedemptions.filter((row) =>
+    matches(
+      feedQuery,
+      row.client,
+      row.relayer,
+      `0x${row.channelId}`,
+      row.network,
+      formatTimestamp(row.timestamp),
+    ),
+  );
+
   const clientRows = () => [
     ['rank', 'client', 'network', 'redemptions', 'usage_mb'],
-    ...rankedClients.map((client, index) => [
-      String(index + 1),
+    ...visibleClients.map((client) => [
+      String(rankOf.get(client.key) ?? 0),
       client.address,
       client.network,
       String(
@@ -346,11 +412,11 @@ export default function Dashboard({
   ];
   const deploymentRows = () => [
     ['timestamp', 'client', 'network'],
-    ...data.deployments.map((row) => [row.timestamp, row.address, row.network]),
+    ...visibleDeployments.map((row) => [row.timestamp, row.address, row.network]),
   ];
   const feedRows = () => [
     ['timestamp', 'client', 'relayer', 'channel', 'network'],
-    ...data.recentRedemptions.map((row) => [
+    ...visibleRedemptions.map((row) => [
       row.timestamp,
       row.client,
       row.relayer,
@@ -362,9 +428,9 @@ export default function Dashboard({
   const pagesOf = (total: number) => Math.max(1, Math.ceil(total / PAGE_SIZE));
   const clip = (page: number, total: number) =>
     Math.min(page, pagesOf(total) - 1);
-  const clientAt = clip(clientPage, rankedClients.length);
-  const deploymentAt = clip(deploymentPage, data.deployments.length);
-  const feedAt = clip(feedPage, data.recentRedemptions.length);
+  const clientAt = clip(clientPage, visibleClients.length);
+  const deploymentAt = clip(deploymentPage, visibleDeployments.length);
+  const feedAt = clip(feedPage, visibleRedemptions.length);
   const pageOf = <T,>(rows: T[], page: number) =>
     rows.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
@@ -1030,6 +1096,12 @@ export default function Dashboard({
             id="clients-table"
             className="table-card"
             rows={clientRows}
+            rowCount={visibleClients.length}
+            search={{
+              value: clientQuery,
+              onChange: setClientQuery,
+              placeholder: 'Search...',
+            }}
             eyebrow="USAGE PER CLIENT"
             title={
               scope === 'weekly'
@@ -1072,7 +1144,6 @@ export default function Dashboard({
               <Pager
                 page={clientAt}
                 pages={pagesOf(rankedClients.length)}
-                total={rankedClients.length}
                 onChange={setClientPage}
                 label="Most active users pages"
               />
@@ -1106,8 +1177,8 @@ export default function Dashboard({
                   </tr>
                 </thead>
                 <tbody>
-                  {pageOf(rankedClients, clientAt).map((client, index) => {
-                    const rank = clientAt * PAGE_SIZE + index + 1;
+                  {pageOf(visibleClients, clientAt).map((client) => {
+                    const rank = rankOf.get(client.key) ?? 0;
                     return (
                       <tr key={client.key}>
                         <td
@@ -1145,13 +1216,14 @@ export default function Dashboard({
             id="deployments-table"
             className="table-card"
             rows={deploymentRows}
+            rowCount={visibleDeployments.length}
+            search={{
+              value: deploymentQuery,
+              onChange: setDeploymentQuery,
+              placeholder: 'Search...',
+            }}
             eyebrow="EDGE NODE KEY-BINDINGS"
             title="Client deployments"
-            badge={
-              <div className="axis-badge">
-                {count(data.totals.clientsDeployed)} total
-              </div>
-            }
             note={
               <>
                 <Empty when={!data.deployments.length}>
@@ -1163,7 +1235,6 @@ export default function Dashboard({
               <Pager
                 page={deploymentAt}
                 pages={pagesOf(data.deployments.length)}
-                total={data.deployments.length}
                 onChange={setDeploymentPage}
                 label="Client deployment pages"
               />
@@ -1187,7 +1258,7 @@ export default function Dashboard({
                   </tr>
                 </thead>
                 <tbody>
-                  {pageOf(data.deployments, deploymentAt).map((deployment) => (
+                  {pageOf(visibleDeployments, deploymentAt).map((deployment) => (
                     <tr key={deployment.key}>
                       <td className="timestamp">
                         {formatTimestamp(deployment.timestamp)}
@@ -1216,13 +1287,14 @@ export default function Dashboard({
           id="feed-table"
           className="table-card"
           rows={feedRows}
+          rowCount={visibleRedemptions.length}
+          search={{
+            value: feedQuery,
+            onChange: setFeedQuery,
+            placeholder: 'Search...',
+          }}
           eyebrow="LATEST REDEMPTIONS PER CHANNEL"
           title="Redemption feed"
-          badge={
-            <div className="axis-badge">
-              {count(data.totals.redemptionsTotal)} total
-            </div>
-          }
           note={
             <>
               <Empty when={!data.recentRedemptions.length}>
@@ -1239,7 +1311,6 @@ export default function Dashboard({
             <Pager
               page={feedAt}
               pages={pagesOf(data.recentRedemptions.length)}
-              total={data.recentRedemptions.length}
               onChange={setFeedPage}
               label="Redemption feed pages"
             />
@@ -1261,7 +1332,7 @@ export default function Dashboard({
                 </tr>
               </thead>
               <tbody>
-                {pageOf(data.recentRedemptions, feedAt).map((redemption) => (
+                {pageOf(visibleRedemptions, feedAt).map((redemption) => (
                   <tr key={redemption.key}>
                     <td className="timestamp">
                       {formatTimestamp(redemption.timestamp)}

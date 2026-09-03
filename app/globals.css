@@ -136,7 +136,73 @@ main {
   gap: 56px;
 }
 .network-switch,
+/*
+ * The strip under a table: how many rows, a filter, then the pager and the tile's
+ * own controls. The controls live in this row rather than floating over the card,
+ * which is what made them sit on top of the pager.
+ */
+.tile-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: auto;
+  padding: 14px 26px 0;
+}
+/* Counting and filtering on the left; moving and exporting on the right. */
+.tile-foot-end {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+}
+.tile-foot .pager {
+  margin: 0;
+  padding: 0;
+}
+.tile-foot .chart-actions {
+  position: static;
+  opacity: 1;
+  gap: 6px;
+}
+.tile-rows {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.tile-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  border: 1px solid var(--line);
+  padding: 6px 11px;
+  color: var(--muted);
+}
+.tile-search:focus-within {
+  border-color: var(--ink);
+}
+.tile-search input {
+  border: 0;
+  outline: none;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  color: var(--ink);
+  /* Grows with what is typed, between a comfortable resting width and a cap, so
+     a pasted address is readable without the box swallowing the footer row.
+     `width` is the fallback where field-sizing is unsupported. */
+  width: 220px;
+  min-width: 220px;
+  max-width: 430px;
+  field-sizing: content;
+}
+.tile-search input::placeholder {
+  color: var(--muted);
+}
 .tab-switch {
+  display: flex;
+  gap: 18px;
   border: 0;
   margin: 0;
   padding: 0;
@@ -355,7 +421,7 @@ main {
 }
 .main-chart {
   background: #fffdf8;
-  padding: 30px 26px 20px;
+  padding: 30px 26px 34px;
 }
 /*
  * Two rows, always: the title and its badge, then the legend beneath.
@@ -497,8 +563,8 @@ main {
   margin-bottom: 18px;
 }
 .table-card .chart-note {
-  padding: 14px 26px 0;
-  margin: auto 0 0;
+  padding: 10px 26px 0;
+  margin: 0;
 }
 .rank-table th:first-child,
 .rank-table td:first-child {
@@ -511,35 +577,44 @@ main {
 .pager {
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 14px 26px 0;
-  margin: auto 0 0;
+  gap: 4px;
   font-size: 11px;
   color: var(--muted);
 }
-.pager span {
-  margin-right: auto;
-  font-variant-numeric: tabular-nums;
+.pager-gap {
+  padding: 0 2px;
+  color: var(--muted);
 }
-.pager button {
+.pager-page,
+.pager-step {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  height: 26px;
+  padding: 0 6px;
   background: none;
-  border: 1px solid var(--line);
-  padding: 5px 12px;
+  border: 1px solid transparent;
   font: inherit;
   font-size: 11px;
-  color: var(--ink);
+  color: var(--muted);
   cursor: pointer;
+  font-variant-numeric: tabular-nums;
 }
-.pager button:hover:not(:disabled) {
-  border-color: var(--ink);
+.pager-page:hover:not(.active),
+.pager-step:hover:not(:disabled) {
+  border-color: var(--line);
+  color: var(--ink);
 }
-.pager button:disabled {
-  color: #a8a49b;
+.pager-page.active {
+  border-color: var(--line);
+  background: #f4f1e8;
+  color: var(--ink);
+}
+
+.pager-step:disabled {
+  color: #c3bfb4;
   cursor: default;
-}
-.table-card .chart-note + .pager,
-.table-card .pager + .chart-note {
-  margin-top: 0;
 }
 .table-scroll {
   max-height: 460px;
@@ -638,10 +713,6 @@ main {
   color: #55534e;
   white-space: nowrap;
 }
-.tab-switch {
-  display: flex;
-  gap: 18px;
-}
 .tab-switch button {
   background: none;
   border: none;
@@ -682,12 +753,8 @@ main {
   }
 }
 .service-chart {
-  padding: 28px 28px 20px;
+  padding: 28px 28px 34px;
   min-height: 375px;
-}
-.main-chart,
-.service-chart {
-  padding-bottom: 34px;
 }
 .service-chart .chart-title span {
   color: #75726b;
@@ -989,32 +1056,7 @@ footer a {
 }
 
 /* Visually hidden but reachable: table captions and link context. */
-.sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
-}
 
-.skip-link {
-  position: absolute;
-  left: var(--gutter);
-  top: -60px;
-  z-index: 10;
-  background: var(--ink);
-  color: #f6f3ea;
-  padding: 10px 16px;
-  font-size: 12px;
-  letter-spacing: 0.08em;
-  transition: top 120ms ease;
-}
-.skip-link:focus {
-  top: 12px;
-}
 
 :root {
     --gutter: 18px;
@@ -1047,118 +1089,7 @@ footer a {
   .mau-number {
     font-size: 46px;
   }
-  /* Sits in the card's bottom-right, out of the way of the title row's badges.
-   Quiet until the card is hovered or the button itself takes focus. */
-.chart-actions {
-  position: absolute;
-  right: 12px;
-  bottom: 10px;
-  display: flex;
-  gap: 6px;
-  opacity: 0;
-  transition: opacity 120ms ease;
-}
-.chart-card:hover .chart-actions,
-.chart-actions:focus-within {
-  opacity: 1;
-}
-.chart-actions button {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  background: #fffdf8;
-  border: 1px solid var(--line);
-  color: var(--muted);
-  cursor: pointer;
-}
-.chart-actions button:hover {
-  color: var(--ink);
-  border-color: var(--ink);
-}
-
-.modal-body {
-  overflow: auto;
-}
-/* Enlarged, a number keeps the tile's face and colour and only grows. */
-.modal-number strong {
-  display: block;
-  font-family: Georgia, serif;
-  font-weight: 400;
-  font-size: clamp(64px, 9vw, 132px);
-  line-height: 1;
-  letter-spacing: -0.05em;
-  color: var(--ink);
-  padding: 20px 0 14px;
-}
-.modal-number + p,
-.modal-body > p {
-  color: var(--muted);
-  font-size: 13px;
-  margin: 0;
-}
-.modal {
-  position: relative;
-  width: min(1180px, 92vw);
-  max-height: 88vh;
-  border: 1px solid var(--line);
-  background: #fffdf8;
-  color: var(--ink);
-  padding: 24px 26px 28px;
-}
-.modal::backdrop {
-  background: rgba(17, 19, 21, 0.5);
-}
-.modal-head {
-  display: flex;
-  align-items: center;
-  gap: 20px;
-  /* Clear of the close button, which is pinned to the corner. */
-  padding-right: 44px;
-  margin-bottom: 16px;
-}
-.modal-head h2 {
-  margin-right: auto;
-}
-/* A chart can have twenty series, so the key sits under the plot it explains and
-   scrolls rather than pushing the plot out of the dialog. */
-.modal-legend {
-  max-height: 84px;
-  overflow-y: auto;
-  padding-top: 14px;
-  margin-top: 14px;
-  border-top: 1px solid var(--line);
-}
-.modal-head h2 {
-  font-family: Georgia, serif;
-  font-weight: 400;
-  font-size: 22px;
-  margin: 0;
-}
-/* Anchored to the dialog, not to the flow of the heading: a long title or a
-   wrapped legend would otherwise drag it out of the corner. */
-.modal-head button {
-  position: absolute;
-  top: 14px;
-  right: 14px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  padding: 0;
-  background: none;
-  border: 1px solid var(--line);
-  color: var(--ink);
-  cursor: pointer;
-}
-.modal-head button:hover {
-  border-color: var(--ink);
-}
-
-.empty-overlay {
+  .empty-overlay {
     inset: 96px 16px 32px;
   }
   .legend {
