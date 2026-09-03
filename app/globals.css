@@ -308,10 +308,12 @@ main {
 }
 .relayer-key {
   list-style: none;
-  margin: 10px 0 0;
-  padding: 0 4px;
+  margin: 1px 0 0;
+  padding: 18px 26px;
+  background: #fbf9f3;
   display: grid;
-  gap: 5px;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 9px 28px;
 }
 .relayer-key li {
   display: grid;
@@ -331,12 +333,17 @@ main {
 .table-card {
   padding-bottom: 14px;
 }
+.table-card .chart-note {
+  padding-left: 14px;
+}
 .table-scroll {
   max-height: 420px;
   overflow-y: auto;
 }
 .rank-table {
   width: 100%;
+  max-width: 880px;
+  table-layout: fixed;
   border-collapse: collapse;
   font-size: 12px;
 }
@@ -347,14 +354,26 @@ main {
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: #98958e;
-  padding: 8px 10px;
+  padding: 7px 14px;
   background: #f4f1e8;
   position: sticky;
   top: 0;
 }
 .rank-table td {
-  padding: 9px 10px;
+  padding: 6px 14px;
   border-bottom: 1px solid #ece8de;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rank-table col.rank {
+  width: 64px;
+}
+.rank-table col.usage {
+  width: 132px;
+}
+.rank-table col.timestamp {
+  width: 190px;
 }
 .rank-table tbody tr:last-child td {
   border-bottom: none;

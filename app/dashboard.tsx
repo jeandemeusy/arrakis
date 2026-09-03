@@ -3,7 +3,6 @@
 import { useMemo, useState } from "react";
 import {
   Area,
-  AreaChart,
   Bar,
   BarChart,
   CartesianGrid,
@@ -44,8 +43,10 @@ const SLICE_COLORS = [
 ];
 const MEDALS = ["\u{1F947}", "\u{1F948}", "\u{1F949}"];
 
-function sliceColor(index: number) {
-  return SLICE_COLORS[index % SLICE_COLORS.length];
+const OTHER_COLOR = "#c3bfb4";
+
+function relayerColor(address: string, index: number) {
+  return address === OTHER_RELAYERS ? OTHER_COLOR : SLICE_COLORS[index % SLICE_COLORS.length];
 }
 
 function medal(index: number) {
@@ -144,7 +145,11 @@ export default function Dashboard({ data }: { data: DashboardData }) {
 
   // Recharts colours pie slices from a `fill` on each datum, avoiding <Cell>.
   const relayerSlices = useMemo(
-    () => data.relayers.map((relayer, index) => ({ ...relayer, fill: sliceColor(index) })),
+    () =>
+      data.relayers.map((relayer, index) => ({
+        ...relayer,
+        fill: relayerColor(relayer.address, index),
+      })),
     [data.relayers],
   );
 
@@ -528,14 +533,16 @@ export default function Dashboard({ data }: { data: DashboardData }) {
             <h2>Redemptions by relayer</h2>
           </div>
           <p>
-            Which relays carried client traffic, and how the load is shared. A single dominant slice means sessions are concentrated on one relay rather than spread across the network.
+            Which relays carried client traffic over the last thirty days, and how the
+            load is shared. Both charts and the key below cover the same top{" "}
+            {relayerStackSize} relays; every other relay is grouped as {OTHER_RELAYERS}.
           </p>
         </div>
         <div className="chart-split">
           <div className="chart-card service-chart">
             <div className="chart-title">
               <div>
-                <span>LAST 7 DAYS</span>
+                <span>LAST 30 DAYS</span>
                 <h3>Share of redemptions</h3>
               </div>
             </div>
@@ -564,18 +571,9 @@ export default function Dashboard({ data }: { data: DashboardData }) {
             </ResponsiveContainer>
             {!data.relayers.length && (
               <div className="empty-overlay">
-                No client redemptions were indexed in the last seven days.
+                No client redemptions were indexed in the last thirty days.
               </div>
             )}
-            <ol className="relayer-key">
-              {relayerSlices.map((relayer) => (
-                <li key={relayer.address}>
-                  <i style={{ background: relayer.fill }} />
-                  <code>{shortAddress(relayer.address)}</code>
-                  <strong>{percent(relayer.share)}</strong>
-                </li>
-              ))}
-            </ol>
           </div>
           <div className="chart-card service-chart">
             <div className="chart-title">
@@ -585,7 +583,7 @@ export default function Dashboard({ data }: { data: DashboardData }) {
               </div>
             </div>
             <ResponsiveContainer width="100%" height={300}>
-              <AreaChart
+              <BarChart
                 data={data.relayerDaily}
                 margin={{ top: 20, right: 10, left: -18, bottom: 0 }}
               >
@@ -600,6 +598,7 @@ export default function Dashboard({ data }: { data: DashboardData }) {
                 />
                 <YAxis axisLine={false} tickLine={false} tick={LIGHT_AXIS} />
                 <Tooltip
+                  cursor={{ fill: "#f2eee5" }}
                   labelFormatter={formatDay}
                   contentStyle={LIGHT_TOOLTIP}
                   formatter={(input: unknown, name: unknown) =>
@@ -612,17 +611,15 @@ export default function Dashboard({ data }: { data: DashboardData }) {
                   }
                 />
                 {data.relayerSeries.map((relayer, index) => (
-                  <Area
+                  <Bar
                     key={relayer}
-                    type="monotone"
                     dataKey={relayer}
                     stackId="relayers"
-                    stroke="none"
-                    fill={sliceColor(index)}
+                    fill={relayerColor(relayer, index)}
                     isAnimationActive={false}
                   />
                 ))}
-              </AreaChart>
+              </BarChart>
             </ResponsiveContainer>
             {!data.relayerDaily.length && (
               <div className="empty-overlay">
@@ -630,27 +627,23 @@ export default function Dashboard({ data }: { data: DashboardData }) {
               </div>
             )}
             <p className="chart-note">
-              Volume is an estimate derived from redemptions seen on chain, stacked per relayer. Relays outside the top {relayerStackSize} are grouped as {OTHER_RELAYERS}.
+              Volume is an estimate derived from redemptions seen on chain.
             </p>
           </div>
         </div>
-        <div className="network-stats network-stats-row">
-          <Metric
-            eyebrow="RELAYERS SERVING CLIENTS"
-            figure={count(data.totals.relayers7d)}
-            note="Distinct destinations, last 7 days"
-          />
-          <Metric
-            eyebrow="INDEXED SAFES"
-            figure={count(data.safes)}
-            note={`${compactToken(data.safeBalance)} held`}
-          />
-          <Metric
-            eyebrow="INDEX SCHEMA"
-            figure={data.schemaVersion ?? "—"}
-            note={`${count(data.accounts)} on-chain accounts indexed`}
-          />
-        </div>
+        <ol className="relayer-key">
+          {relayerSlices.map((relayer) => (
+            <li key={relayer.address}>
+              <i style={{ background: relayer.fill }} />
+              <code>
+                {relayer.address === OTHER_RELAYERS
+                  ? `${OTHER_RELAYERS} relays`
+                  : shortAddress(relayer.address)}
+              </code>
+              <strong>{percent(relayer.share)}</strong>
+            </li>
+          ))}
+        </ol>
       </section>
 
       <section className="section" id="clients">
@@ -688,6 +681,11 @@ export default function Dashboard({ data }: { data: DashboardData }) {
             <div className="axis-badge">{data.clientCount} clients</div>
           </div>
           <table className="rank-table">
+            <colgroup>
+              <col className="rank" />
+              <col />
+              <col className="usage" />
+            </colgroup>
             <thead>
               <tr>
                 <th scope="col">rank</th>
@@ -744,6 +742,10 @@ export default function Dashboard({ data }: { data: DashboardData }) {
           </div>
           <div className="table-scroll">
             <table className="rank-table">
+              <colgroup>
+                <col className="timestamp" />
+                <col />
+              </colgroup>
               <thead>
                 <tr>
                   <th scope="col">timestamp</th>

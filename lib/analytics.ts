@@ -22,7 +22,6 @@ const DAY_SECONDS = 86_400;
 // 30 days is day-30..day, matching how the published Dune queries slice them.
 const WEEK_DAYS = 7;
 const MONTH_DAYS = 31;
-const RELAYER_LIMIT = 12;
 /** Relayers charted individually in the daily stack; the rest collapse into "Other". */
 const RELAYER_STACK_LIMIT = 6;
 const RELAYER_STACK_DAYS = 30;
@@ -315,74 +314,75 @@ function weeklySeries(redemptions: Redemption[]): WeekPoint[] {
     });
 }
 
-function relayerDistribution(recent: Redemption[]): Relayer[] {
-  const buckets = new Map<string, { redemptions: number; gigabytes: number }>();
-  for (const redemption of recent) {
-    const bucket = buckets.get(redemption.destination) ?? { redemptions: 0, gigabytes: 0 };
-    bucket.redemptions += 1;
-    bucket.gigabytes += redemption.gigabytes;
-    buckets.set(redemption.destination, bucket);
-  }
-
-  const total = recent.length || 1;
-  return [...buckets.entries()]
-    .map(([address, bucket]) => ({
-      address,
-      redemptions: bucket.redemptions,
-      gigabytes: bucket.gigabytes,
-      share: bucket.redemptions / total,
-    }))
-    .sort((a, b) => b.redemptions - a.redemptions)
-    .slice(0, RELAYER_LIMIT);
-}
-
 /**
- * Daily relayed volume per relayer over the recent window.
+ * Relayer breakdown over the recent window: the canonical set, the daily stack and
+ * the share of redemptions.
  *
- * Relayers beyond the top few collapse into a single "Other" band so the stack
- * stays readable; every day in the window is emitted, including quiet ones, so
- * the chart does not imply activity on days that had none.
+ * The stacked chart, the donut and the legend all read from one ordered list of
+ * relayers so a colour means the same relayer everywhere. Relayers outside the top
+ * few collapse into a single "Other" entry rather than repeating palette colours.
  */
-function relayerDailySeries(
+function relayerBreakdown(
   redemptions: Redemption[],
   lastDay: number,
-): { points: RelayerDayPoint[]; series: string[] } {
+): { series: string[]; daily: RelayerDayPoint[]; distribution: Relayer[] } {
   const firstDay = lastDay - RELAYER_STACK_DAYS + 1;
   const window = redemptions.filter((redemption) => redemption.day >= firstDay);
-  if (!window.length) return { points: [], series: [] };
+  if (!window.length) return { series: [], daily: [], distribution: [] };
 
-  const totals = new Map<string, number>();
+  const volumes = new Map<string, number>();
   for (const redemption of window) {
-    totals.set(
+    volumes.set(
       redemption.destination,
-      (totals.get(redemption.destination) ?? 0) + redemption.gigabytes,
+      (volumes.get(redemption.destination) ?? 0) + redemption.gigabytes,
     );
   }
-  const ranked = [...totals.entries()].sort(([, a], [, b]) => b - a);
   const charted = new Set(
-    ranked.slice(0, RELAYER_STACK_LIMIT).map(([address]) => address),
+    [...volumes.entries()]
+      .sort(([, a], [, b]) => b - a)
+      .slice(0, RELAYER_STACK_LIMIT)
+      .map(([address]) => address),
   );
-  const hasOther = ranked.length > charted.size;
+  const bucketFor = (destination: string) =>
+    charted.has(destination) ? destination : OTHER_RELAYERS;
+  const hasOther = volumes.size > charted.size;
   const series = [...charted, ...(hasOther ? [OTHER_RELAYERS] : [])];
 
   const byDay = new Map<number, Map<string, number>>();
   for (const redemption of window) {
-    const key = charted.has(redemption.destination)
-      ? redemption.destination
-      : OTHER_RELAYERS;
     const day = byDay.get(redemption.day) ?? new Map<string, number>();
+    const key = bucketFor(redemption.destination);
     day.set(key, (day.get(key) ?? 0) + redemption.gigabytes);
     byDay.set(redemption.day, day);
   }
 
-  const points: RelayerDayPoint[] = [];
+  const daily: RelayerDayPoint[] = [];
   for (let day = firstDay; day <= lastDay; day += 1) {
     const values = byDay.get(day);
     const point: RelayerDayPoint = { date: isoDate(day) };
     for (const key of series) point[key] = values?.get(key) ?? 0;
-    points.push(point);
+    daily.push(point);
   }
-  return { points, series };
+
+  const totals = new Map<string, { redemptions: number; gigabytes: number }>();
+  for (const redemption of window) {
+    const key = bucketFor(redemption.destination);
+    const bucket = totals.get(key) ?? { redemptions: 0, gigabytes: 0 };
+    bucket.redemptions += 1;
+    bucket.gigabytes += redemption.gigabytes;
+    totals.set(key, bucket);
+  }
+  const distribution = series.map((address) => {
+    const bucket = totals.get(address) ?? { redemptions: 0, gigabytes: 0 };
+    return {
+      address,
+      redemptions: bucket.redemptions,
+      gigabytes: bucket.gigabytes,
+      share: bucket.redemptions / window.length,
+    };
+  });
+
+  return { series, daily, distribution };
 }
 
 /** Per-client usage, ranked by the caller, over both the recent window and all time. */
@@ -517,11 +517,11 @@ async function querySnapshot(): Promise<AnalyticsSnapshot> {
   const activeUsers = activeUserSeries(actorsByDay, deploymentsByDay, lastDay);
   const weeks = weeklySeries(redemptions);
   const recent = redemptions.filter((redemption) => redemption.day > lastDay - WEEK_DAYS);
-  const relayers = relayerDistribution(recent);
-  const { points: relayerDaily, series: relayerSeries } = relayerDailySeries(
-    redemptions,
-    lastDay,
-  );
+  const {
+    series: relayerSeries,
+    daily: relayerDaily,
+    distribution: relayers,
+  } = relayerBreakdown(redemptions, lastDay);
   const allClients = clientUsage(redemptions, lastDay - WEEK_DAYS + 1);
   const deployments = rawDeployments
     .map((row) => ({
