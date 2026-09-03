@@ -4,6 +4,10 @@
   --yellow: #ffd84d;
   --muted: #74736e;
   --line: #d7d2c7;
+  /* One horizontal inset for every full-width band, so nothing drifts out of line. */
+  --gutter: clamp(24px, 5vw, 76px);
+  /* Hairline between adjacent panels, drawn by a grid gap over --line. */
+  --seam: 1px;
 }
 * {
   box-sizing: border-box;
@@ -27,7 +31,7 @@ main {
 }
 .topbar {
   height: 72px;
-  padding: 0 clamp(24px, 5vw, 76px);
+  padding: 0 var(--gutter);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -91,11 +95,11 @@ main {
   padding-bottom: 4px;
 }
 .intro {
-  padding: 86px clamp(24px, 5vw, 76px) 68px;
+  padding: 56px var(--gutter) 40px;
   display: grid;
   grid-template-columns: 1.45fr 0.75fr;
   align-items: end;
-  gap: 80px;
+  gap: 56px;
 }
 .status-line {
   display: flex;
@@ -121,7 +125,7 @@ main {
 .intro h1 {
   margin: 0;
   font-family: Georgia, "Times New Roman", serif;
-  font-size: clamp(58px, 8.2vw, 126px);
+  font-size: clamp(28px, 5.6vw, 84px);
   font-weight: 400;
   line-height: 0.83;
   letter-spacing: -0.07em;
@@ -153,76 +157,81 @@ main {
   font-weight: 600;
 }
 .headline-grid {
-  background: var(--ink);
-  color: #f6f3ea;
+  background: var(--line);
+  color: var(--ink);
+  gap: var(--seam);
   display: grid;
   grid-template-columns: 1.35fr repeat(3, 1fr);
-  margin: 0 clamp(24px, 5vw, 76px);
+  /* The summary band is a bigger break than the gap between sections, so it gets
+     more room than the sections' own top padding provides. */
+  margin: 0 var(--gutter) 56px;
 }
 .mau-card,
 .metric {
-  min-height: 226px;
-  padding: 30px;
-  border-right: 1px solid #34383d;
+  background: #fffdf8;
+  min-height: 206px;
+  padding: 28px;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
 }
-.metric:last-child {
-  border-right: 0;
-}
 .metric-kicker,
 .metric > span {
-  color: #9da2a8;
+  color: var(--muted);
   font-size: 10px;
   letter-spacing: 0.14em;
   display: flex;
   gap: 8px;
   align-items: center;
 }
+/* The headline tile earns its emphasis from scale and an accent rule, not from
+   inverting the colours of the tiles beside it. */
+.mau-card {
+  border-top: 3px solid var(--yellow);
+}
 .mau-number {
   font-family: Georgia, serif;
-  font-size: 82px;
+  font-size: clamp(52px, 5vw, 76px);
   line-height: 0.9;
-  letter-spacing: -0.06em;
-  color: var(--yellow);
+  letter-spacing: -0.05em;
+  color: var(--ink);
 }
 .mau-footer {
   display: flex;
   justify-content: space-between;
   align-items: center;
   font-size: 11px;
+  gap: 12px;
 }
 .mau-footer span {
-  color: var(--yellow);
+  color: #8a6d00;
   display: flex;
   align-items: center;
   gap: 5px;
 }
 .mau-footer small {
-  color: #81878e;
+  color: var(--muted);
+}
+.metric strong {
+  color: var(--ink);
 }
 .metric strong {
   font-family: Georgia, serif;
-  font-size: clamp(38px, 4vw, 62px);
+  font-size: clamp(30px, 3vw, 44px);
   font-weight: 400;
-  letter-spacing: -0.05em;
+  letter-spacing: -0.04em;
   overflow-wrap: anywhere;
 }
 .metric p {
-  color: #979da3;
+  color: var(--muted);
   font-size: 11px;
   margin: 0;
 }
 .section {
-  padding: 104px clamp(24px, 5vw, 76px);
+  padding: 18px var(--gutter);
 }
 .section-heading {
-  display: grid;
-  grid-template-columns: 1fr 360px;
-  gap: 60px;
-  align-items: end;
-  margin-bottom: 46px;
+  margin-bottom: 20px;
 }
 .section-heading > div {
   display: flex;
@@ -238,19 +247,19 @@ main {
   font-family: Georgia, serif;
   font-weight: 400;
   letter-spacing: -0.045em;
-  font-size: clamp(38px, 5vw, 72px);
+  font-size: clamp(14px, 2.6vw, 24px);
   margin: 0;
 }
 .section-heading > p {
   color: #686864;
-  line-height: 1.55;
-  font-size: 14px;
-  margin: 0;
+  line-height: 1.5;
+  font-size: 12px;
+  margin: 6px 0 0;
 }
 .chart-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 290px;
-  gap: 1px;
+  gap: var(--seam);
   background: var(--line);
   border: 1px solid var(--line);
 }
@@ -259,9 +268,8 @@ main {
   position: relative;
 }
 .main-chart {
-  background: var(--ink);
-  color: #f6f3ea;
-  padding: 32px 28px 22px;
+  background: #fffdf8;
+  padding: 30px 26px 20px;
 }
 .chart-title {
   display: flex;
@@ -282,7 +290,7 @@ main {
   margin: 8px 0 0;
 }
 .legend {
-  color: #a1a5aa;
+  color: var(--muted);
   font-size: 10px;
   display: flex;
   align-items: center;
@@ -298,7 +306,7 @@ main {
   background: var(--yellow);
 }
 .legend .target {
-  border-top: 1px dashed #737b85;
+  border-top: 1px dashed var(--muted);
 }
 .chart-note {
   color: #777d84;
@@ -312,6 +320,14 @@ main {
 }
 .legend i.new-client {
   background: #8d4f68;
+}
+.legend i.cumulative {
+  background: var(--ink);
+}
+/* Title, legend and badge share the row, so let them wrap rather than collide. */
+.chart-title {
+  flex-wrap: wrap;
+  gap: 10px 18px;
 }
 .relayer-legend {
   margin-top: 1px;
@@ -381,6 +397,12 @@ main {
 .table-scroll {
   max-height: 460px;
   overflow-y: auto;
+  /* Fixed columns with min-widths overflow a narrow card; scroll them here rather
+     than letting the page itself scroll sideways. */
+  overflow-x: auto;
+}
+.table-scroll > .rank-table {
+  min-width: 440px;
 }
 .chart-split .table-card {
   min-width: 0;
@@ -391,6 +413,17 @@ main {
   border-collapse: collapse;
   font-size: 12px;
 }
+/* Fixed row height rather than padding, so every table lines up with every other
+   one regardless of what a cell contains — a medal emoji is taller than digits. */
+.rank-table th,
+.rank-table td {
+  height: 32px;
+  padding: 0 14px;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .rank-table th {
   text-align: left;
   font-weight: 400;
@@ -398,17 +431,12 @@ main {
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: #98958e;
-  padding: 7px 14px;
   background: #f4f1e8;
   position: sticky;
   top: 0;
 }
 .rank-table td {
-  padding: 6px 14px;
   border-bottom: 1px solid #ece8de;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 .rank-table col.rank {
   width: 7%;
@@ -461,16 +489,23 @@ main {
 .chart-split {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 1px;
-  background: #e6e2d8;
+  gap: var(--seam);
+  background: var(--line);
 }
 .network-stats-row {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 1px;
-  margin-top: 1px;
+  gap: var(--seam);
+  margin-top: var(--seam);
 }
-@media (max-width: 860px) {
+/* The ranking tables are two separate readings, so they sit apart rather than
+   sharing a hairline divider like the chart panels do. Compound selector because
+   .chart-split sets the same properties and is declared alongside it. */
+.chart-split.table-split {
+  gap: 22px;
+  background: transparent;
+}
+@media (max-width: 900px) {
   .chart-split,
   .network-stats-row {
     grid-template-columns: 1fr;
@@ -533,27 +568,24 @@ main {
 .network-stats .metric strong {
   font-size: 36px;
 }
-/* The row variant is a single line of three; .network-stats' own two-column rules
-   are declared later, so these have to restate the columns and the last-child span. */
+/* The row variant is a single line of three. Seams come from the grid gap alone,
+   like every other panel group; a border here would sit on top of the gap and make
+   one seam twice as wide as its neighbour. .network-stats' own two-column rules are
+   declared later, hence the compound selector. */
 .network-stats.network-stats-row {
   grid-template-columns: repeat(3, 1fr);
+  background: var(--line);
   border: 0;
 }
-.network-stats.network-stats-row .metric:nth-child(2) {
-  border-right: 1px solid var(--line);
+.network-stats.network-stats-row .metric {
+  border: 0;
 }
 .network-stats.network-stats-row .metric:last-child {
   grid-column: auto;
-  border-top: 0;
-  border-right: 0;
 }
-@media (max-width: 860px) {
+@media (max-width: 900px) {
   .network-stats.network-stats-row {
     grid-template-columns: 1fr;
-  }
-  .network-stats.network-stats-row .metric {
-    border-right: 0;
-    border-top: 1px solid var(--line);
   }
 }
 .empty-overlay {
@@ -571,7 +603,7 @@ main {
 }
 .methodology {
   background: var(--yellow);
-  padding: 82px clamp(24px, 5vw, 76px) 58px;
+  padding: 56px var(--gutter) 44px;
 }
 .method-title {
   display: flex;
@@ -625,7 +657,7 @@ main {
   letter-spacing: 0;
 }
 footer {
-  padding: 34px clamp(24px, 5vw, 76px);
+  padding: 34px var(--gutter);
   display: flex;
   align-items: center;
   gap: 42px;
@@ -655,20 +687,9 @@ footer a {
   .headline-grid {
     grid-template-columns: 1fr 1fr;
   }
-  .mau-card,
-  .metric {
-    border-bottom: 1px solid #34383d;
-  }
   .chart-layout,
   .network-grid {
     grid-template-columns: 1fr;
-  }
-  .section-heading {
-    grid-template-columns: 1fr;
-    gap: 18px;
-  }
-  .section-heading > p {
-    max-width: 520px;
   }
   .method-grid {
     grid-template-columns: 1fr;
@@ -683,8 +704,8 @@ footer a {
   }
 }
 @media (max-width: 560px) {
-  .topbar {
-    padding: 0 18px;
+  :root {
+    --gutter: 18px;
   }
   .source-link {
     font-size: 0;
@@ -694,25 +715,28 @@ footer a {
     height: 16px;
   }
   .intro {
-    padding: 48px 20px;
+    padding: 40px var(--gutter) 28px;
   }
   .intro h1 {
-    font-size: 58px;
+    font-size: 34px;
   }
   .headline-grid {
-    margin: 0 8px;
+    margin: 0 var(--gutter) 32px;
     grid-template-columns: 1fr;
   }
   .mau-card,
   .metric {
-    min-height: 180px;
-    border-right: 0;
-  }
-  .section {
-    padding: 72px 20px;
+    min-height: 150px;
+    padding: 22px;
   }
   .section-heading > div {
     gap: 12px;
+  }
+  .mau-number {
+    font-size: 46px;
+  }
+  .empty-overlay {
+    inset: 96px 16px 32px;
   }
   .legend {
     display: none;
@@ -720,14 +744,14 @@ footer a {
   .network-stats {
     grid-template-columns: 1fr;
   }
-  .network-stats .metric:nth-child(2) {
+  .network-stats:not(.network-stats-row) .metric:nth-child(2) {
     border-top: 1px solid var(--line);
   }
   .network-stats .metric:last-child {
     grid-column: auto;
   }
   .methodology {
-    padding: 66px 20px 40px;
+    padding: 40px var(--gutter) 32px;
   }
   footer {
     align-items: flex-start;

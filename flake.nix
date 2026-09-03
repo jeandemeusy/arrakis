@@ -37,16 +37,19 @@
               && base != "node_modules"
               && base != "Dockerfile"
               && base != "README.md"
-              && (relative == topLevel -> lib.elem topLevel [
-                "app"
-                "lib"
-                "public"
-                "sql"
-                "next.config.ts"
-                "package.json"
-                "package-lock.json"
-                "tsconfig.json"
-              ]);
+              && (
+                relative == topLevel
+                -> lib.elem topLevel [
+                  "app"
+                  "lib"
+                  "public"
+                  "sql"
+                  "next.config.ts"
+                  "package.json"
+                  "package-lock.json"
+                  "tsconfig.json"
+                ]
+              );
           };
 
           # Refresh with: nix run nixpkgs#prefetch-npm-deps -- package-lock.json
@@ -121,6 +124,10 @@
           inherit bloklune;
         }
         // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux { inherit container; };
+
+        # `nix fmt` formats the Nix in this repo; app code goes through `npm run
+        # format`, which runs oxfmt with the project's own config.
+        formatter = pkgs.nixfmt-tree;
 
         devShells.default = pkgs.mkShell {
           # package.json requires Node >= 22.13; nodejs_22 ships npm alongside it.
