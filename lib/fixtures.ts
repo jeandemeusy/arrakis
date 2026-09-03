@@ -25,6 +25,7 @@ import {
 
 const DAY_SECONDS = 86_400;
 const SEED = 0x5eed;
+const LATEST_BLOCK = 48_060_000;
 
 /** Two networks of different sizes and winning probabilities, as in production. */
 const NETWORKS = [
@@ -82,6 +83,7 @@ function dataset(
     for (let i = 0; i < count; i += 1) {
       // Traffic clusters in the working day rather than spreading evenly.
       const hour = Math.floor(6 + next() * 14);
+      const timestamp = day * DAY_SECONDS + hour * 3600 + Math.floor(next() * 3600);
       redemptions.push({
         network: config.id,
         channelId: channelId(next),
@@ -89,7 +91,7 @@ function dataset(
         // A skewed pick gives the long tail the donut and stack need to be tested.
         destination: relayers[Math.floor(next() ** 2 * relayers.length)],
         day,
-        timestamp: day * DAY_SECONDS + hour * 3600 + Math.floor(next() * 3600),
+        timestamp,
         tickets: 30 + Math.floor(next() * 60),
         gigabytes: perRedemption,
       });
@@ -108,7 +110,7 @@ function dataset(
     network: config.id,
     label: config.label,
     lastDay,
-    blockNumber: 48_060_000,
+    blockNumber: LATEST_BLOCK,
     schemaVersion: "1.5.0-fixture",
     accounts: config.clients + config.relayers,
     safes: config.clients,

@@ -1,8 +1,42 @@
+:where(a, button, [tabindex]):focus-visible {
+  outline: 2px solid #8a6d00;
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* Visually hidden but reachable: table captions and link context. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.skip-link {
+  position: absolute;
+  left: var(--gutter);
+  top: -60px;
+  z-index: 10;
+  background: var(--ink);
+  color: #f6f3ea;
+  padding: 10px 16px;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  transition: top 120ms ease;
+}
+.skip-link:focus {
+  top: 12px;
+}
+
 :root {
   --ink: #111315;
   --paper: #f2efe7;
   --yellow: #ffd84d;
-  --muted: #74736e;
+  --muted: #6a6760;
   --line: #d7d2c7;
   /* One horizontal inset for every full-width band, so nothing drifts out of line. */
   --gutter: clamp(24px, 5vw, 76px);
@@ -101,6 +135,13 @@ main {
   align-items: end;
   gap: 56px;
 }
+.network-switch,
+.tab-switch {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-inline-size: 0;
+}
 .network-switch {
   display: flex;
   flex-wrap: wrap;
@@ -122,14 +163,6 @@ main {
   background: var(--ink);
   border-color: var(--ink);
   color: #f6f3ea;
-}
-.row-network {
-  margin-left: 8px;
-  font-style: normal;
-  font-size: 9px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--muted);
 }
 .status-line {
   display: flex;
@@ -269,7 +302,7 @@ main {
   gap: 20px;
 }
 .section-index {
-  color: #9b9992;
+  color: #6a6760;
   font-size: 11px;
 }
 .section h2,
@@ -309,7 +342,7 @@ main {
 }
 .chart-title span,
 .aside-label {
-  color: #878d94;
+  color: #6a6760;
   font-size: 10px;
   letter-spacing: 0.14em;
 }
@@ -425,6 +458,39 @@ main {
 .rank-table td:last-child {
   padding-right: 26px;
 }
+.pager {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 26px 0;
+  margin: auto 0 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+.pager span {
+  margin-right: auto;
+  font-variant-numeric: tabular-nums;
+}
+.pager button {
+  background: none;
+  border: 1px solid var(--line);
+  padding: 5px 12px;
+  font: inherit;
+  font-size: 11px;
+  color: var(--ink);
+  cursor: pointer;
+}
+.pager button:hover:not(:disabled) {
+  border-color: var(--ink);
+}
+.pager button:disabled {
+  color: #a8a49b;
+  cursor: default;
+}
+.table-card .chart-note + .pager,
+.table-card .pager + .chart-note {
+  margin-top: 0;
+}
 .table-scroll {
   max-height: 460px;
   overflow-y: auto;
@@ -434,6 +500,17 @@ main {
 }
 .table-scroll > .rank-table {
   min-width: 440px;
+}
+/* The feed shows identifiers in full, so it sizes to its content and scrolls
+   inside its card rather than truncating them. */
+.rank-table.feed-table {
+  table-layout: auto;
+  min-width: max-content;
+}
+.rank-table.feed-table td,
+.rank-table.feed-table th {
+  overflow: visible;
+  text-overflow: clip;
 }
 .chart-split .table-card {
   min-width: 0;
@@ -461,7 +538,7 @@ main {
   font-size: 9px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: #98958e;
+  color: #6a6760;
   background: #f4f1e8;
   position: sticky;
   top: 0;
@@ -469,9 +546,21 @@ main {
 .rank-table td {
   border-bottom: 1px solid #ece8de;
 }
+.rank-table .rank-number {
+  font-family: Georgia, serif;
+  font-size: 14px;
+  color: var(--ink);
+}
+/* Emphasis follows the rank, not the row position: on a later page the first
+   three rows are 51-53, which are not the top three of anything. */
+.rank-table .rank-number.leading {
+  font-weight: 700;
+}
+/* Holds one or two digits, but the header word sets the floor: 26px of gutter
+   padding plus 14px plus the width of "RANK" itself. A percentage shrank below
+   that on a half-width card and truncated the header. */
 .rank-table col.rank {
-  width: 7%;
-  min-width: 56px;
+  width: 84px;
 }
 .rank-table col.count {
   width: 16%;
@@ -542,18 +631,12 @@ main {
     grid-template-columns: 1fr;
   }
 }
-.network-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1.55fr) minmax(300px, 0.75fr);
-  gap: 22px;
-}
 .service-chart {
-  border: 1px solid var(--line);
   padding: 28px 28px 20px;
   min-height: 375px;
 }
 .service-chart .chart-title span {
-  color: #85827c;
+  color: #75726b;
 }
 .service-chart .chart-title h3 {
   color: var(--ink);
@@ -569,7 +652,7 @@ main {
 .data-warning {
   list-style: none;
   padding: 0;
-  color: #805f00;
+  color: #5f4700;
   font-size: 10px;
   line-height: 1.5;
   margin: 4px 0 0;
@@ -626,7 +709,7 @@ main {
   align-items: center;
   justify-content: center;
   text-align: center;
-  color: #8b8881;
+  color: #6f6c65;
   font:
     12px Georgia,
     serif;
@@ -718,8 +801,7 @@ footer a {
   .headline-grid {
     grid-template-columns: 1fr 1fr;
   }
-  .chart-layout,
-  .network-grid {
+  .chart-layout {
     grid-template-columns: 1fr;
   }
   .method-grid {
@@ -735,7 +817,41 @@ footer a {
   }
 }
 @media (max-width: 560px) {
-  :root {
+  :where(a, button, [tabindex]):focus-visible {
+  outline: 2px solid #8a6d00;
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* Visually hidden but reachable: table captions and link context. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.skip-link {
+  position: absolute;
+  left: var(--gutter);
+  top: -60px;
+  z-index: 10;
+  background: var(--ink);
+  color: #f6f3ea;
+  padding: 10px 16px;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  transition: top 120ms ease;
+}
+.skip-link:focus {
+  top: 12px;
+}
+
+:root {
     --gutter: 18px;
   }
   .source-link {

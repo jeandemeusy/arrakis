@@ -29,11 +29,20 @@ const TOOLTIP = {
   borderRadius: 2,
   fontSize: 12,
 };
+/**
+ * Addresses are fixed-width, so listing them whole in a monospace tooltip puts
+ * every volume at the same offset and the column reads as a column.
+ */
+const ADDRESS_TOOLTIP = {
+  ...TOOLTIP,
+  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+  fontSize: 11,
+};
 const YELLOW = '#ffd84d';
 const INK = '#17191c';
 const PLUM = '#8d4f68';
 const LEGEND_PREVIEW = 5;
-const MEDALS = ['\u{1F947}', '\u{1F948}', '\u{1F949}'];
+const PAGE_SIZE = 50;
 
 // Constructing an Intl formatter is expensive and these run per tick and per row.
 const INTEGER = new Intl.NumberFormat('en-US');
@@ -111,10 +120,6 @@ function relayerColor(index: number, total: number) {
   return `rgb(${channel(0)} ${channel(1)} ${channel(2)})`;
 }
 
-function medal(index: number) {
-  return MEDALS[index] ?? String(index + 1);
-}
-
 function count(input: number | null) {
   return input === null ? '—' : INTEGER.format(input);
 }
@@ -173,6 +178,52 @@ function formatTimestamp(value: string) {
   return TIMESTAMP.format(new Date(value)).replace(',', '');
 }
 
+/**
+ * Page controls for a table.
+ *
+ * The page is clamped by the caller rather than reset, so switching network or
+ * ranking window while deep in a list lands on the last available page instead of
+ * an empty one.
+ */
+function Pager({
+  page,
+  pages,
+  total,
+  onChange,
+  label,
+}: {
+  page: number;
+  pages: number;
+  total: number;
+  onChange: (page: number) => void;
+  label: string;
+}) {
+  if (pages <= 1) return null;
+  const first = page * PAGE_SIZE + 1;
+  const last = Math.min(total, (page + 1) * PAGE_SIZE);
+  return (
+    <nav className="pager" aria-label={label}>
+      <span>
+        {count(first)}–{count(last)} of {count(total)}
+      </span>
+      <button
+        type="button"
+        onClick={() => onChange(page - 1)}
+        disabled={page === 0}
+      >
+        Previous
+      </button>
+      <button
+        type="button"
+        onClick={() => onChange(page + 1)}
+        disabled={page >= pages - 1}
+      >
+        Next
+      </button>
+    </nav>
+  );
+}
+
 /** Overlay shown in place of a chart or table that has nothing to render. */
 function Empty({ when, children }: { when: boolean; children: string }) {
   if (!when) return null;
@@ -197,17 +248,23 @@ function Metric({
   );
 }
 
-export default function Dashboard({ dashboard }: { dashboard: DashboardPayload }) {
+export default function Dashboard({
+  dashboard,
+}: {
+  dashboard: DashboardPayload;
+}) {
   const [scope, setScope] = useState<'weekly' | 'all'>('weekly');
   const [allRelayers, setAllRelayers] = useState(false);
+  const [clientPage, setClientPage] = useState(0);
+  const [deploymentPage, setDeploymentPage] = useState(0);
+  const [feedPage, setFeedPage] = useState(0);
   const [network, setNetwork] = useState(dashboard.defaultNetwork);
 
   // Every network's snapshot is already on the page, so switching is instant.
   const data =
-    dashboard.snapshots[network] ?? dashboard.snapshots[dashboard.defaultNetwork];
+    dashboard.snapshots[network] ??
+    dashboard.snapshots[dashboard.defaultNetwork];
   const combined = network === COMBINED;
-  const labelOf = (id: string) =>
-    dashboard.networks.find((entry) => entry.id === id)?.label ?? id;
   const live = data.source !== 'unavailable';
 
   // Recharts colours pie slices from a `fill` on each datum, avoiding <Cell>.
@@ -218,6 +275,14 @@ export default function Dashboard({ dashboard }: { dashboard: DashboardPayload }
         fill: relayerColor(relayer.colorIndex, data.relayerSeries.length),
       })),
     [data.relayers, data.relayerSeries.length],
+  );
+
+  // Series are keyed by network+address to stay unique; labels must resolve back
+  // to the plain address rather than slicing the composite key.
+  const addressOfSeries = useMemo(
+    () =>
+      new Map(data.relayerSeries.map((entry) => [entry.key, entry.address])),
+    [data.relayerSeries],
   );
 
   const rankedClients = useMemo(() => {
@@ -231,8 +296,20 @@ export default function Dashboard({ dashboard }: { dashboard: DashboardPayload }
     );
   }, [data.clients, scope]);
 
+  const pagesOf = (total: number) => Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const clip = (page: number, total: number) =>
+    Math.min(page, pagesOf(total) - 1);
+  const clientAt = clip(clientPage, rankedClients.length);
+  const deploymentAt = clip(deploymentPage, data.deployments.length);
+  const feedAt = clip(feedPage, data.recentRedemptions.length);
+  const pageOf = <T,>(rows: T[], page: number) =>
+    rows.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+
   return (
     <main>
+      <a className="skip-link" href="#top">
+        Skip to content
+      </a>
       <header className="topbar">
         <a
           className="brand"
@@ -261,7 +338,8 @@ export default function Dashboard({ dashboard }: { dashboard: DashboardPayload }
           target="_blank"
           rel="noreferrer"
         >
-          Blokli source <ExternalLink size={13} />
+          Blokli source <ExternalLink size={13} aria-hidden="true" />
+          <span className="sr-only">(opens in a new tab)</span>
         </a>
       </header>
 
@@ -280,11 +358,11 @@ export default function Dashboard({ dashboard }: { dashboard: DashboardPayload }
                 : 'DATA SOURCE UNAVAILABLE'}
           </div>
           {dashboard.networks.length > 1 && (
-            <div className="network-switch" role="tablist" aria-label="Network">
+            <fieldset className="network-switch">
+              <legend className="sr-only">Network</legend>
               <button
                 type="button"
-                role="tab"
-                aria-selected={combined}
+                aria-pressed={combined}
                 className={combined ? 'active' : ''}
                 onClick={() => setNetwork(COMBINED)}
               >
@@ -294,15 +372,14 @@ export default function Dashboard({ dashboard }: { dashboard: DashboardPayload }
                 <button
                   key={entry.id}
                   type="button"
-                  role="tab"
-                  aria-selected={network === entry.id}
+                  aria-pressed={network === entry.id}
                   className={network === entry.id ? 'active' : ''}
                   onClick={() => setNetwork(entry.id)}
                 >
                   {entry.label}
                 </button>
               ))}
-            </div>
+            </fieldset>
           )}
           <h1>
             Private access.
@@ -331,9 +408,7 @@ export default function Dashboard({ dashboard }: { dashboard: DashboardPayload }
             {count(data.totals.monthlyActiveUsers)}
           </div>
           <div className="mau-footer">
-            <span>
-              {count(data.totals.weeklyActiveUsers)} weekly active
-            </span>
+            <span>{count(data.totals.weeklyActiveUsers)} weekly active</span>
             <small>Trailing 30 and 7 days</small>
           </div>
         </div>
@@ -690,11 +765,11 @@ export default function Dashboard({ dashboard }: { dashboard: DashboardPayload }
                   isAnimationActive={false}
                 />
                 <Tooltip
-                  contentStyle={TOOLTIP}
+                  contentStyle={ADDRESS_TOOLTIP}
                   formatter={(input: unknown, name: unknown) =>
                     [
                       `${INTEGER.format(Number(input))} redemptions`,
-                      typeof name === 'string' ? shortAddress(name) : '',
+                      typeof name === 'string' ? name : '',
                     ] as [string, string]
                   }
                 />
@@ -729,19 +804,21 @@ export default function Dashboard({ dashboard }: { dashboard: DashboardPayload }
                 <Tooltip
                   cursor={CURSOR}
                   labelFormatter={formatDay}
-                  contentStyle={TOOLTIP}
+                  contentStyle={ADDRESS_TOOLTIP}
                   itemSorter={(item) => -Number(item.value ?? 0)}
                   formatter={(input: unknown, name: unknown) =>
                     [
                       volume(Number(input)),
-                      typeof name === 'string' ? shortAddress(name) : '',
+                      typeof name === 'string'
+                        ? (addressOfSeries.get(name) ?? name)
+                        : '',
                     ] as [string, string]
                   }
                 />
-                {data.relayerSeries.map((relayer, index) => (
+                {data.relayerSeries.map((entry, index) => (
                   <Bar
-                    key={relayer}
-                    dataKey={relayer}
+                    key={entry.key}
+                    dataKey={entry.key}
                     stackId="relayers"
                     fill={relayerColor(index, data.relayerSeries.length)}
                     isAnimationActive={false}
@@ -766,7 +843,6 @@ export default function Dashboard({ dashboard }: { dashboard: DashboardPayload }
               <li key={relayer.key}>
                 <i style={{ background: relayer.fill }} />
                 <code>{shortAddress(relayer.address)}</code>
-                {combined && <em className="row-network">{labelOf(relayer.network)}</em>}
                 <strong>{percent(relayer.share)}</strong>
               </li>
             ))}
@@ -838,15 +914,11 @@ export default function Dashboard({ dashboard }: { dashboard: DashboardPayload }
                     : 'Most active users'}
                 </h3>
               </div>
-              <div
-                className="tab-switch"
-                role="tablist"
-                aria-label="Ranking window"
-              >
+              <fieldset className="tab-switch">
+                <legend className="sr-only">Ranking window</legend>
                 <button
                   type="button"
-                  role="tab"
-                  aria-selected={scope === 'weekly'}
+                  aria-pressed={scope === 'weekly'}
                   className={scope === 'weekly' ? 'active' : ''}
                   onClick={() => setScope('weekly')}
                 >
@@ -854,17 +926,21 @@ export default function Dashboard({ dashboard }: { dashboard: DashboardPayload }
                 </button>
                 <button
                   type="button"
-                  role="tab"
-                  aria-selected={scope === 'all'}
+                  aria-pressed={scope === 'all'}
                   className={scope === 'all' ? 'active' : ''}
                   onClick={() => setScope('all')}
                 >
                   All time
                 </button>
-              </div>
+              </fieldset>
             </div>
             <div className="table-scroll">
               <table className="rank-table">
+                <caption className="sr-only">
+                  {scope === 'weekly'
+                    ? 'Most active clients over the last seven days'
+                    : 'Most active clients since indexing began'}
+                </caption>
                 <colgroup>
                   <col className="rank" />
                   <col />
@@ -884,38 +960,53 @@ export default function Dashboard({ dashboard }: { dashboard: DashboardPayload }
                   </tr>
                 </thead>
                 <tbody>
-                  {rankedClients.map((client, index) => (
-                    <tr key={client.key}>
-                      <td>{medal(index)}</td>
-                      <td>
-                        <code>{client.address}</code>
-                        {combined && <em className="row-network">{labelOf(client.network)}</em>}
-                      </td>
-                      <td className="numeric">
-                        {count(
-                          scope === 'weekly'
-                            ? client.redemptions7d
-                            : client.redemptionsTotal,
-                        )}
-                      </td>
-                      <td className="numeric">
-                        {megabytes(
-                          scope === 'weekly'
-                            ? client.gigabytes7d
-                            : client.gigabytesTotal,
-                        )}
-                      </td>
-                    </tr>
-                  ))}
+                  {pageOf(rankedClients, clientAt).map((client, index) => {
+                    const rank = clientAt * PAGE_SIZE + index + 1;
+                    return (
+                      <tr key={client.key}>
+                        <td
+                          className={
+                            rank <= 3 ? 'rank-number leading' : 'rank-number'
+                          }
+                        >
+                          {rank}
+                        </td>
+                        <td>
+                          <code>{client.address}</code>
+                        </td>
+                        <td className="numeric">
+                          {count(
+                            scope === 'weekly'
+                              ? client.redemptions7d
+                              : client.redemptionsTotal,
+                          )}
+                        </td>
+                        <td className="numeric">
+                          {megabytes(
+                            scope === 'weekly'
+                              ? client.gigabytes7d
+                              : client.gigabytesTotal,
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
             <Empty when={!rankedClients.length}>
               No client usage has been indexed for this window.
             </Empty>
+            <Pager
+              page={clientAt}
+              pages={pagesOf(rankedClients.length)}
+              total={rankedClients.length}
+              onChange={setClientPage}
+              label="Most active users pages"
+            />
             <p className="chart-note">
-              Showing {rankedClients.length} of {data.clientCount} clients with
-              usage.
+              {count(rankedClients.length)} of {count(data.clientCount)} clients
+              had usage in this window.
             </p>
           </div>
           <div className="chart-card table-card">
@@ -925,13 +1016,14 @@ export default function Dashboard({ dashboard }: { dashboard: DashboardPayload }
                 <h3>Client deployments</h3>
               </div>
               <div className="axis-badge">
-                {data.timebase === 'rpc'
-                  ? 'TIME · RPC RESOLVED'
-                  : 'TIME · ESTIMATED'}
+                {count(data.totals.clientsDeployed)} total
               </div>
             </div>
             <div className="table-scroll">
               <table className="rank-table">
+                <caption className="sr-only">
+                  Client deployments, newest first
+                </caption>
                 <colgroup>
                   <col className="timestamp" />
                   <col />
@@ -943,16 +1035,13 @@ export default function Dashboard({ dashboard }: { dashboard: DashboardPayload }
                   </tr>
                 </thead>
                 <tbody>
-                  {data.deployments.map((deployment) => (
+                  {pageOf(data.deployments, deploymentAt).map((deployment) => (
                     <tr key={deployment.key}>
                       <td className="timestamp">
                         {formatTimestamp(deployment.timestamp)}
                       </td>
                       <td>
                         <code>{deployment.address}</code>
-                        {combined && (
-                          <em className="row-network">{labelOf(deployment.network)}</em>
-                        )}
                       </td>
                     </tr>
                   ))}
@@ -962,10 +1051,13 @@ export default function Dashboard({ dashboard }: { dashboard: DashboardPayload }
             <Empty when={!data.deployments.length}>
               No client deployments have been indexed.
             </Empty>
-            <p className="chart-note">
-              Showing the {data.deployments.length} most recent of{' '}
-              {count(data.totals.clientsDeployed)} clients deployed.
-            </p>
+            <Pager
+              page={deploymentAt}
+              pages={pagesOf(data.deployments.length)}
+              total={data.deployments.length}
+              onChange={setDeploymentPage}
+              label="Client deployment pages"
+            />
           </div>
         </div>
       </section>
@@ -989,13 +1081,10 @@ export default function Dashboard({ dashboard }: { dashboard: DashboardPayload }
             </div>
           </div>
           <div className="table-scroll">
-            <table className="rank-table">
-              <colgroup>
-                <col className="timestamp" />
-                <col />
-                <col />
-                <col />
-              </colgroup>
+            <table className="rank-table feed-table">
+              <caption className="sr-only">
+                Most recent redemptions, newest first
+              </caption>
               <thead>
                 <tr>
                   <th scope="col">timestamp</th>
@@ -1005,19 +1094,19 @@ export default function Dashboard({ dashboard }: { dashboard: DashboardPayload }
                 </tr>
               </thead>
               <tbody>
-                {data.recentRedemptions.map((redemption) => (
+                {pageOf(data.recentRedemptions, feedAt).map((redemption) => (
                   <tr key={redemption.key}>
                     <td className="timestamp">
                       {formatTimestamp(redemption.timestamp)}
                     </td>
                     <td>
-                      <code>{shortAddress(redemption.client)}</code>
+                      <code>{redemption.client}</code>
                     </td>
                     <td>
-                      <code>{shortAddress(redemption.relayer)}</code>
+                      <code>{redemption.relayer}</code>
                     </td>
                     <td>
-                      <code>{shortAddress(`0x${redemption.channelId}`)}</code>
+                      <code>{`0x${redemption.channelId}`}</code>
                     </td>
                   </tr>
                 ))}
@@ -1027,6 +1116,18 @@ export default function Dashboard({ dashboard }: { dashboard: DashboardPayload }
           <Empty when={!data.recentRedemptions.length}>
             No redemptions have been indexed.
           </Empty>
+          <Pager
+            page={feedAt}
+            pages={pagesOf(data.recentRedemptions.length)}
+            total={data.recentRedemptions.length}
+            onChange={setFeedPage}
+            label="Redemption feed pages"
+          />
+          <p className="chart-note">
+            The feed keeps the most recent{' '}
+            {count(data.recentRedemptions.length)} of{' '}
+            {count(data.totals.redemptionsTotal)} redemptions.
+          </p>
         </div>
       </section>
 
