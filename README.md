@@ -52,7 +52,9 @@ The repository ships a Nix flake with Node 22 and `psql`. With direnv installed:
 direnv allow
 ```
 
-The shell then loads on `cd` into the directory, and `.env.local` (git-ignored) is
+`nix fmt` formats the Nix; application code goes through `npm run format`, which
+runs oxfmt with the project's own configuration. The shell loads on `cd` into the
+directory, and `.env.local` (git-ignored) is
 sourced for `DATABASE_URL`, `RPC_URL` and friends. Without direnv, `nix develop`
 gives the same shell. Without Nix, install Node 22.13 or newer by hand.
 
