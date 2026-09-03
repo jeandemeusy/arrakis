@@ -25,15 +25,12 @@ Copy `.env.example` to `.env.local` for local development:
 
 ```dotenv
 DATABASE_URL=postgresql://dashboard:change-me@blokli-db:5432/blokli
-BLOKLI_URL=https://blokli.example.org
 # Optional
 RPC_URL=https://rpc.gnosischain.com
 ```
 
 - `DATABASE_URL` is required and currently supports PostgreSQL Blokli indexes.
   Use a dedicated read-only database role.
-- `BLOKLI_URL` identifies the attached Blokli instance in public provenance
-  metadata. It is not used for database access.
 - `RPC_URL` is optional. Set it to enable timestamp-based historical charts.
 
 ## Run

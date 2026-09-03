@@ -19,7 +19,6 @@ export type AnalyticsSnapshot = {
   source: "live" | "unavailable";
   axisMode: "time" | "block";
   observedAt: string;
-  blokliUrl: string | null;
   schemaVersion: string | null;
   blockNumber: number;
   accounts: number | null;
@@ -183,7 +182,6 @@ async function querySnapshot(): Promise<AnalyticsSnapshot> {
     source: "live",
     axisMode,
     observedAt: new Date().toISOString(),
-    blokliUrl: process.env.BLOKLI_URL ?? null,
     schemaVersion: summary.schema_version,
     blockNumber: Number(summary.block_number),
     accounts: Number(summary.accounts),
@@ -210,7 +208,6 @@ export async function loadAnalytics(): Promise<AnalyticsSnapshot> {
       source: "unavailable",
       axisMode: process.env.RPC_URL ? "time" : "block",
       observedAt: new Date().toISOString(),
-      blokliUrl: process.env.BLOKLI_URL ?? null,
       schemaVersion: null,
       blockNumber: 0,
       accounts: null,

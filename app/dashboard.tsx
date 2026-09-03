@@ -25,7 +25,6 @@ export type DashboardData = {
   source: "live" | "unavailable";
   axisMode: "time" | "block";
   observedAt: string;
-  blokliUrl: string | null;
   schemaVersion: string | null;
   blockNumber: number;
   accounts: number | null;
@@ -90,15 +89,6 @@ export default function Dashboard({ data }: { data: DashboardData }) {
   const activityChart = data.activity.length
     ? data.activity
     : [{ key: "waiting", label: "Waiting", activeParticipants: 0, redemptions: 0, redeemedWei: "0" }];
-  const provenance = data.blokliUrl
-    ? (() => {
-        try {
-          return new URL(data.blokliUrl).host;
-        } catch {
-          return data.blokliUrl;
-        }
-      })()
-    : "Configured index database";
 
   return (
     <main>
@@ -152,7 +142,7 @@ export default function Dashboard({ data }: { data: DashboardData }) {
           </p>
           <div className="asof">
             <span>NETWORK</span>
-            <strong>{provenance}</strong>
+            <strong>Blokli index database</strong>
             <span>OBSERVED</span>
             <strong>
               {new Date(data.observedAt).toLocaleDateString("en-GB", {
@@ -443,7 +433,7 @@ export default function Dashboard({ data }: { data: DashboardData }) {
           <span>
             {live ? "POSTGRESQL → BACKEND → PUBLIC DASHBOARD" : "DATABASE CONNECTION PENDING"}
           </span>
-          <code>{provenance}</code>
+          <code>Schema {data.schemaVersion ?? "unavailable"}</code>
         </div>
       </section>
 
