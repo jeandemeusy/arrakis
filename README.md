@@ -74,22 +74,29 @@ mutable `main` convenience tag are also published.
 Every published figure is reconstructed from chain events. No number on the page
 is self-reported.
 
+**Client traffic only.** This is a dashboard about the VPN, so it counts what VPN
+clients did. Relays announce themselves on chain; an account that never announced
+is not infrastructure, so a channel it opened is a client paying for its own
+sessions. Every metric below is restricted to those channels — channels sourced
+by announced accounts are relay-to-relay hops, not client usage.
+
 **Redemptions.** Blokli appends one `channel_state` row per on-chain channel
 event, and `TicketRedeemed` is the only event that advances `ticket_index`. A row
 whose ticket index exceeds its predecessor's (within the same channel epoch) is
-therefore a redemption, and the drop in channel balance across that pair of rows
-is what the relay was paid. See [`sql/v1/redemptions.sql`](./sql/v1/redemptions.sql).
+therefore a redemption, and the increment is the number of tickets it settled.
+See [`sql/v1/redemptions.sql`](./sql/v1/redemptions.sql).
 
-**Active users.** An account is active in a window when it was the source of a
-channel that saw a redemption inside the window, or when it announced inside the
-window. The chart plots this per day over trailing 7- and 30-day windows.
+**Active users.** Distinct client accounts that settled a redemption inside the
+window, plotted per day over trailing 7- and 30-day windows.
 
-**Data volume.** Each packet issues exactly one ticket priced at the network
-ticket price, and a ticket's face value already carries the
-1/winning-probability multiplier, so redeemed value divided by the indexed ticket
-price is the expected number of packets paid for. Each packet carries 1,038
-bytes of payload (`HoprPacket::PAYLOAD_SIZE`). Volume is counted once per paid
-relay hop, so a packet crossing several paid hops contributes once per hop.
+**Data volume.** Each settled ticket accounts for `650 / 2^30` GB scaled by the
+network winning probability in force at the redemption's block. Blokli keeps only
+the current probability in `chain_info`, so the timeline is recovered by decoding
+`WinProbUpdated` logs from the raw `log` table
+([`sql/v1/win-prob-updates.sql`](./sql/v1/win-prob-updates.sql)); the 7-byte
+encoding is decoded exactly as `WinningProbability::as_f64` does. When the log
+table is not in this database the page falls back to the current probability and
+says so in a banner.
 
 These deliberately avoid the service registry: the `gvpn:exit` service type
 requires migration `m006`, which is not present on every deployed index.

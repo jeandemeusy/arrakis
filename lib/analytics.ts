@@ -7,8 +7,8 @@ import { Pool, type QueryResultRow } from "pg";
 
 import { resolveBlockClock, type BlockClock } from "./rpc";
 
-/** Application payload carried by one HOPR packet (`HoprPacket::PAYLOAD_SIZE`). */
-const PACKET_PAYLOAD_BYTES = 1038;
+/** Payload a single redeemed ticket accounts for, before the win-probability scale. */
+const GIGABYTES_PER_TICKET = 650 / 2 ** 30;
 /** Gnosis block cadence, used to place blocks in time when no RPC is configured. */
 const BLOCK_SECONDS = 5;
 const DAY_SECONDS = 86_400;
@@ -26,14 +26,16 @@ export type WeekPoint = {
   key: string;
   label: string;
   redemptions: number;
-  megabytes: number;
-  redeemedWei: string;
+  tickets: number;
+  gigabytes: number;
+  cumulativeRedemptions: number;
+  cumulativeGigabytes: number;
 };
 
 export type Relayer = {
   address: string;
   redemptions: number;
-  redeemedWei: string;
+  gigabytes: number;
   share: number;
 };
 
@@ -41,9 +43,9 @@ export type AnalyticsSnapshot = {
   source: "live" | "degraded" | "unavailable";
   observedAt: string;
   timebase: "rpc" | "estimated";
+  winProbability: "historical" | "current" | "assumed";
   schemaVersion: string | null;
   blockNumber: number;
-  ticketPriceWei: string | null;
   accounts: number | null;
   safes: number | null;
   openChannels: number | null;
@@ -55,11 +57,13 @@ export type AnalyticsSnapshot = {
   totals: {
     weeklyActiveUsers: number | null;
     monthlyActiveUsers: number | null;
+    allTimeUsers: number | null;
     redemptions7d: number | null;
     redemptionsTotal: number | null;
-    megabytes7d: number | null;
-    megabytesTotal: number | null;
-    redeemedWeiTotal: string | null;
+    gigabytes7d: number | null;
+    gigabytesTotal: number | null;
+    ticketsTotal: number | null;
+    relayers7d: number | null;
   };
   warnings: string[];
 };
@@ -67,7 +71,7 @@ export type AnalyticsSnapshot = {
 type SummaryRow = QueryResultRow & {
   schema_version: string;
   block_number: string;
-  ticket_price: Buffer | null;
+  win_prob: string | number | null;
   accounts: string;
   safes: string;
   open_channels: string;
@@ -78,13 +82,11 @@ type RedemptionRow = QueryResultRow & {
   destination: Buffer;
   published_block: string;
   tickets: string;
-  balance_before: Buffer;
-  balance_after: Buffer;
 };
 
-type AnnouncementRow = QueryResultRow & {
-  account: Buffer;
-  published_block: string;
+type WinProbRow = QueryResultRow & {
+  block_number: string;
+  win_prob: Buffer;
 };
 
 type Redemption = {
@@ -92,7 +94,8 @@ type Redemption = {
   destination: string;
   block: number;
   day: number;
-  amount: bigint;
+  tickets: number;
+  gigabytes: number;
 };
 
 let pool: Pool | undefined;
@@ -141,18 +144,34 @@ function sumBalances(rows: Array<{ balance: Buffer }>): string {
 }
 
 /**
- * Converts redeemed wxHOPR into relayed payload bytes.
+ * Decodes HOPR's 7-byte encoded winning probability into a probability in [0, 1].
  *
- * Each packet issues exactly one ticket priced at the network ticket price, and a
- * ticket's face value already carries the 1/winning-probability multiplier, so the
- * redeemed value divided by the ticket price is the expected number of packets paid
- * for. This counts one relay hop: a packet crossing several paid hops is counted
- * once per hop it pays for.
+ * Mirrors `WinningProbability::as_f64` in hopr-types: the seven bytes are read
+ * big-endian, incremented, and used as the mantissa of a float in [1, 2), from
+ * which one is subtracted. The all-zero and all-ones encodings are exact.
  */
-function megabytes(redeemedWei: bigint, ticketPrice: bigint | null): number {
-  if (!ticketPrice || ticketPrice === 0n) return 0;
-  const scaledPackets = Number((redeemedWei * 1_000n) / ticketPrice) / 1_000;
-  return (scaledPackets * PACKET_PAYLOAD_BYTES) / 1_000_000;
+function decodeWinProbability(bytes: Buffer): number {
+  if (bytes.length !== 7) return 1;
+  if (bytes.every((byte) => byte === 0x00)) return 0;
+  if (bytes.every((byte) => byte === 0xff)) return 1;
+  const significand = fromBigEndian(bytes) + 1n;
+  const bits = (1023n << 52n) | (significand >> 4n);
+  const buffer = new ArrayBuffer(8);
+  new DataView(buffer).setBigUint64(0, bits);
+  return new DataView(buffer).getFloat64(0) - 1;
+}
+
+/** Step function over the win-probability timeline, newest update at or before a block. */
+function winProbabilityAt(timeline: Array<[number, number]>, fallback: number) {
+  if (!timeline.length) return () => fallback;
+  return (block: number) => {
+    let value = fallback;
+    for (const [updatedAt, probability] of timeline) {
+      if (updatedAt > block) break;
+      value = probability;
+    }
+    return value;
+  };
 }
 
 function dayIndex(timestamp: number): number {
@@ -171,8 +190,8 @@ function estimatedClock(latestBlock: number): BlockClock {
 /**
  * Daily snapshots of the trailing 7- and 30-day active-user counts.
  *
- * An account is active on a given day's window when it was the source of a channel
- * that saw a redemption inside the window, or when it announced inside the window.
+ * A user is the source of a client channel that settled a redemption inside the
+ * window: the session was paid for, so the client was online and relaying traffic.
  */
 function activeUserSeries(
   actorsByDay: Map<number, Set<string>>,
@@ -180,10 +199,9 @@ function activeUserSeries(
 ): ActiveUserPoint[] {
   const days = [...actorsByDay.keys()].sort((a, b) => a - b);
   if (!days.length) return [];
-  const firstDay = days[0];
 
   const points: ActiveUserPoint[] = [];
-  for (let day = firstDay; day <= lastDay; day += 1) {
+  for (let day = days[0]; day <= lastDay; day += 1) {
     const weekly = new Set<string>();
     const monthly = new Set<string>();
     for (let offset = 0; offset < MONTH_DAYS; offset += 1) {
@@ -199,39 +217,48 @@ function activeUserSeries(
   return points;
 }
 
-function weeklySeries(redemptions: Redemption[], ticketPrice: bigint | null): WeekPoint[] {
-  const buckets = new Map<number, { redemptions: number; amount: bigint }>();
+function weeklySeries(redemptions: Redemption[]): WeekPoint[] {
+  const buckets = new Map<number, { redemptions: number; tickets: number; gigabytes: number }>();
   for (const redemption of redemptions) {
-    // Anchor each week to the Monday that contains it. Day 0 of the unix epoch was
-    // a Thursday, so shift by 3 before flooring.
+    // Anchor each week to the Monday containing it. Unix day 0 was a Thursday,
+    // so shift by three days before flooring to a week boundary.
     const week = Math.floor((redemption.day + 3) / 7) * 7 - 3;
-    const bucket = buckets.get(week) ?? { redemptions: 0, amount: 0n };
+    const bucket = buckets.get(week) ?? { redemptions: 0, tickets: 0, gigabytes: 0 };
     bucket.redemptions += 1;
-    bucket.amount += redemption.amount;
+    bucket.tickets += redemption.tickets;
+    bucket.gigabytes += redemption.gigabytes;
     buckets.set(week, bucket);
   }
 
+  let cumulativeRedemptions = 0;
+  let cumulativeGigabytes = 0;
   return [...buckets.entries()]
     .sort(([a], [b]) => a - b)
-    .map(([week, bucket]) => ({
-      key: isoDate(week),
-      label: new Intl.DateTimeFormat("en", {
-        day: "2-digit",
-        month: "short",
-        timeZone: "UTC",
-      }).format(new Date(week * DAY_SECONDS * 1000)),
-      redemptions: bucket.redemptions,
-      megabytes: megabytes(bucket.amount, ticketPrice),
-      redeemedWei: bucket.amount.toString(),
-    }));
+    .map(([week, bucket]) => {
+      cumulativeRedemptions += bucket.redemptions;
+      cumulativeGigabytes += bucket.gigabytes;
+      return {
+        key: isoDate(week),
+        label: new Intl.DateTimeFormat("en", {
+          day: "2-digit",
+          month: "short",
+          timeZone: "UTC",
+        }).format(new Date(week * DAY_SECONDS * 1000)),
+        redemptions: bucket.redemptions,
+        tickets: bucket.tickets,
+        gigabytes: bucket.gigabytes,
+        cumulativeRedemptions,
+        cumulativeGigabytes,
+      };
+    });
 }
 
 function relayerDistribution(recent: Redemption[]): Relayer[] {
-  const buckets = new Map<string, { redemptions: number; amount: bigint }>();
+  const buckets = new Map<string, { redemptions: number; gigabytes: number }>();
   for (const redemption of recent) {
-    const bucket = buckets.get(redemption.destination) ?? { redemptions: 0, amount: 0n };
+    const bucket = buckets.get(redemption.destination) ?? { redemptions: 0, gigabytes: 0 };
     bucket.redemptions += 1;
-    bucket.amount += redemption.amount;
+    bucket.gigabytes += redemption.gigabytes;
     buckets.set(redemption.destination, bucket);
   }
 
@@ -240,7 +267,7 @@ function relayerDistribution(recent: Redemption[]): Relayer[] {
     .map(([address, bucket]) => ({
       address,
       redemptions: bucket.redemptions,
-      redeemedWei: bucket.amount.toString(),
+      gigabytes: bucket.gigabytes,
       share: bucket.redemptions / total,
     }))
     .sort((a, b) => b.redemptions - a.redemptions)
@@ -257,35 +284,49 @@ async function querySnapshot(): Promise<AnalyticsSnapshot> {
   const summary = summaryResult.rows[0];
   if (!summary) throw new Error("Blokli chain_info is not initialized");
 
-  const [channelBalances, safeBalances, redemptionRows, announcementRows] =
+  const [channelBalances, safeBalances, redemptionRows, winProbRows] =
     await Promise.allSettled([
       db.query<{ balance: Buffer }>(await sql("channel-balances")),
       db.query<{ balance: Buffer }>(await sql("safe-balances")),
       db.query<RedemptionRow>(await sql("redemptions")),
-      db.query<AnnouncementRow>(await sql("announcements")),
+      db.query<WinProbRow>(await sql("win-prob-updates")),
     ]);
-
-  const ticketPrice = summary.ticket_price ? fromBigEndian(summary.ticket_price) : null;
-  if (!ticketPrice) {
-    warnings.push("Ticket price is not indexed yet; data volume cannot be derived.");
-  }
 
   const rawRedemptions =
     redemptionRows.status === "fulfilled" ? redemptionRows.value.rows : [];
-  const rawAnnouncements =
-    announcementRows.status === "fulfilled" ? announcementRows.value.rows : [];
   if (redemptionRows.status === "rejected") {
     warnings.push("Redemption history is unavailable; usage panels are empty.");
   }
-  if (announcementRows.status === "rejected") {
-    warnings.push("Announcements are unavailable; active users count redemptions only.");
+
+  // chain_info holds only the current winning probability. The raw log table, when
+  // it lives in this database, carries the full oracle history instead.
+  const currentWinProb = Number(summary.win_prob);
+  const fallbackWinProb = Number.isFinite(currentWinProb) && currentWinProb > 0
+    ? currentWinProb
+    : 1;
+  const timeline: Array<[number, number]> =
+    winProbRows.status === "fulfilled"
+      ? winProbRows.value.rows.map((row) => [
+          Number(row.block_number),
+          decodeWinProbability(row.win_prob),
+        ])
+      : [];
+
+  let winProbability: AnalyticsSnapshot["winProbability"] = "historical";
+  if (!timeline.length) {
+    winProbability = Number.isFinite(currentWinProb) && currentWinProb > 0
+      ? "current"
+      : "assumed";
+    warnings.push(
+      winProbability === "current"
+        ? "Winning probability history is unavailable; volume uses the current value throughout."
+        : "Winning probability is not indexed; volume assumes a probability of 1.",
+    );
   }
+  const probabilityAt = winProbabilityAt(timeline, fallbackWinProb);
 
   const latestBlock = Number(summary.block_number);
-  const blocks = [
-    ...rawRedemptions.map((row) => Number(row.published_block)),
-    ...rawAnnouncements.map((row) => Number(row.published_block)),
-  ];
+  const blocks = rawRedemptions.map((row) => Number(row.published_block));
   const firstBlock = blocks.length ? Math.min(...blocks) : latestBlock;
 
   let timebase: AnalyticsSnapshot["timebase"] = "estimated";
@@ -301,42 +342,41 @@ async function querySnapshot(): Promise<AnalyticsSnapshot> {
 
   const redemptions: Redemption[] = rawRedemptions.map((row) => {
     const block = Number(row.published_block);
+    const tickets = Number(row.tickets);
     return {
       source: hex(row.source),
       destination: hex(row.destination),
       block,
       day: dayIndex(clock(block)),
-      amount: fromBigEndian(row.balance_before) - fromBigEndian(row.balance_after),
+      tickets,
+      gigabytes: tickets * GIGABYTES_PER_TICKET * probabilityAt(block),
     };
   });
 
   const actorsByDay = new Map<number, Set<string>>();
-  const addActor = (day: number, actor: string) => {
-    const actors = actorsByDay.get(day) ?? new Set<string>();
-    actors.add(actor);
-    actorsByDay.set(day, actors);
-  };
-  for (const redemption of redemptions) addActor(redemption.day, redemption.source);
-  for (const row of rawAnnouncements) {
-    addActor(dayIndex(clock(Number(row.published_block))), hex(row.account));
+  for (const redemption of redemptions) {
+    const actors = actorsByDay.get(redemption.day) ?? new Set<string>();
+    actors.add(redemption.source);
+    actorsByDay.set(redemption.day, actors);
   }
 
   const lastDay = dayIndex(clock(latestBlock));
   const activeUsers = activeUserSeries(actorsByDay, lastDay);
-  const weeks = weeklySeries(redemptions, ticketPrice);
+  const weeks = weeklySeries(redemptions);
   const recent = redemptions.filter((redemption) => redemption.day > lastDay - WEEK_DAYS);
-  const redeemedTotal = redemptions.reduce((total, row) => total + row.amount, 0n);
-  const redeemedRecent = recent.reduce((total, row) => total + row.amount, 0n);
+  const relayers = relayerDistribution(recent);
   const latest = activeUsers.at(-1);
   const hasUsage = redemptionRows.status === "fulfilled";
+  const sum = (rows: Redemption[], pick: (row: Redemption) => number) =>
+    rows.reduce((total, row) => total + pick(row), 0);
 
   return {
     source: warnings.length ? "degraded" : "live",
     observedAt: new Date().toISOString(),
     timebase,
+    winProbability,
     schemaVersion: summary.schema_version,
     blockNumber: latestBlock,
-    ticketPriceWei: ticketPrice?.toString() ?? null,
     accounts: Number(summary.accounts),
     safes: Number(summary.safes),
     openChannels: Number(summary.open_channels),
@@ -346,15 +386,19 @@ async function querySnapshot(): Promise<AnalyticsSnapshot> {
       safeBalances.status === "fulfilled" ? sumBalances(safeBalances.value.rows) : null,
     activeUsers,
     weeks,
-    relayers: relayerDistribution(recent),
+    relayers,
     totals: {
       weeklyActiveUsers: latest?.weekly ?? null,
       monthlyActiveUsers: latest?.monthly ?? null,
+      allTimeUsers: hasUsage
+        ? new Set(redemptions.map((redemption) => redemption.source)).size
+        : null,
       redemptions7d: hasUsage ? recent.length : null,
       redemptionsTotal: hasUsage ? redemptions.length : null,
-      megabytes7d: hasUsage ? megabytes(redeemedRecent, ticketPrice) : null,
-      megabytesTotal: hasUsage ? megabytes(redeemedTotal, ticketPrice) : null,
-      redeemedWeiTotal: hasUsage ? redeemedTotal.toString() : null,
+      gigabytes7d: hasUsage ? sum(recent, (row) => row.gigabytes) : null,
+      gigabytesTotal: hasUsage ? sum(redemptions, (row) => row.gigabytes) : null,
+      ticketsTotal: hasUsage ? sum(redemptions, (row) => row.tickets) : null,
+      relayers7d: hasUsage ? new Set(recent.map((row) => row.destination)).size : null,
     },
     warnings,
   };
@@ -365,9 +409,9 @@ function unavailable(message: string): AnalyticsSnapshot {
     source: "unavailable",
     observedAt: new Date().toISOString(),
     timebase: "estimated",
+    winProbability: "assumed",
     schemaVersion: null,
     blockNumber: 0,
-    ticketPriceWei: null,
     accounts: null,
     safes: null,
     openChannels: null,
@@ -379,11 +423,13 @@ function unavailable(message: string): AnalyticsSnapshot {
     totals: {
       weeklyActiveUsers: null,
       monthlyActiveUsers: null,
+      allTimeUsers: null,
       redemptions7d: null,
       redemptionsTotal: null,
-      megabytes7d: null,
-      megabytesTotal: null,
-      redeemedWeiTotal: null,
+      gigabytes7d: null,
+      gigabytesTotal: null,
+      ticketsTotal: null,
+      relayers7d: null,
     },
     warnings: [message],
   };

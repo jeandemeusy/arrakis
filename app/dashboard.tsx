@@ -20,14 +20,24 @@ export type DashboardData = AnalyticsSnapshot;
 
 const AXIS = { fill: "#89919b", fontSize: 11 };
 const LIGHT_AXIS = { fill: "#77756f", fontSize: 11 };
+const YELLOW = "#ffd84d";
+const INK = "#17191c";
+const DARK_TOOLTIP = {
+  background: "#161a1f",
+  border: "1px solid #333940",
+  borderRadius: 2,
+};
+const LIGHT_TOOLTIP = { border: "1px solid #d9d5cb", borderRadius: 2 };
 
 function count(input: number | null) {
   return input === null ? "—" : new Intl.NumberFormat("en-US").format(input);
 }
 
+/** Volume arrives in gigabytes; step down so small numbers stay readable. */
 function volume(input: number | null) {
   if (input === null) return "—";
-  const [value, unit] = input >= 1000 ? [input / 1000, "GB"] : [input, "MB"];
+  const [value, unit] =
+    input >= 1 ? [input, "GB"] : input >= 0.001 ? [input * 1000, "MB"] : [input * 1e6, "KB"];
   return `${new Intl.NumberFormat("en", { maximumFractionDigits: 2 }).format(value)} ${unit}`;
 }
 
@@ -89,6 +99,7 @@ export default function Dashboard({ data }: { data: DashboardData }) {
         <nav aria-label="Dashboard navigation">
           <a href="#users">Active users</a>
           <a href="#usage">Usage</a>
+          <a href="#growth">Growth</a>
           <a href="#relayers">Relayers</a>
           <a href="#methodology">Methodology</a>
         </nav>
@@ -120,9 +131,9 @@ export default function Dashboard({ data }: { data: DashboardData }) {
         </div>
         <div className="intro-copy">
           <p>
-            Gnosis VPN usage measured directly from Gnosis Chain. Every figure below is
-            reconstructed from ticket redemptions and node announcements indexed by
-            Blokli—no self-reported numbers.
+            Gnosis VPN client usage measured directly from Gnosis Chain. Every figure
+            below counts traffic paid for by VPN clients—accounts that never announced
+            themselves as relays—reconstructed from ticket redemptions indexed by Blokli.
           </p>
           <div className="asof">
             <span>LAST INDEXED BLOCK</span>
@@ -159,13 +170,13 @@ export default function Dashboard({ data }: { data: DashboardData }) {
         />
         <Metric
           eyebrow="DATA RELAYED · 7 DAYS"
-          figure={volume(data.totals.megabytes7d)}
-          note={`${volume(data.totals.megabytesTotal)} cumulative`}
+          figure={volume(data.totals.gigabytes7d)}
+          note={`${volume(data.totals.gigabytesTotal)} cumulative`}
         />
         <Metric
-          eyebrow="ACTIVE CHANNELS"
-          figure={count(data.openChannels)}
-          note={`${compactToken(data.channelBalance)} allocated`}
+          eyebrow="ALL-TIME CLIENTS"
+          figure={count(data.totals.allTimeUsers)}
+          note={`${count(data.totals.relayers7d)} relayers served them this week`}
         />
       </section>
 
@@ -176,8 +187,9 @@ export default function Dashboard({ data }: { data: DashboardData }) {
             <h2>Unique active users</h2>
           </div>
           <p>
-            An account counts as active when it sourced a channel that saw a ticket
-            redemption inside the window, or announced itself inside the window.
+            A user is a VPN client that paid for a session in the window—an account that
+            opened a channel and settled tickets on it, and that never announced itself
+            as relay infrastructure.
           </p>
         </div>
         <div className="chart-card main-chart">
@@ -199,8 +211,8 @@ export default function Dashboard({ data }: { data: DashboardData }) {
             >
               <defs>
                 <linearGradient id="fillMonthly" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#ffd84d" stopOpacity={0.45} />
-                  <stop offset="100%" stopColor="#ffd84d" stopOpacity={0} />
+                  <stop offset="0%" stopColor={YELLOW} stopOpacity={0.45} />
+                  <stop offset="100%" stopColor={YELLOW} stopOpacity={0} />
                 </linearGradient>
               </defs>
               <CartesianGrid vertical={false} stroke="#262b31" strokeDasharray="2 5" />
@@ -213,19 +225,12 @@ export default function Dashboard({ data }: { data: DashboardData }) {
                 tickFormatter={formatDay}
               />
               <YAxis axisLine={false} tickLine={false} tick={AXIS} allowDecimals={false} />
-              <Tooltip
-                labelFormatter={formatDay}
-                contentStyle={{
-                  background: "#161a1f",
-                  border: "1px solid #333940",
-                  borderRadius: 2,
-                }}
-              />
+              <Tooltip labelFormatter={formatDay} contentStyle={DARK_TOOLTIP} />
               <Area
                 type="monotone"
                 dataKey="monthly"
                 name="30-day active"
-                stroke="#ffd84d"
+                stroke={YELLOW}
                 fill="url(#fillMonthly)"
                 strokeWidth={3}
                 dot={false}
@@ -242,12 +247,11 @@ export default function Dashboard({ data }: { data: DashboardData }) {
           </ResponsiveContainer>
           {!hasUsers && (
             <div className="empty-overlay">
-              The series appears once the index database reports redemptions or
-              announcements.
+              The series appears once the index database reports client redemptions.
             </div>
           )}
           <p className="chart-note">
-            Each point counts distinct accounts over the preceding 30 and 7 days, so the
+            Each point counts distinct clients over the preceding 30 and 7 days, so the
             two lines converge when activity is concentrated in a single week.
           </p>
         </div>
@@ -260,28 +264,60 @@ export default function Dashboard({ data }: { data: DashboardData }) {
             <h2>Relayed traffic</h2>
           </div>
           <p>
-            Redemptions are counted per channel state transition. Volume converts the
-            redeemed wxHOPR into packets at the indexed ticket price, one packet
-            carrying {new Intl.NumberFormat("en").format(1038)} bytes of payload.
+            Each redemption settles a batch of tickets, and each ticket accounts for 650
+            bytes scaled by the winning probability in force when it was redeemed.
           </p>
         </div>
-        <div className="network-grid">
+        <div className="chart-split">
           <div className="chart-card service-chart">
             <div className="chart-title">
               <div>
                 <span>PER WEEK</span>
-                <h3>Redemptions and data volume</h3>
+                <h3>Data volume</h3>
+              </div>
+              <div className="axis-badge">
+                {data.winProbability === "historical"
+                  ? "WIN PROB · HISTORICAL"
+                  : data.winProbability === "current"
+                    ? "WIN PROB · CURRENT"
+                    : "WIN PROB · ASSUMED 1"}
+              </div>
+            </div>
+            <ResponsiveContainer width="100%" height={230}>
+              <BarChart data={data.weeks} margin={{ top: 20, right: 10, left: -20, bottom: 0 }}>
+                <CartesianGrid vertical={false} stroke="#e6e2d8" />
+                <XAxis
+                  dataKey="label"
+                  axisLine={false}
+                  tickLine={false}
+                  tick={LIGHT_AXIS}
+                  minTickGap={24}
+                />
+                <YAxis axisLine={false} tickLine={false} tick={LIGHT_AXIS} />
+                <Tooltip
+                  cursor={{ fill: "#f2eee5" }}
+                  contentStyle={LIGHT_TOOLTIP}
+                  formatter={(input: unknown) => volume(Number(input))}
+                />
+                <Bar dataKey="gigabytes" name="Data volume" fill={YELLOW} radius={[2, 2, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+            {!hasWeeks && (
+              <div className="empty-overlay">No client redemptions have been indexed yet.</div>
+            )}
+          </div>
+          <div className="chart-card service-chart">
+            <div className="chart-title">
+              <div>
+                <span>PER WEEK</span>
+                <h3>Redemptions</h3>
               </div>
               <div className="axis-badge">
                 {data.timebase === "rpc" ? "TIME · RPC RESOLVED" : "TIME · ESTIMATED"}
               </div>
             </div>
-            <ResponsiveContainer width="100%" height={250}>
-              <BarChart
-                data={data.weeks}
-                barGap={3}
-                margin={{ top: 20, right: 10, left: -28, bottom: 0 }}
-              >
+            <ResponsiveContainer width="100%" height={230}>
+              <BarChart data={data.weeks} margin={{ top: 20, right: 10, left: -20, bottom: 0 }}>
                 <CartesianGrid vertical={false} stroke="#e6e2d8" />
                 <XAxis
                   dataKey="label"
@@ -291,79 +327,131 @@ export default function Dashboard({ data }: { data: DashboardData }) {
                   minTickGap={24}
                 />
                 <YAxis
-                  yAxisId="left"
                   allowDecimals={false}
                   axisLine={false}
                   tickLine={false}
                   tick={LIGHT_AXIS}
                 />
-                <YAxis
-                  yAxisId="right"
-                  orientation="right"
-                  axisLine={false}
-                  tickLine={false}
-                  tick={LIGHT_AXIS}
-                />
-                <Tooltip
-                  cursor={{ fill: "#f2eee5" }}
-                  contentStyle={{ border: "1px solid #d9d5cb", borderRadius: 2 }}
-                  formatter={(input: unknown, name: unknown) =>
-                    name === "Data volume"
-                      ? volume(Number(input))
-                      : new Intl.NumberFormat("en").format(Number(input))
-                  }
-                />
-                <Bar
-                  yAxisId="left"
-                  dataKey="redemptions"
-                  name="Redemptions"
-                  fill="#17191c"
-                  radius={[2, 2, 0, 0]}
-                />
-                <Bar
-                  yAxisId="right"
-                  dataKey="megabytes"
-                  name="Data volume"
-                  fill="#ffd84d"
-                  radius={[2, 2, 0, 0]}
-                />
+                <Tooltip cursor={{ fill: "#f2eee5" }} contentStyle={LIGHT_TOOLTIP} />
+                <Bar dataKey="redemptions" name="Redemptions" fill={INK} radius={[2, 2, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
             {!hasWeeks && (
-              <div className="empty-overlay">
-                No redemptions have been indexed for this network yet.
-              </div>
+              <div className="empty-overlay">No client redemptions have been indexed yet.</div>
             )}
           </div>
-          <div className="network-stats">
-            <Metric
-              eyebrow="TOTAL REDEMPTIONS"
-              figure={count(data.totals.redemptionsTotal)}
-              note="Ticket redemptions across all channels"
-            />
-            <Metric
-              eyebrow="TOTAL DATA RELAYED"
-              figure={volume(data.totals.megabytesTotal)}
-              note={`${compactToken(data.totals.redeemedWeiTotal)} redeemed`}
-            />
-            <Metric
-              eyebrow="TICKET PRICE"
-              figure={compactToken(data.ticketPriceWei)}
-              note="Indexed from chain_info"
-            />
+        </div>
+        <div className="network-stats network-stats-row">
+          <Metric
+            eyebrow="TOTAL REDEMPTIONS"
+            figure={count(data.totals.redemptionsTotal)}
+            note={`${count(data.totals.ticketsTotal)} tickets settled`}
+          />
+          <Metric
+            eyebrow="TOTAL DATA RELAYED"
+            figure={volume(data.totals.gigabytesTotal)}
+            note="Client traffic since indexing began"
+          />
+          <Metric
+            eyebrow="ACTIVE CHANNELS"
+            figure={count(data.openChannels)}
+            note={`${compactToken(data.channelBalance)} allocated`}
+          />
+        </div>
+      </section>
+
+      <section className="section" id="growth">
+        <div className="section-heading">
+          <div>
+            <span className="section-index">03</span>
+            <h2>Cumulative growth</h2>
           </div>
+          <p>
+            The running totals behind the weekly bars—useful for reading the trajectory
+            rather than week-to-week noise.
+          </p>
+        </div>
+        <div className="chart-card main-chart">
+          <div className="chart-title">
+            <div>
+              <span>SINCE INDEXING BEGAN</span>
+              <h3>Cumulative volume and redemptions</h3>
+            </div>
+            <div className="legend">
+              <i className="actual" />
+              Volume <i className="target" />
+              Redemptions
+            </div>
+          </div>
+          <ResponsiveContainer width="100%" height={300}>
+            <ComposedChart data={data.weeks} margin={{ top: 24, right: 8, left: -18, bottom: 0 }}>
+              <defs>
+                <linearGradient id="fillCumulative" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor={YELLOW} stopOpacity={0.45} />
+                  <stop offset="100%" stopColor={YELLOW} stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid vertical={false} stroke="#262b31" strokeDasharray="2 5" />
+              <XAxis
+                dataKey="label"
+                axisLine={false}
+                tickLine={false}
+                tick={AXIS}
+                minTickGap={24}
+              />
+              <YAxis yAxisId="left" axisLine={false} tickLine={false} tick={AXIS} />
+              <YAxis
+                yAxisId="right"
+                orientation="right"
+                axisLine={false}
+                tickLine={false}
+                tick={AXIS}
+              />
+              <Tooltip
+                contentStyle={DARK_TOOLTIP}
+                formatter={(input: unknown, name: unknown) =>
+                  name === "Cumulative volume"
+                    ? volume(Number(input))
+                    : new Intl.NumberFormat("en").format(Number(input))
+                }
+              />
+              <Area
+                yAxisId="left"
+                type="monotone"
+                dataKey="cumulativeGigabytes"
+                name="Cumulative volume"
+                stroke={YELLOW}
+                fill="url(#fillCumulative)"
+                strokeWidth={3}
+                dot={false}
+              />
+              <Line
+                yAxisId="right"
+                type="monotone"
+                dataKey="cumulativeRedemptions"
+                name="Cumulative redemptions"
+                stroke="#737b85"
+                strokeWidth={1.5}
+                dot={false}
+              />
+            </ComposedChart>
+          </ResponsiveContainer>
+          {!hasWeeks && (
+            <div className="empty-overlay">No client redemptions have been indexed yet.</div>
+          )}
         </div>
       </section>
 
       <section className="section" id="relayers">
         <div className="section-heading">
           <div>
-            <span className="section-index">03</span>
-            <h2>Relayer distribution</h2>
+            <span className="section-index">04</span>
+            <h2>Redemptions by relayer</h2>
           </div>
           <p>
-            Where the last seven days of redemptions landed. A flat distribution means
-            traffic is spread across many relays rather than concentrated in a few.
+            Which relays carried client traffic over the last seven days. A flat
+            distribution means sessions are spread across many relays rather than
+            concentrated in a few.
           </p>
         </div>
         <div className="network-grid">
@@ -371,31 +459,60 @@ export default function Dashboard({ data }: { data: DashboardData }) {
             <div className="chart-title">
               <div>
                 <span>LAST 7 DAYS</span>
-                <h3>Redemptions by destination</h3>
+                <h3>Redemptions by relayer</h3>
               </div>
             </div>
-            <ol className="relayer-list">
-              {data.relayers.map((relayer) => (
-                <li key={relayer.address}>
-                  <code>{shortAddress(relayer.address)}</code>
-                  <span className="relayer-bar">
-                    <i style={{ width: `${Math.max(2, relayer.share * 100)}%` }} />
-                  </span>
-                  <strong>{count(relayer.redemptions)}</strong>
-                </li>
-              ))}
-            </ol>
+            <ResponsiveContainer width="100%" height={280}>
+              <BarChart
+                data={data.relayers}
+                layout="vertical"
+                margin={{ top: 10, right: 16, left: 8, bottom: 0 }}
+              >
+                <CartesianGrid horizontal={false} stroke="#e6e2d8" />
+                <XAxis
+                  type="number"
+                  axisLine={false}
+                  tickLine={false}
+                  tick={LIGHT_AXIS}
+                  allowDecimals={false}
+                />
+                <YAxis
+                  type="category"
+                  dataKey="address"
+                  width={132}
+                  axisLine={false}
+                  tickLine={false}
+                  tick={LIGHT_AXIS}
+                  tickFormatter={(value: unknown) =>
+                    typeof value === "string" ? shortAddress(value) : ""
+                  }
+                />
+                <Tooltip
+                  cursor={{ fill: "#f2eee5" }}
+                  contentStyle={LIGHT_TOOLTIP}
+                  formatter={(input: unknown) =>
+                    new Intl.NumberFormat("en").format(Number(input))
+                  }
+                />
+                <Bar
+                  dataKey="redemptions"
+                  name="Redemptions"
+                  fill={INK}
+                  radius={[0, 2, 2, 0]}
+                />
+              </BarChart>
+            </ResponsiveContainer>
             {!data.relayers.length && (
               <div className="empty-overlay">
-                No redemptions were indexed in the last seven days.
+                No client redemptions were indexed in the last seven days.
               </div>
             )}
           </div>
           <div className="network-stats">
             <Metric
-              eyebrow="ON-CHAIN ACCOUNTS"
-              figure={count(data.accounts)}
-              note="Unique on-chain identities indexed"
+              eyebrow="RELAYERS SERVING CLIENTS"
+              figure={count(data.totals.relayers7d)}
+              note="Distinct destinations, last 7 days"
             />
             <Metric
               eyebrow="INDEXED SAFES"
@@ -405,7 +522,7 @@ export default function Dashboard({ data }: { data: DashboardData }) {
             <Metric
               eyebrow="INDEX SCHEMA"
               figure={data.schemaVersion ?? "—"}
-              note="Blokli database schema version"
+              note={`${count(data.accounts)} on-chain accounts indexed`}
             />
           </div>
         </div>
@@ -420,29 +537,29 @@ export default function Dashboard({ data }: { data: DashboardData }) {
         <div className="method-grid">
           <div>
             <span>01</span>
-            <h3>Redemptions</h3>
+            <h3>Client traffic only</h3>
             <p>
-              Blokli appends a channel state row per on-chain event. A row whose ticket
-              index advances is a redemption; the drop in channel balance is what the
-              relay was paid.
+              Relays announce themselves on chain. A channel sourced by an account that
+              never announced is a VPN client paying for its own sessions, so only those
+              channels are counted.
             </p>
           </div>
           <div>
             <span>02</span>
-            <h3>Active users</h3>
+            <h3>Redemptions</h3>
             <p>
-              Distinct channel sources with a redemption in the window, unioned with
-              accounts that announced in the window. Counted per day over trailing 7-
-              and 30-day windows.
+              Blokli appends a channel state row per on-chain event, and only
+              TicketRedeemed advances the ticket index. A row whose index advances is a
+              redemption; the increment is the tickets it settled.
             </p>
           </div>
           <div>
             <span>03</span>
             <h3>Data volume</h3>
             <p>
-              Redeemed wxHOPR divided by the indexed ticket price gives the expected
-              packets paid for; each carries 1,038 bytes. Volume is counted once per
-              paid relay hop.
+              Each settled ticket accounts for 650 bytes scaled by the network winning
+              probability, read from the oracle&rsquo;s update history so every redemption
+              uses the value in force at its block.
             </p>
           </div>
         </div>

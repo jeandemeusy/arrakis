@@ -303,39 +303,23 @@ main {
   margin: 8px 10px 0;
   max-width: 690px;
 }
-.relayer-list {
-  list-style: none;
-  margin: 4px 0 0;
-  padding: 0;
-}
-.relayer-list li {
+.chart-split {
   display: grid;
-  grid-template-columns: 132px 1fr 48px;
-  align-items: center;
-  gap: 14px;
-  padding: 9px 0;
-  border-bottom: 1px solid #ece8de;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  background: #e6e2d8;
 }
-.relayer-list li:last-child {
-  border-bottom: none;
+.network-stats-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  margin-top: 1px;
 }
-.relayer-list code {
-  font-size: 11px;
-  color: #55534e;
-}
-.relayer-bar {
-  display: block;
-  height: 7px;
-  background: #f0ece2;
-}
-.relayer-bar i {
-  display: block;
-  height: 100%;
-  background: var(--yellow);
-}
-.relayer-list strong {
-  font-size: 12px;
-  text-align: right;
+@media (max-width: 860px) {
+  .chart-split,
+  .network-stats-row {
+    grid-template-columns: 1fr;
+  }
 }
 .network-grid {
   display: grid;

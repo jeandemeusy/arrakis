@@ -2,6 +2,7 @@ SELECT
   COALESCE((SELECT version FROM schema_version ORDER BY id DESC LIMIT 1), 'unknown') AS schema_version,
   COALESCE((SELECT last_indexed_block FROM chain_info ORDER BY id LIMIT 1), 0) AS block_number,
   (SELECT ticket_price FROM chain_info ORDER BY id LIMIT 1) AS ticket_price,
+  (SELECT min_incoming_ticket_win_prob FROM chain_info ORDER BY id LIMIT 1) AS win_prob,
   (SELECT COUNT(*) FROM account) AS accounts,
   (SELECT COUNT(*) FROM hopr_safe_contract) AS safes,
   (SELECT COUNT(*) FROM channel_current WHERE status = 1 AND corrupted_state = FALSE) AS open_channels;

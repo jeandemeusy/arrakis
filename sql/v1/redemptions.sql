@@ -1,9 +1,14 @@
--- Ticket redemptions reconstructed from the append-only channel_state history.
+-- Ticket redemptions caused by Gnosis VPN client traffic.
 --
 -- Blokli writes one channel_state row per on-chain channel event. A TicketRedeemed
 -- event is the only event that advances ticket_index, so a row whose ticket_index
--- is greater than its predecessor's marks a redemption on that channel. The wxHOPR
--- paid out is the drop in channel balance across the same pair of rows.
+-- is greater than its predecessor's marks a redemption on that channel, and the
+-- increment is the number of tickets that redemption settled.
+--
+-- Only channels opened BY a client are counted. Nodes that relay traffic announce
+-- themselves on chain; an account that never announced is not part of the network
+-- infrastructure, so it is a VPN client paying for its own sessions. Channels
+-- sourced by announced accounts are relay-to-relay hops, not client usage.
 WITH ordered AS (
   SELECT
     cs.channel_id,
@@ -36,5 +41,7 @@ JOIN account AS destination_account ON destination_account.id = channel.destinat
 WHERE ordered.previous_ticket_index IS NOT NULL
   AND ordered.epoch = ordered.previous_epoch
   AND ordered.ticket_index > ordered.previous_ticket_index
-  AND ordered.balance < ordered.previous_balance
+  AND NOT EXISTS (
+    SELECT 1 FROM announcement WHERE announcement.account_id = channel.source
+  )
 ORDER BY ordered.published_block ASC;
