@@ -135,17 +135,21 @@ main {
 }
 .asof {
   display: grid;
-  grid-template-columns: 90px 1fr;
-  gap: 8px 18px;
+  grid-template-columns: max-content 1fr;
+  gap: 8px 24px;
+  margin: 0;
   padding-top: 18px;
   border-top: 1px solid var(--line);
   font-size: 11px;
 }
-.asof span {
+.asof dt {
   color: var(--muted);
   letter-spacing: 0.12em;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
-.asof strong {
+.asof dd {
+  margin: 0;
   font-weight: 600;
 }
 .headline-grid {
@@ -153,7 +157,7 @@ main {
   color: #f6f3ea;
   display: grid;
   grid-template-columns: 1.35fr repeat(3, 1fr);
-  margin: 0 clamp(16px, 2vw, 30px);
+  margin: 0 clamp(24px, 5vw, 76px);
 }
 .mau-card,
 .metric {
@@ -352,10 +356,27 @@ main {
   color: #17191c;
 }
 .table-card {
-  padding-bottom: 14px;
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 18px;
+}
+/* Table cards get no padding from .main-chart/.service-chart, so the chrome
+   carries its own, aligned with the first and last table cells. */
+.table-card .chart-title {
+  padding: 30px 26px 0;
+  margin-bottom: 18px;
 }
 .table-card .chart-note {
-  padding-left: 14px;
+  padding: 14px 26px 0;
+  margin: auto 0 0;
+}
+.rank-table th:first-child,
+.rank-table td:first-child {
+  padding-left: 26px;
+}
+.rank-table th:last-child,
+.rank-table td:last-child {
+  padding-right: 26px;
 }
 .table-scroll {
   max-height: 460px;

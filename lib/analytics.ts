@@ -78,13 +78,6 @@ export type HourPoint = {
   share: number;
 };
 
-export type TicketParameterPoint = {
-  date: string;
-  winProbability: number;
-  ticketPriceWei: string;
-  ticketValueWei: string;
-};
-
 export type RecentRedemption = {
   timestamp: string;
   client: string;
@@ -114,7 +107,6 @@ export type AnalyticsSnapshot = {
   deployments: Deployment[];
   dailyUsers: DailyUserPoint[];
   hourly: HourPoint[];
-  ticketParameters: TicketParameterPoint[];
   recentRedemptions: RecentRedemption[];
   ticket: {
     winProbability: number | null;
@@ -453,44 +445,6 @@ function hourlyDistribution(redemptions: Redemption[]): HourPoint[] {
   }));
 }
 
-/**
- * Ticket price, winning probability and the resulting ticket face value over time.
- *
- * Both oracles update independently, so the series carries a point at every change
- * on either timeline, each holding the values in force from that block onward.
- */
-function ticketParameterSeries(
-  probabilities: Array<[number, number]>,
-  prices: Array<[number, bigint]>,
-  clock: BlockClock,
-): TicketParameterPoint[] {
-  const blocks = [...new Set([...probabilities, ...prices].map(([block]) => block))].sort(
-    (a, b) => a - b,
-  );
-  const at = <T,>(timeline: Array<[number, T]>, block: number, fallback: T): T => {
-    let value = fallback;
-    for (const [updatedAt, entry] of timeline) {
-      if (updatedAt > block) break;
-      value = entry;
-    }
-    return value;
-  };
-
-  return blocks.map((block) => {
-    const winProbability = at(probabilities, block, 0);
-    const priceWei = at(prices, block, 0n);
-    return {
-      date: isoDate(dayIndex(clock(block))),
-      winProbability,
-      ticketPriceWei: priceWei.toString(),
-      ticketValueWei:
-        winProbability > 0
-          ? BigInt(Math.round(Number(priceWei) / winProbability)).toString()
-          : "0",
-    };
-  });
-}
-
 /** Per-client usage, ranked by the caller, over both the recent window and all time. */
 function clientUsage(redemptions: Redemption[], firstRecentDay: number): Client[] {
   const buckets = new Map<string, Client>();
@@ -703,7 +657,6 @@ async function querySnapshot(): Promise<AnalyticsSnapshot> {
     deployments,
     dailyUsers: dailyUserSeries(actorsByDay, deploymentDayOf, lastDay),
     hourly: hourlyDistribution(redemptions),
-    ticketParameters: ticketParameterSeries(timeline, priceTimeline, clock),
     recentRedemptions,
     ticket: {
       winProbability: currentProbability,
@@ -756,7 +709,6 @@ function unavailable(message: string): AnalyticsSnapshot {
     deployments: [],
     dailyUsers: [],
     hourly: [],
-    ticketParameters: [],
     recentRedemptions: [],
     ticket: { winProbability: null, priceWei: null, valueWei: null },
     totals: {

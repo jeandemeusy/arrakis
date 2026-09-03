@@ -25,6 +25,7 @@ const AXIS = { fill: "#89919b", fontSize: 11 };
 const LIGHT_AXIS = { fill: "#77756f", fontSize: 11 };
 const YELLOW = "#ffd84d";
 const INK = "#17191c";
+const PLUM = "#8d4f68";
 const DARK_TOOLTIP = {
   background: "#161a1f",
   border: "1px solid #333940",
@@ -38,8 +39,8 @@ const MEDALS = ["\u{1F947}", "\u{1F948}", "\u{1F949}"];
  * A distinct colour per relayer, however many there are.
  *
  * Stepping the hue by the golden angle keeps neighbouring ranks far apart on the
- * wheel, and alternating lightness separates hues that wrap around to similar
- * values. Rank zero starts on the brand yellow.
+ * wheel, and cycling lightness separates hues that wrap around to similar values.
+ * Rank zero starts on the brand yellow.
  */
 function relayerColor(index: number) {
   const hue = (48 + index * 137.508) % 360;
@@ -51,38 +52,15 @@ function medal(index: number) {
   return MEDALS[index] ?? String(index + 1);
 }
 
+function count(input: number | null) {
+  return input === null ? "—" : new Intl.NumberFormat("en-US").format(input);
+}
+
 function percent(share: number) {
   return new Intl.NumberFormat("en", {
     style: "percent",
     maximumFractionDigits: 1,
   }).format(share);
-}
-
-/** The ranking tables quote usage in megabytes, matching the published tables. */
-function megabytes(gigabytes: number) {
-  return new Intl.NumberFormat("en", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(gigabytes * 1000);
-}
-
-function formatTimestamp(value: string) {
-  return new Intl.DateTimeFormat("en-GB", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    timeZone: "UTC",
-    hour12: false,
-  })
-    .format(new Date(value))
-    .replace(",", "");
-}
-
-function count(input: number | null) {
-  return input === null ? "—" : new Intl.NumberFormat("en-US").format(input);
 }
 
 /** Volume arrives in gigabytes; step down so small numbers stay readable. */
@@ -91,6 +69,14 @@ function volume(input: number | null) {
   const [value, unit] =
     input >= 1 ? [input, "GB"] : input >= 0.001 ? [input * 1000, "MB"] : [input * 1e6, "KB"];
   return `${new Intl.NumberFormat("en", { maximumFractionDigits: 2 }).format(value)} ${unit}`;
+}
+
+/** The ranking tables quote usage in megabytes, matching the published tables. */
+function megabytes(gigabytes: number) {
+  return new Intl.NumberFormat("en", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(gigabytes * 1000);
 }
 
 function compactToken(input: string | null) {
@@ -127,6 +113,21 @@ function formatDay(value: unknown) {
   }).format(new Date(`${value}T00:00:00Z`));
 }
 
+function formatTimestamp(value: string) {
+  return new Intl.DateTimeFormat("en-GB", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    timeZone: "UTC",
+    hour12: false,
+  })
+    .format(new Date(value))
+    .replace(",", "");
+}
+
 function Metric({
   eyebrow,
   figure,
@@ -147,10 +148,8 @@ function Metric({
 
 export default function Dashboard({ data }: { data: DashboardData }) {
   const [scope, setScope] = useState<"weekly" | "all">("weekly");
-  const live = data.source !== "unavailable";
-  const hasUsers = data.activeUsers.length > 0;
-  const hasWeeks = data.weeks.length > 0;
   const [allRelayers, setAllRelayers] = useState(false);
+  const live = data.source !== "unavailable";
 
   // Recharts colours pie slices from a `fill` on each datum, avoiding <Cell>.
   const relayerSlices = useMemo(
@@ -162,27 +161,15 @@ export default function Dashboard({ data }: { data: DashboardData }) {
     [data.relayers],
   );
 
-  // Recharts plots numbers, so convert the wei-denominated values once here.
-  const ticketSeries = useMemo(
-    () =>
-      data.ticketParameters.map((point) => ({
-        date: point.date,
-        winProbability: point.winProbability,
-        price: Number(BigInt(point.ticketPriceWei)) / 1e18,
-        value: Number(BigInt(point.ticketValueWei)) / 1e18,
-      })),
-    [data.ticketParameters],
-  );
-
   const rankedClients = useMemo(() => {
     const ranked = [...data.clients].sort((a, b) =>
       scope === "weekly"
         ? b.gigabytes7d - a.gigabytes7d
         : b.gigabytesTotal - a.gigabytesTotal,
     );
-    return scope === "weekly"
-      ? ranked.filter((client) => client.gigabytes7d > 0)
-      : ranked.filter((client) => client.gigabytesTotal > 0);
+    return ranked.filter((client) =>
+      scope === "weekly" ? client.gigabytes7d > 0 : client.gigabytesTotal > 0,
+    );
   }, [data.clients, scope]);
 
   return (
@@ -234,20 +221,22 @@ export default function Dashboard({ data }: { data: DashboardData }) {
         </div>
         <div className="intro-copy">
           <p>
-            Gnosis VPN client usage measured directly from Gnosis Chain. Every figure below counts traffic paid by VPN clients.
+            Gnosis VPN client usage measured directly from Gnosis Chain. Every figure below
+            counts traffic paid for by VPN clients—accounts that never announced themselves
+            as relays—reconstructed from ticket redemptions indexed by Blokli.
           </p>
-          <div className="asof">
-            <span>LAST INDEXED BLOCK</span>
-            <strong>{data.blockNumber ? `#${count(data.blockNumber)}` : "—"}</strong>
-            <span>OBSERVED</span>
-            <strong>
+          <dl className="asof">
+            <dt>Last indexed block</dt>
+            <dd>{data.blockNumber ? `#${count(data.blockNumber)}` : "—"}</dd>
+            <dt>Observed</dt>
+            <dd>
               {new Date(data.observedAt).toLocaleDateString("en-GB", {
                 day: "2-digit",
                 month: "short",
                 year: "numeric",
               })}
-            </strong>
-          </div>
+            </dd>
+          </dl>
         </div>
       </section>
 
@@ -288,7 +277,9 @@ export default function Dashboard({ data }: { data: DashboardData }) {
             <h2>Unique active users</h2>
           </div>
           <p>
-            A user is a VPN client that either settled tickets on one of its channels inside the window or was first deployed inside it.
+            A user is a VPN client—an account that bound a key but never announced an
+            address, so it is not relay infrastructure—that either settled tickets on one of
+            its channels inside the window or was first deployed inside it.
           </p>
         </div>
         <div className="chart-card main-chart">
@@ -300,7 +291,7 @@ export default function Dashboard({ data }: { data: DashboardData }) {
             <div className="legend">
               <i className="actual" />
               30-day <i className="target" />
-              7-day <i className="deployments" />
+              7-day <i className="new-client" />
               New clients
             </div>
           </div>
@@ -347,20 +338,21 @@ export default function Dashboard({ data }: { data: DashboardData }) {
                 type="monotone"
                 dataKey="deployments"
                 name="New clients (30d)"
-                stroke="#4c8f7b"
+                stroke={PLUM}
                 strokeWidth={1.5}
                 strokeDasharray="4 4"
                 dot={false}
               />
             </ComposedChart>
           </ResponsiveContainer>
-          {!hasUsers && (
+          {!data.activeUsers.length && (
             <div className="empty-overlay">
               The series appears once the index database reports client redemptions.
             </div>
           )}
           <p className="chart-note">
-            Each point counts distinct clients over the preceding 30 and 7 days, so the two lines converge when activity is concentrated in a single week. New clients counts first deployments in the same 30-day window.
+            Each point counts distinct clients over the preceding 30 and 7 days, so the two
+            lines converge when activity is concentrated in a single week.
           </p>
         </div>
       </section>
@@ -372,7 +364,9 @@ export default function Dashboard({ data }: { data: DashboardData }) {
             <h2>Relayed traffic</h2>
           </div>
           <p>
-            A ticket is assumed to have been carried alongside a packet of average size of 650 bytes.
+            A ticket is issued per packet but only wins with probability p, so each
+            redemption stands in for 650 bytes divided by the winning probability in force
+            at its block.
           </p>
         </div>
         <div className="chart-split">
@@ -409,7 +403,7 @@ export default function Dashboard({ data }: { data: DashboardData }) {
                 <Bar dataKey="gigabytes" name="Data volume" fill={YELLOW} radius={[2, 2, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
-            {!hasWeeks && (
+            {!data.weeks.length && (
               <div className="empty-overlay">No client redemptions have been indexed yet.</div>
             )}
           </div>
@@ -433,17 +427,12 @@ export default function Dashboard({ data }: { data: DashboardData }) {
                   tick={LIGHT_AXIS}
                   minTickGap={24}
                 />
-                <YAxis
-                  allowDecimals={false}
-                  axisLine={false}
-                  tickLine={false}
-                  tick={LIGHT_AXIS}
-                />
+                <YAxis allowDecimals={false} axisLine={false} tickLine={false} tick={LIGHT_AXIS} />
                 <Tooltip cursor={{ fill: "#f2eee5" }} contentStyle={LIGHT_TOOLTIP} />
                 <Bar dataKey="redemptions" name="Redemptions" fill={INK} radius={[2, 2, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
-            {!hasWeeks && (
+            {!data.weeks.length && (
               <div className="empty-overlay">No client redemptions have been indexed yet.</div>
             )}
           </div>
@@ -474,7 +463,8 @@ export default function Dashboard({ data }: { data: DashboardData }) {
             <h2>Cumulative growth</h2>
           </div>
           <p>
-            The running totals behind the weekly bars—useful for reading the trajectory rather than week-to-week noise.
+            The running totals behind the weekly bars—useful for reading the trajectory
+            rather than week-to-week noise.
           </p>
         </div>
         <div className="chart-card main-chart">
@@ -542,7 +532,7 @@ export default function Dashboard({ data }: { data: DashboardData }) {
               />
             </ComposedChart>
           </ResponsiveContainer>
-          {!hasWeeks && (
+          {!data.weeks.length && (
             <div className="empty-overlay">No client redemptions have been indexed yet.</div>
           )}
         </div>
@@ -554,9 +544,7 @@ export default function Dashboard({ data }: { data: DashboardData }) {
             <span className="section-index">04</span>
             <h2>Daily activity</h2>
           </div>
-          <p>
-            Who showed up each day, and when during the day the network carries traffic.
-          </p>
+          <p>Who showed up each day, and when during the day the network carries traffic.</p>
         </div>
         <div className="chart-split">
           <div className="chart-card service-chart">
@@ -585,19 +573,14 @@ export default function Dashboard({ data }: { data: DashboardData }) {
                   minTickGap={40}
                   tickFormatter={formatDay}
                 />
-                <YAxis
-                  allowDecimals={false}
-                  axisLine={false}
-                  tickLine={false}
-                  tick={LIGHT_AXIS}
-                />
+                <YAxis allowDecimals={false} axisLine={false} tickLine={false} tick={LIGHT_AXIS} />
                 <Tooltip
                   cursor={{ fill: "#f2eee5" }}
                   labelFormatter={formatDay}
                   contentStyle={LIGHT_TOOLTIP}
                 />
                 <Bar dataKey="returning" name="Returning" stackId="users" fill={YELLOW} />
-                <Bar dataKey="newClients" name="New" stackId="users" fill="#8d4f68" />
+                <Bar dataKey="newClients" name="New" stackId="users" fill={PLUM} />
               </BarChart>
             </ResponsiveContainer>
             {!data.dailyUsers.length && (
@@ -612,10 +595,7 @@ export default function Dashboard({ data }: { data: DashboardData }) {
               </div>
             </div>
             <ResponsiveContainer width="100%" height={250}>
-              <BarChart
-                data={data.hourly}
-                margin={{ top: 20, right: 10, left: -18, bottom: 0 }}
-              >
+              <BarChart data={data.hourly} margin={{ top: 20, right: 10, left: -18, bottom: 0 }}>
                 <CartesianGrid vertical={false} stroke="#e6e2d8" />
                 <XAxis
                   dataKey="hour"
@@ -635,7 +615,7 @@ export default function Dashboard({ data }: { data: DashboardData }) {
                   contentStyle={LIGHT_TOOLTIP}
                   formatter={(input: unknown) => percent(Number(input))}
                 />
-                <Bar dataKey="share" name="Share of volume" fill="#8d4f68" radius={[2, 2, 0, 0]} />
+                <Bar dataKey="share" name="Share of volume" fill={PLUM} radius={[2, 2, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
             {!data.hourly.length && (
@@ -656,9 +636,8 @@ export default function Dashboard({ data }: { data: DashboardData }) {
             <h2>Redemptions by relayer</h2>
           </div>
           <p>
-            Which relays carried client traffic over the last thirty days, and how the
-            load is shared. Every relay is charted individually; the key lists the
-            busiest first.
+            Which relays carried client traffic over the last thirty days, and how the load
+            is shared. Every relay is charted individually; the key lists the busiest first.
           </p>
         </div>
         <div className="chart-split">
@@ -771,9 +750,7 @@ export default function Dashboard({ data }: { data: DashboardData }) {
               aria-expanded={allRelayers}
               onClick={() => setAllRelayers((open) => !open)}
             >
-              {allRelayers
-                ? "Show fewer"
-                : `Show all ${relayerSlices.length} relayers`}
+              {allRelayers ? "Show fewer" : `Show all ${relayerSlices.length} relayers`}
             </button>
           )}
         </div>
@@ -785,85 +762,24 @@ export default function Dashboard({ data }: { data: DashboardData }) {
             <span className="section-index">06</span>
             <h2>Ticket parameters</h2>
           </div>
-          <p>
-            The oracle values that convert redemptions into traffic. Ticket value is the
-            price divided by the winning probability—what one winning ticket pays out.
-          </p>
+          <p>The oracle values that convert redemptions into traffic, as they stand now.</p>
         </div>
-        <div className="network-grid">
-          <div className="chart-card service-chart">
-            <div className="chart-title">
-              <div>
-                <span>ORACLE UPDATES</span>
-                <h3>Price and winning probability</h3>
-              </div>
-            </div>
-            <ResponsiveContainer width="100%" height={260}>
-              <ComposedChart
-                data={ticketSeries}
-                margin={{ top: 20, right: 8, left: -18, bottom: 0 }}
-              >
-                <CartesianGrid vertical={false} stroke="#e6e2d8" />
-                <XAxis
-                  dataKey="date"
-                  axisLine={false}
-                  tickLine={false}
-                  tick={LIGHT_AXIS}
-                  minTickGap={40}
-                  tickFormatter={formatDay}
-                />
-                <YAxis yAxisId="left" axisLine={false} tickLine={false} tick={LIGHT_AXIS} />
-                <YAxis
-                  yAxisId="right"
-                  orientation="right"
-                  axisLine={false}
-                  tickLine={false}
-                  tick={LIGHT_AXIS}
-                />
-                <Tooltip labelFormatter={formatDay} contentStyle={LIGHT_TOOLTIP} />
-                <Line
-                  yAxisId="left"
-                  type="stepAfter"
-                  dataKey="value"
-                  name="Ticket value (wxHOPR)"
-                  stroke={INK}
-                  strokeWidth={2}
-                  dot={false}
-                />
-                <Line
-                  yAxisId="right"
-                  type="stepAfter"
-                  dataKey="winProbability"
-                  name="Winning probability"
-                  stroke="#8d4f68"
-                  strokeWidth={2}
-                  dot={false}
-                />
-              </ComposedChart>
-            </ResponsiveContainer>
-            {!ticketSeries.length && (
-              <div className="empty-overlay">
-                Oracle history is unavailable from this index database.
-              </div>
-            )}
-          </div>
-          <div className="network-stats">
-            <Metric
-              eyebrow="WINNING PROBABILITY"
-              figure={probability(data.ticket.winProbability)}
-              note="Current network minimum"
-            />
-            <Metric
-              eyebrow="TICKET PRICE"
-              figure={token(data.ticket.priceWei)}
-              note="Cost of relaying one packet"
-            />
-            <Metric
-              eyebrow="TICKET VALUE"
-              figure={token(data.ticket.valueWei, 4)}
-              note="Payout of one winning ticket"
-            />
-          </div>
+        <div className="network-stats network-stats-row">
+          <Metric
+            eyebrow="WINNING PROBABILITY"
+            figure={probability(data.ticket.winProbability)}
+            note="Current network minimum"
+          />
+          <Metric
+            eyebrow="TICKET PRICE"
+            figure={token(data.ticket.priceWei)}
+            note="Cost of relaying one packet, one hop"
+          />
+          <Metric
+            eyebrow="TICKET VALUE"
+            figure={token(data.ticket.valueWei, 4)}
+            note="Price ÷ probability, for one remaining hop"
+          />
         </div>
       </section>
 
@@ -881,6 +797,12 @@ export default function Dashboard({ data }: { data: DashboardData }) {
         <div className="chart-split">
           <div className="chart-card table-card">
             <div className="chart-title">
+              <div>
+                <span>USAGE PER CLIENT</span>
+                <h3>
+                  {scope === "weekly" ? "Weekly most active users" : "Most active users"}
+                </h3>
+              </div>
               <div className="tab-switch" role="tablist" aria-label="Ranking window">
                 <button
                   type="button"
@@ -889,7 +811,7 @@ export default function Dashboard({ data }: { data: DashboardData }) {
                   className={scope === "weekly" ? "active" : ""}
                   onClick={() => setScope("weekly")}
                 >
-                  Weekly most active users
+                  Weekly
                 </button>
                 <button
                   type="button"
@@ -898,58 +820,60 @@ export default function Dashboard({ data }: { data: DashboardData }) {
                   className={scope === "all" ? "active" : ""}
                   onClick={() => setScope("all")}
                 >
-                  Most active users
+                  All time
                 </button>
               </div>
-              <div className="axis-badge">{data.clientCount} clients</div>
             </div>
             <div className="table-scroll">
               <table className="rank-table">
                 <colgroup>
                   <col className="rank" />
-                <col />
-                <col className="count" />
-                <col className="usage" />
-              </colgroup>
-              <thead>
-                <tr>
-                  <th scope="col">rank</th>
-                  <th scope="col">client</th>
-                  <th scope="col" className="numeric">
-                    redemptions
-                  </th>
-                  <th scope="col" className="numeric">
-                    usage (MB)
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {rankedClients.map((client, index) => (
-                  <tr key={client.address}>
-                    <td>{medal(index)}</td>
-                    <td>
-                      <code>{client.address}</code>
-                    </td>
-                    <td className="numeric">
-                      {count(
-                        scope === "weekly" ? client.redemptions7d : client.redemptionsTotal,
-                      )}
-                    </td>
-                    <td className="numeric">
-                      {megabytes(
-                        scope === "weekly" ? client.gigabytes7d : client.gigabytesTotal,
-                      )}
-                    </td>
+                  <col />
+                  <col className="count" />
+                  <col className="usage" />
+                </colgroup>
+                <thead>
+                  <tr>
+                    <th scope="col">rank</th>
+                    <th scope="col">client</th>
+                    <th scope="col" className="numeric">
+                      redemptions
+                    </th>
+                    <th scope="col" className="numeric">
+                      usage (MB)
+                    </th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {rankedClients.map((client, index) => (
+                    <tr key={client.address}>
+                      <td>{medal(index)}</td>
+                      <td>
+                        <code>{client.address}</code>
+                      </td>
+                      <td className="numeric">
+                        {count(
+                          scope === "weekly" ? client.redemptions7d : client.redemptionsTotal,
+                        )}
+                      </td>
+                      <td className="numeric">
+                        {megabytes(
+                          scope === "weekly" ? client.gigabytes7d : client.gigabytesTotal,
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
             {!rankedClients.length && (
               <div className="empty-overlay">
                 No client usage has been indexed for this window.
               </div>
             )}
+            <p className="chart-note">
+              Showing {rankedClients.length} of {data.clientCount} clients with usage.
+            </p>
           </div>
           <div className="chart-card table-card">
             <div className="chart-title">
@@ -1010,9 +934,7 @@ export default function Dashboard({ data }: { data: DashboardData }) {
               <span>LATEST REDEMPTIONS PER CHANNEL</span>
               <h3>Redemption feed</h3>
             </div>
-            <div className="axis-badge">
-              {count(data.totals.redemptionsTotal)} total
-            </div>
+            <div className="axis-badge">{count(data.totals.redemptionsTotal)} total</div>
           </div>
           <div className="table-scroll">
             <table className="rank-table">
@@ -1065,21 +987,27 @@ export default function Dashboard({ data }: { data: DashboardData }) {
             <span>01</span>
             <h3>Client traffic only</h3>
             <p>
-              Relays announce themselves on chain. A channel sourced by an account that never announced is a VPN client paying for its own sessions, so only those channels are counted.
+              Relays announce themselves on chain. A channel sourced by an account that never
+              announced is a VPN client paying for its own sessions, so only those channels
+              are counted.
             </p>
           </div>
           <div>
             <span>02</span>
             <h3>Redemptions</h3>
             <p>
-              Blokli appends a channel state row per on-chain event, and only TicketRedeemed advances the ticket index. A row whose index advances is a redemption; the increment is the tickets it settled.
+              Blokli appends a channel state row per on-chain event, and only TicketRedeemed
+              advances the ticket index. A row whose index advances is a redemption; the
+              increment is the tickets it settled.
             </p>
           </div>
           <div>
             <span>03</span>
             <h3>Data volume</h3>
             <p>
-              Each redemption accounts for 650 / (2<sup>30</sup> &times; p) GB, where p is the winning probability from the oracle&rsquo;s update history at that block. Redemptions predating the first update are excluded.
+              Each redemption accounts for 650 / (2<sup>30</sup> &times; p) GB, where p is the
+              winning probability from the oracle&rsquo;s update history at that block.
+              Redemptions predating the first update are excluded.
             </p>
           </div>
         </div>
