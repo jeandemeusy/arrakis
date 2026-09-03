@@ -22,24 +22,26 @@ import {
 } from "lucide-react";
 
 export type DashboardData = {
-  source: "live" | "reference";
-  endpoint: string;
+  source: "live" | "unavailable";
+  axisMode: "time" | "block";
   observedAt: string;
-  network: string;
+  blokliUrl: string | null;
+  schemaVersion: string | null;
   blockNumber: number;
-  finality: number;
   accounts: number | null;
   openChannels: number | null;
   channelBalance: string | null;
   safes: number | null;
   safeBalance: string | null;
   exits: number | null;
-  exitActivity: Array<{
-    month: string;
-    registrations: number;
-    updates: number;
-    order: number;
+  activity: Array<{
+    key: string;
+    label: string;
+    activeParticipants: number;
+    redemptions: number;
+    redeemedWei: string;
   }>;
+  warning: string | null;
 };
 
 const adoption = [
@@ -60,9 +62,7 @@ function value(input: number | null) {
 
 function compactToken(input: string | null) {
   if (!input) return "—";
-  const match = input.match(/[\d,.]+/);
-  if (!match) return input;
-  const number = Number(match[0].replaceAll(",", ""));
+  const number = Number(BigInt(input) / 1_000_000_000_000_000n) / 1_000;
   if (!Number.isFinite(number)) return input;
   return `${new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(number)} wxHOPR`;
 }
@@ -87,9 +87,18 @@ function Metric({
 
 export default function Dashboard({ data }: { data: DashboardData }) {
   const live = data.source === "live";
-  const exitChart = data.exitActivity.length
-    ? data.exitActivity
-    : [{ month: "Waiting", registrations: 0, updates: 0, order: 0 }];
+  const activityChart = data.activity.length
+    ? data.activity
+    : [{ key: "waiting", label: "Waiting", activeParticipants: 0, redemptions: 0, redeemedWei: "0" }];
+  const provenance = data.blokliUrl
+    ? (() => {
+        try {
+          return new URL(data.blokliUrl).host;
+        } catch {
+          return data.blokliUrl;
+        }
+      })()
+    : "Configured index database";
 
   return (
     <main>
@@ -124,10 +133,10 @@ export default function Dashboard({ data }: { data: DashboardData }) {
       <section className="intro" id="top">
         <div>
           <div className="status-line">
-            <span className={live ? "live-dot" : "reference-dot"} />
+            <span className={live ? "live-dot" : "unavailable-dot"} />
             {live
-              ? "LIVE · FINALIZED ON-CHAIN DATA"
-              : "REFERENCE VIEW · CONNECTING TO BLOKLI"}
+              ? "LIVE · BLOKLI INDEX DATA"
+              : "DATA SOURCE UNAVAILABLE"}
           </div>
           <h1>
             Private access.
@@ -143,7 +152,7 @@ export default function Dashboard({ data }: { data: DashboardData }) {
           </p>
           <div className="asof">
             <span>NETWORK</span>
-            <strong>{data.network}</strong>
+            <strong>{provenance}</strong>
             <span>OBSERVED</span>
             <strong>
               {new Date(data.observedAt).toLocaleDateString("en-GB", {
@@ -176,8 +185,8 @@ export default function Dashboard({ data }: { data: DashboardData }) {
           figure={value(data.accounts)}
           note={
             live
-              ? "Unique identities indexed"
-              : "Available when Blokli responds"
+              ? "Unique on-chain identities indexed"
+              : "Available when the index database responds"
           }
         />
         <Metric
@@ -186,7 +195,7 @@ export default function Dashboard({ data }: { data: DashboardData }) {
           note={
             live
               ? compactToken(data.channelBalance) + " allocated"
-              : "Available when Blokli responds"
+              : "Available when the index database responds"
           }
         />
         <Metric
@@ -195,7 +204,7 @@ export default function Dashboard({ data }: { data: DashboardData }) {
           note={
             live
               ? "gvpn:exit registry entries"
-              : "Available when Blokli responds"
+              : "Available when the index database responds"
           }
         />
       </section>
@@ -281,9 +290,9 @@ export default function Dashboard({ data }: { data: DashboardData }) {
               </AreaChart>
             </ResponsiveContainer>
             <p className="chart-note">
-              The 100+ figure is the latest published program update. Blokli
-              powers the infrastructure metrics; exact rolling MAU requires a
-              dedicated historical usage resolver.
+              The 100+ figure is the latest published program update. It is
+              deliberately separated from on-chain participation observed by
+              Blokli.
             </p>
           </div>
           <aside className="milestones">
@@ -315,27 +324,30 @@ export default function Dashboard({ data }: { data: DashboardData }) {
             <h2>Network capacity</h2>
           </div>
           <p>
-            Capital and service availability underpin the user story. These
-            figures come directly from Blokli’s indexed state.
+            Capital, services and ticket-redemption activity underpin the user
+            story. These figures are calculated from Blokli’s index database.
           </p>
         </div>
         <div className="network-grid">
           <div className="chart-card service-chart">
             <div className="chart-title">
               <div>
-                <span>EXIT REGISTRY ACTIVITY</span>
-                <h3>Service registrations & updates</h3>
+                <span>ON-CHAIN ACTIVITY</span>
+                <h3>Ticket redemptions & active participants</h3>
+              </div>
+              <div className="axis-badge">
+                {data.axisMode === "time" ? "TIME · RPC RESOLVED" : "BLOCK AXIS"}
               </div>
             </div>
             <ResponsiveContainer width="100%" height={250}>
               <BarChart
-                data={exitChart}
+                data={activityChart}
                 barGap={3}
                 margin={{ top: 20, right: 10, left: -28, bottom: 0 }}
               >
                 <CartesianGrid vertical={false} stroke="#e6e2d8" />
                 <XAxis
-                  dataKey="month"
+                  dataKey="label"
                   axisLine={false}
                   tickLine={false}
                   tick={{ fill: "#77756f", fontSize: 11 }}
@@ -354,19 +366,21 @@ export default function Dashboard({ data }: { data: DashboardData }) {
                   }}
                 />
                 <Bar
-                  dataKey="registrations"
+                  dataKey="activeParticipants"
+                  name="Active participants"
                   fill="#17191c"
                   radius={[2, 2, 0, 0]}
                 />
-                <Bar dataKey="updates" fill="#ffd84d" radius={[2, 2, 0, 0]} />
+                <Bar dataKey="redemptions" name="Redemptions" fill="#ffd84d" radius={[2, 2, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
             {!live && (
               <div className="empty-overlay">
-                Live series appears when the configured Blokli endpoint is
-                reachable.
+                Live series appears when the configured Blokli index database
+                is reachable.
               </div>
             )}
+            {data.warning && <p className="data-warning">{data.warning}</p>}
           </div>
           <div className="network-stats">
             <Metric
@@ -383,9 +397,9 @@ export default function Dashboard({ data }: { data: DashboardData }) {
               eyebrow="FINALIZED BLOCK"
               figure={data.blockNumber ? `#${value(data.blockNumber)}` : "—"}
               note={
-                data.finality
-                  ? `${data.finality} block confirmations`
-                  : "Finality-aware indexing"
+                data.schemaVersion
+                  ? `Blokli schema ${data.schemaVersion}`
+                  : "Latest indexed block"
               }
             />
           </div>
@@ -411,25 +425,25 @@ export default function Dashboard({ data }: { data: DashboardData }) {
             <span>02</span>
             <h3>Finality aware</h3>
             <p>
-              Figures follow Blokli’s configured confirmation threshold and
-              reorg handling.
+              Versioned SQL reads the same current-state views maintained by
+              Blokli and exposes the latest indexed block.
             </p>
           </div>
           <div>
             <span>03</span>
             <h3>Definition first</h3>
             <p>
-              Reported users and on-chain infrastructure metrics are kept
-              visibly distinct.
+              Block timestamps are resolved through the configured RPC and
+              cached. Without an RPC, history remains block-number based.
             </p>
           </div>
         </div>
         <div className="integrity">
           <ShieldCheck size={16} />
           <span>
-            {live ? "LIVE BLOKLI CONNECTION" : "BLOKLI CONNECTION PENDING"}
+            {live ? "POSTGRESQL → BACKEND → PUBLIC DASHBOARD" : "DATABASE CONNECTION PENDING"}
           </span>
-          <code>{data.endpoint.replace(/^https?:\/\//, "")}</code>
+          <code>{provenance}</code>
         </div>
       </section>
 
