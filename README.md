@@ -95,6 +95,11 @@ so a new client registers on deployment rather than only once its first tickets
 are redeemed. Windows are inclusive of both endpoints: 7 days is `day-6..day`,
 30 days is `day-30..day`.
 
+**Ticket parameters.** Ticket price and winning probability are both oracle values
+that Blokli stores only at their latest setting, so each timeline is recovered by
+decoding the oracle's own logs — `TicketPriceUpdated` and `WinProbUpdated` — from
+the raw `log` table. Ticket value is the price divided by the winning probability.
+
 **Data volume.** A ticket is issued per packet but only wins with probability `p`,
 so a redeemed ticket stands in for `1/p` packets of 650 bytes. Each redemption
 therefore accounts for `650 / (2^30 * p)` GB, with `p` the winning probability in

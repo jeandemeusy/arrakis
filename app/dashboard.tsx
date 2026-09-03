@@ -17,7 +17,6 @@ import {
 } from "recharts";
 import { Database, ExternalLink, Radio, ShieldCheck, Users } from "lucide-react";
 
-import { OTHER_RELAYERS } from "@/lib/constants";
 import type { AnalyticsSnapshot } from "@/lib/analytics";
 
 export type DashboardData = AnalyticsSnapshot;
@@ -32,21 +31,20 @@ const DARK_TOOLTIP = {
   borderRadius: 2,
 };
 const LIGHT_TOOLTIP = { border: "1px solid #d9d5cb", borderRadius: 2 };
-const SLICE_COLORS = [
-  "#ffd84d",
-  "#17191c",
-  "#4c8f7b",
-  "#c98b3a",
-  "#7a7fa6",
-  "#b25a4d",
-  "#9aa0a6",
-];
+const LEGEND_PREVIEW = 5;
 const MEDALS = ["\u{1F947}", "\u{1F948}", "\u{1F949}"];
 
-const OTHER_COLOR = "#c3bfb4";
-
-function relayerColor(address: string, index: number) {
-  return address === OTHER_RELAYERS ? OTHER_COLOR : SLICE_COLORS[index % SLICE_COLORS.length];
+/**
+ * A distinct colour per relayer, however many there are.
+ *
+ * Stepping the hue by the golden angle keeps neighbouring ranks far apart on the
+ * wheel, and alternating lightness separates hues that wrap around to similar
+ * values. Rank zero starts on the brand yellow.
+ */
+function relayerColor(index: number) {
+  const hue = (48 + index * 137.508) % 360;
+  const lightness = [58, 42, 68][index % 3];
+  return `hsl(${hue.toFixed(1)} 52% ${lightness}%)`;
 }
 
 function medal(index: number) {
@@ -102,6 +100,19 @@ function compactToken(input: string | null) {
   return `${new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(number)} wxHOPR`;
 }
 
+/** wxHOPR has 18 decimals; these amounts are small, so show significant digits. */
+function token(wei: string | null, digits = 6) {
+  if (wei === null) return "—";
+  const value = Number(BigInt(wei)) / 1e18;
+  if (!Number.isFinite(value)) return "—";
+  return `${new Intl.NumberFormat("en", { maximumSignificantDigits: digits }).format(value)} wxHOPR`;
+}
+
+function probability(value: number | null) {
+  if (value === null) return "—";
+  return new Intl.NumberFormat("en", { maximumSignificantDigits: 2 }).format(value);
+}
+
 function shortAddress(address: string) {
   return `${address.slice(0, 8)}…${address.slice(-6)}`;
 }
@@ -139,18 +150,28 @@ export default function Dashboard({ data }: { data: DashboardData }) {
   const live = data.source !== "unavailable";
   const hasUsers = data.activeUsers.length > 0;
   const hasWeeks = data.weeks.length > 0;
-  const relayerStackSize = data.relayerSeries.filter(
-    (relayer) => relayer !== OTHER_RELAYERS,
-  ).length;
+  const [allRelayers, setAllRelayers] = useState(false);
 
   // Recharts colours pie slices from a `fill` on each datum, avoiding <Cell>.
   const relayerSlices = useMemo(
     () =>
       data.relayers.map((relayer, index) => ({
         ...relayer,
-        fill: relayerColor(relayer.address, index),
+        fill: relayerColor(index),
       })),
     [data.relayers],
+  );
+
+  // Recharts plots numbers, so convert the wei-denominated values once here.
+  const ticketSeries = useMemo(
+    () =>
+      data.ticketParameters.map((point) => ({
+        date: point.date,
+        winProbability: point.winProbability,
+        price: Number(BigInt(point.ticketPriceWei)) / 1e18,
+        value: Number(BigInt(point.ticketValueWei)) / 1e18,
+      })),
+    [data.ticketParameters],
   );
 
   const rankedClients = useMemo(() => {
@@ -179,9 +200,10 @@ export default function Dashboard({ data }: { data: DashboardData }) {
           <a href="#users">Active users</a>
           <a href="#usage">Usage</a>
           <a href="#growth">Growth</a>
+          <a href="#activity">Activity</a>
           <a href="#relayers">Relayers</a>
+          <a href="#ticket">Tickets</a>
           <a href="#clients">Clients</a>
-          <a href="#deployments">Deployments</a>
           <a href="#methodology">Methodology</a>
         </nav>
         <a
@@ -526,16 +548,117 @@ export default function Dashboard({ data }: { data: DashboardData }) {
         </div>
       </section>
 
-      <section className="section" id="relayers">
+      <section className="section" id="activity">
         <div className="section-heading">
           <div>
             <span className="section-index">04</span>
+            <h2>Daily activity</h2>
+          </div>
+          <p>
+            Who showed up each day, and when during the day the network carries traffic.
+          </p>
+        </div>
+        <div className="chart-split">
+          <div className="chart-card service-chart">
+            <div className="chart-title">
+              <div>
+                <span>LAST 30 DAYS</span>
+                <h3>Daily users</h3>
+              </div>
+              <div className="legend">
+                <i className="actual" />
+                Returning <i className="new-client" />
+                New
+              </div>
+            </div>
+            <ResponsiveContainer width="100%" height={250}>
+              <BarChart
+                data={data.dailyUsers}
+                margin={{ top: 20, right: 10, left: -24, bottom: 0 }}
+              >
+                <CartesianGrid vertical={false} stroke="#e6e2d8" />
+                <XAxis
+                  dataKey="date"
+                  axisLine={false}
+                  tickLine={false}
+                  tick={LIGHT_AXIS}
+                  minTickGap={40}
+                  tickFormatter={formatDay}
+                />
+                <YAxis
+                  allowDecimals={false}
+                  axisLine={false}
+                  tickLine={false}
+                  tick={LIGHT_AXIS}
+                />
+                <Tooltip
+                  cursor={{ fill: "#f2eee5" }}
+                  labelFormatter={formatDay}
+                  contentStyle={LIGHT_TOOLTIP}
+                />
+                <Bar dataKey="returning" name="Returning" stackId="users" fill={YELLOW} />
+                <Bar dataKey="newClients" name="New" stackId="users" fill="#8d4f68" />
+              </BarChart>
+            </ResponsiveContainer>
+            {!data.dailyUsers.length && (
+              <div className="empty-overlay">No client activity in the last thirty days.</div>
+            )}
+          </div>
+          <div className="chart-card service-chart">
+            <div className="chart-title">
+              <div>
+                <span>ALL INDEXED HISTORY</span>
+                <h3>Usage distribution over the day</h3>
+              </div>
+            </div>
+            <ResponsiveContainer width="100%" height={250}>
+              <BarChart
+                data={data.hourly}
+                margin={{ top: 20, right: 10, left: -18, bottom: 0 }}
+              >
+                <CartesianGrid vertical={false} stroke="#e6e2d8" />
+                <XAxis
+                  dataKey="hour"
+                  axisLine={false}
+                  tickLine={false}
+                  tick={LIGHT_AXIS}
+                  minTickGap={24}
+                />
+                <YAxis
+                  axisLine={false}
+                  tickLine={false}
+                  tick={LIGHT_AXIS}
+                  tickFormatter={(input: unknown) => percent(Number(input))}
+                />
+                <Tooltip
+                  cursor={{ fill: "#f2eee5" }}
+                  contentStyle={LIGHT_TOOLTIP}
+                  formatter={(input: unknown) => percent(Number(input))}
+                />
+                <Bar dataKey="share" name="Share of volume" fill="#8d4f68" radius={[2, 2, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+            {!data.hourly.length && (
+              <div className="empty-overlay">No volume has been indexed yet.</div>
+            )}
+            <p className="chart-note">
+              Share of relayed volume by hour, UTC. Block timestamps are{" "}
+              {data.timebase === "rpc" ? "RPC resolved" : "estimated from block height"}.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section className="section" id="relayers">
+        <div className="section-heading">
+          <div>
+            <span className="section-index">05</span>
             <h2>Redemptions by relayer</h2>
           </div>
           <p>
             Which relays carried client traffic over the last thirty days, and how the
-            load is shared. Both charts and the key below cover the same top{" "}
-            {relayerStackSize} relays; every other relay is grouped as {OTHER_RELAYERS}.
+            load is shared. Every relay is charted individually; the key lists the
+            busiest first.
           </p>
         </div>
         <div className="chart-split">
@@ -604,9 +727,7 @@ export default function Dashboard({ data }: { data: DashboardData }) {
                   formatter={(input: unknown, name: unknown) =>
                     [
                       volume(Number(input)),
-                      typeof name === "string" && name !== OTHER_RELAYERS
-                        ? shortAddress(name)
-                        : OTHER_RELAYERS,
+                      typeof name === "string" ? shortAddress(name) : "",
                     ] as [string, string]
                   }
                 />
@@ -615,7 +736,7 @@ export default function Dashboard({ data }: { data: DashboardData }) {
                     key={relayer}
                     dataKey={relayer}
                     stackId="relayers"
-                    fill={relayerColor(relayer, index)}
+                    fill={relayerColor(index)}
                     isAnimationActive={false}
                   />
                 ))}
@@ -631,113 +752,266 @@ export default function Dashboard({ data }: { data: DashboardData }) {
             </p>
           </div>
         </div>
-        <ol className="relayer-key">
-          {relayerSlices.map((relayer) => (
-            <li key={relayer.address}>
-              <i style={{ background: relayer.fill }} />
-              <code>
-                {relayer.address === OTHER_RELAYERS
-                  ? `${OTHER_RELAYERS} relays`
-                  : shortAddress(relayer.address)}
-              </code>
-              <strong>{percent(relayer.share)}</strong>
-            </li>
-          ))}
-        </ol>
+        <div className="relayer-legend">
+          <ol className="relayer-key">
+            {(allRelayers ? relayerSlices : relayerSlices.slice(0, LEGEND_PREVIEW)).map(
+              (relayer) => (
+                <li key={relayer.address}>
+                  <i style={{ background: relayer.fill }} />
+                  <code>{shortAddress(relayer.address)}</code>
+                  <strong>{percent(relayer.share)}</strong>
+                </li>
+              ),
+            )}
+          </ol>
+          {relayerSlices.length > LEGEND_PREVIEW && (
+            <button
+              type="button"
+              className="legend-toggle"
+              aria-expanded={allRelayers}
+              onClick={() => setAllRelayers((open) => !open)}
+            >
+              {allRelayers
+                ? "Show fewer"
+                : `Show all ${relayerSlices.length} relayers`}
+            </button>
+          )}
+        </div>
+      </section>
+
+      <section className="section" id="ticket">
+        <div className="section-heading">
+          <div>
+            <span className="section-index">06</span>
+            <h2>Ticket parameters</h2>
+          </div>
+          <p>
+            The oracle values that convert redemptions into traffic. Ticket value is the
+            price divided by the winning probability—what one winning ticket pays out.
+          </p>
+        </div>
+        <div className="network-grid">
+          <div className="chart-card service-chart">
+            <div className="chart-title">
+              <div>
+                <span>ORACLE UPDATES</span>
+                <h3>Price and winning probability</h3>
+              </div>
+            </div>
+            <ResponsiveContainer width="100%" height={260}>
+              <ComposedChart
+                data={ticketSeries}
+                margin={{ top: 20, right: 8, left: -18, bottom: 0 }}
+              >
+                <CartesianGrid vertical={false} stroke="#e6e2d8" />
+                <XAxis
+                  dataKey="date"
+                  axisLine={false}
+                  tickLine={false}
+                  tick={LIGHT_AXIS}
+                  minTickGap={40}
+                  tickFormatter={formatDay}
+                />
+                <YAxis yAxisId="left" axisLine={false} tickLine={false} tick={LIGHT_AXIS} />
+                <YAxis
+                  yAxisId="right"
+                  orientation="right"
+                  axisLine={false}
+                  tickLine={false}
+                  tick={LIGHT_AXIS}
+                />
+                <Tooltip labelFormatter={formatDay} contentStyle={LIGHT_TOOLTIP} />
+                <Line
+                  yAxisId="left"
+                  type="stepAfter"
+                  dataKey="value"
+                  name="Ticket value (wxHOPR)"
+                  stroke={INK}
+                  strokeWidth={2}
+                  dot={false}
+                />
+                <Line
+                  yAxisId="right"
+                  type="stepAfter"
+                  dataKey="winProbability"
+                  name="Winning probability"
+                  stroke="#8d4f68"
+                  strokeWidth={2}
+                  dot={false}
+                />
+              </ComposedChart>
+            </ResponsiveContainer>
+            {!ticketSeries.length && (
+              <div className="empty-overlay">
+                Oracle history is unavailable from this index database.
+              </div>
+            )}
+          </div>
+          <div className="network-stats">
+            <Metric
+              eyebrow="WINNING PROBABILITY"
+              figure={probability(data.ticket.winProbability)}
+              note="Current network minimum"
+            />
+            <Metric
+              eyebrow="TICKET PRICE"
+              figure={token(data.ticket.priceWei)}
+              note="Cost of relaying one packet"
+            />
+            <Metric
+              eyebrow="TICKET VALUE"
+              figure={token(data.ticket.valueWei, 4)}
+              note="Payout of one winning ticket"
+            />
+          </div>
+        </div>
       </section>
 
       <section className="section" id="clients">
         <div className="section-heading">
           <div>
-            <span className="section-index">05</span>
-            <h2>Most active users</h2>
+            <span className="section-index">07</span>
+            <h2>Clients</h2>
           </div>
           <p>
-            Volume is only an estimation based on the redemptions seen on chain.
+            Who used the network and when each client first appeared. Volume is only an
+            estimation based on the redemptions seen on chain.
           </p>
         </div>
-        <div className="chart-card table-card">
-          <div className="chart-title">
-            <div className="tab-switch" role="tablist" aria-label="Ranking window">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={scope === "weekly"}
-                className={scope === "weekly" ? "active" : ""}
-                onClick={() => setScope("weekly")}
-              >
-                Weekly most active users
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={scope === "all"}
-                className={scope === "all" ? "active" : ""}
-                onClick={() => setScope("all")}
-              >
-                Most active users
-              </button>
+        <div className="chart-split">
+          <div className="chart-card table-card">
+            <div className="chart-title">
+              <div className="tab-switch" role="tablist" aria-label="Ranking window">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={scope === "weekly"}
+                  className={scope === "weekly" ? "active" : ""}
+                  onClick={() => setScope("weekly")}
+                >
+                  Weekly most active users
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={scope === "all"}
+                  className={scope === "all" ? "active" : ""}
+                  onClick={() => setScope("all")}
+                >
+                  Most active users
+                </button>
+              </div>
+              <div className="axis-badge">{data.clientCount} clients</div>
             </div>
-            <div className="axis-badge">{data.clientCount} clients</div>
-          </div>
-          <table className="rank-table">
-            <colgroup>
-              <col className="rank" />
-              <col />
-              <col className="usage" />
-            </colgroup>
-            <thead>
-              <tr>
-                <th scope="col">rank</th>
-                <th scope="col">client</th>
-                <th scope="col" className="numeric">
-                  usage (MB)
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {rankedClients.map((client, index) => (
-                <tr key={client.address}>
-                  <td>{medal(index)}</td>
-                  <td>
-                    <code>{client.address}</code>
-                  </td>
-                  <td className="numeric">
-                    {megabytes(
-                      scope === "weekly" ? client.gigabytes7d : client.gigabytesTotal,
-                    )}
-                  </td>
+            <div className="table-scroll">
+              <table className="rank-table">
+                <colgroup>
+                  <col className="rank" />
+                <col />
+                <col className="count" />
+                <col className="usage" />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th scope="col">rank</th>
+                  <th scope="col">client</th>
+                  <th scope="col" className="numeric">
+                    redemptions
+                  </th>
+                  <th scope="col" className="numeric">
+                    usage (MB)
+                  </th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-          {!rankedClients.length && (
-            <div className="empty-overlay">
-              No client usage has been indexed for this window.
+              </thead>
+              <tbody>
+                {rankedClients.map((client, index) => (
+                  <tr key={client.address}>
+                    <td>{medal(index)}</td>
+                    <td>
+                      <code>{client.address}</code>
+                    </td>
+                    <td className="numeric">
+                      {count(
+                        scope === "weekly" ? client.redemptions7d : client.redemptionsTotal,
+                      )}
+                    </td>
+                    <td className="numeric">
+                      {megabytes(
+                        scope === "weekly" ? client.gigabytes7d : client.gigabytesTotal,
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
             </div>
-          )}
+            {!rankedClients.length && (
+              <div className="empty-overlay">
+                No client usage has been indexed for this window.
+              </div>
+            )}
+          </div>
+          <div className="chart-card table-card">
+            <div className="chart-title">
+              <div>
+                <span>EDGE NODE KEY-BINDINGS</span>
+                <h3>Client deployments</h3>
+              </div>
+              <div className="axis-badge">
+                {data.timebase === "rpc" ? "TIME · RPC RESOLVED" : "TIME · ESTIMATED"}
+              </div>
+            </div>
+            <div className="table-scroll">
+              <table className="rank-table">
+                <colgroup>
+                  <col className="timestamp" />
+                  <col />
+                </colgroup>
+                <thead>
+                  <tr>
+                    <th scope="col">timestamp</th>
+                    <th scope="col">client</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.deployments.map((deployment) => (
+                    <tr key={deployment.address}>
+                      <td className="timestamp">{formatTimestamp(deployment.timestamp)}</td>
+                      <td>
+                        <code>{deployment.address}</code>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {!data.deployments.length && (
+              <div className="empty-overlay">No client deployments have been indexed.</div>
+            )}
+            <p className="chart-note">
+              Showing the {data.deployments.length} most recent of{" "}
+              {count(data.totals.clientsDeployed)} clients deployed.
+            </p>
+          </div>
         </div>
       </section>
 
-      <section className="section" id="deployments">
+      <section className="section" id="redemptions">
         <div className="section-heading">
           <div>
-            <span className="section-index">06</span>
-            <h2>Gnosis VPN clients&rsquo; deployments</h2>
+            <span className="section-index">08</span>
+            <h2>Most recent redemptions</h2>
           </div>
-          <p>
-            Edge node key bindings—the moment each client first appeared on chain,
-            newest first.
-          </p>
+          <p>Latest redemptions per channel, newest first.</p>
         </div>
         <div className="chart-card table-card">
           <div className="chart-title">
             <div>
-              <span>EDGE NODE KEY-BINDINGS</span>
-              <h3>Client deployments</h3>
+              <span>LATEST REDEMPTIONS PER CHANNEL</span>
+              <h3>Redemption feed</h3>
             </div>
             <div className="axis-badge">
-              {data.timebase === "rpc" ? "TIME · RPC RESOLVED" : "TIME · ESTIMATED"}
+              {count(data.totals.redemptionsTotal)} total
             </div>
           </div>
           <div className="table-scroll">
@@ -745,32 +1019,38 @@ export default function Dashboard({ data }: { data: DashboardData }) {
               <colgroup>
                 <col className="timestamp" />
                 <col />
+                <col />
+                <col />
               </colgroup>
               <thead>
                 <tr>
                   <th scope="col">timestamp</th>
                   <th scope="col">client</th>
+                  <th scope="col">relayer</th>
+                  <th scope="col">channel</th>
                 </tr>
               </thead>
               <tbody>
-                {data.deployments.map((deployment) => (
-                  <tr key={deployment.address}>
-                    <td className="timestamp">{formatTimestamp(deployment.timestamp)}</td>
+                {data.recentRedemptions.map((redemption) => (
+                  <tr key={`${redemption.channelId}-${redemption.timestamp}`}>
+                    <td className="timestamp">{formatTimestamp(redemption.timestamp)}</td>
                     <td>
-                      <code>{deployment.address}</code>
+                      <code>{shortAddress(redemption.client)}</code>
+                    </td>
+                    <td>
+                      <code>{shortAddress(redemption.relayer)}</code>
+                    </td>
+                    <td>
+                      <code>{shortAddress(`0x${redemption.channelId}`)}</code>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-          {!data.deployments.length && (
-            <div className="empty-overlay">No client deployments have been indexed.</div>
+          {!data.recentRedemptions.length && (
+            <div className="empty-overlay">No redemptions have been indexed.</div>
           )}
-          <p className="chart-note">
-            Showing the {data.deployments.length} most recent of{" "}
-            {count(data.totals.clientsDeployed)} clients deployed.
-          </p>
         </div>
       </section>
 

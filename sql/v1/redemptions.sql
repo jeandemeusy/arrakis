@@ -28,6 +28,7 @@ WITH ordered AS (
   )
 )
 SELECT
+  channel.concrete_channel_id AS channel_id,
   source_account.chain_key AS source,
   destination_account.chain_key AS destination,
   ordered.published_block,

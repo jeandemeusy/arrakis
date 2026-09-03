@@ -5,7 +5,6 @@ import path from "node:path";
 
 import { Pool, type QueryResultRow } from "pg";
 
-import { OTHER_RELAYERS } from "./constants";
 import { resolveBlockClock, type BlockClock } from "./rpc";
 
 /**
@@ -22,11 +21,11 @@ const DAY_SECONDS = 86_400;
 // 30 days is day-30..day, matching how the published Dune queries slice them.
 const WEEK_DAYS = 7;
 const MONTH_DAYS = 31;
-/** Relayers charted individually in the daily stack; the rest collapse into "Other". */
-const RELAYER_STACK_LIMIT = 6;
-const RELAYER_STACK_DAYS = 30;
+/** Window shared by the daily panels: relayer stack, daily users. */
+const RECENT_DAYS = 30;
 const CLIENT_LIMIT = 50;
 const DEPLOYMENT_LIMIT = 100;
+const REDEMPTION_FEED_LIMIT = 100;
 
 export type ActiveUserPoint = {
   date: string;
@@ -68,6 +67,31 @@ export type Deployment = {
   timestamp: string;
 };
 
+export type DailyUserPoint = {
+  date: string;
+  newClients: number;
+  returning: number;
+};
+
+export type HourPoint = {
+  hour: string;
+  share: number;
+};
+
+export type TicketParameterPoint = {
+  date: string;
+  winProbability: number;
+  ticketPriceWei: string;
+  ticketValueWei: string;
+};
+
+export type RecentRedemption = {
+  timestamp: string;
+  client: string;
+  relayer: string;
+  channelId: string;
+};
+
 export type AnalyticsSnapshot = {
   source: "live" | "degraded" | "unavailable";
   observedAt: string;
@@ -88,6 +112,15 @@ export type AnalyticsSnapshot = {
   clients: Client[];
   clientCount: number;
   deployments: Deployment[];
+  dailyUsers: DailyUserPoint[];
+  hourly: HourPoint[];
+  ticketParameters: TicketParameterPoint[];
+  recentRedemptions: RecentRedemption[];
+  ticket: {
+    winProbability: number | null;
+    priceWei: string | null;
+    valueWei: string | null;
+  };
   totals: {
     weeklyActiveUsers: number | null;
     monthlyActiveUsers: number | null;
@@ -115,6 +148,7 @@ type SummaryRow = QueryResultRow & {
 };
 
 type RedemptionRow = QueryResultRow & {
+  channel_id: string;
   source: Buffer;
   destination: Buffer;
   published_block: string;
@@ -131,11 +165,18 @@ type WinProbRow = QueryResultRow & {
   win_prob: Buffer;
 };
 
+type TicketPriceRow = QueryResultRow & {
+  block_number: string;
+  ticket_price: Buffer;
+};
+
 type Redemption = {
+  channelId: string;
   source: string;
   destination: string;
   block: number;
   day: number;
+  timestamp: number;
   tickets: number;
   gigabytes: number;
 };
@@ -315,63 +356,49 @@ function weeklySeries(redemptions: Redemption[]): WeekPoint[] {
 }
 
 /**
- * Relayer breakdown over the recent window: the canonical set, the daily stack and
- * the share of redemptions.
+ * Relayer breakdown over the recent window: the ordering, the daily stack and the
+ * share of redemptions.
  *
- * The stacked chart, the donut and the legend all read from one ordered list of
- * relayers so a colour means the same relayer everywhere. Relayers outside the top
- * few collapse into a single "Other" entry rather than repeating palette colours.
+ * The stacked chart, the donut and the legend all read from one list of relayers,
+ * ordered by volume, so a colour means the same relayer everywhere. Every relayer is
+ * charted individually — nothing is rolled into an aggregate bucket.
  */
 function relayerBreakdown(
   redemptions: Redemption[],
   lastDay: number,
 ): { series: string[]; daily: RelayerDayPoint[]; distribution: Relayer[] } {
-  const firstDay = lastDay - RELAYER_STACK_DAYS + 1;
+  const firstDay = lastDay - RECENT_DAYS + 1;
   const window = redemptions.filter((redemption) => redemption.day >= firstDay);
   if (!window.length) return { series: [], daily: [], distribution: [] };
 
-  const volumes = new Map<string, number>();
-  for (const redemption of window) {
-    volumes.set(
-      redemption.destination,
-      (volumes.get(redemption.destination) ?? 0) + redemption.gigabytes,
-    );
-  }
-  const charted = new Set(
-    [...volumes.entries()]
-      .sort(([, a], [, b]) => b - a)
-      .slice(0, RELAYER_STACK_LIMIT)
-      .map(([address]) => address),
-  );
-  const bucketFor = (destination: string) =>
-    charted.has(destination) ? destination : OTHER_RELAYERS;
-  const hasOther = volumes.size > charted.size;
-  const series = [...charted, ...(hasOther ? [OTHER_RELAYERS] : [])];
-
+  const totals = new Map<string, { redemptions: number; gigabytes: number }>();
   const byDay = new Map<number, Map<string, number>>();
   for (const redemption of window) {
+    const bucket = totals.get(redemption.destination) ?? { redemptions: 0, gigabytes: 0 };
+    bucket.redemptions += 1;
+    bucket.gigabytes += redemption.gigabytes;
+    totals.set(redemption.destination, bucket);
+
     const day = byDay.get(redemption.day) ?? new Map<string, number>();
-    const key = bucketFor(redemption.destination);
-    day.set(key, (day.get(key) ?? 0) + redemption.gigabytes);
+    day.set(
+      redemption.destination,
+      (day.get(redemption.destination) ?? 0) + redemption.gigabytes,
+    );
     byDay.set(redemption.day, day);
   }
+
+  const series = [...totals.entries()]
+    .sort(([, a], [, b]) => b.gigabytes - a.gigabytes)
+    .map(([address]) => address);
 
   const daily: RelayerDayPoint[] = [];
   for (let day = firstDay; day <= lastDay; day += 1) {
     const values = byDay.get(day);
     const point: RelayerDayPoint = { date: isoDate(day) };
-    for (const key of series) point[key] = values?.get(key) ?? 0;
+    for (const address of series) point[address] = values?.get(address) ?? 0;
     daily.push(point);
   }
 
-  const totals = new Map<string, { redemptions: number; gigabytes: number }>();
-  for (const redemption of window) {
-    const key = bucketFor(redemption.destination);
-    const bucket = totals.get(key) ?? { redemptions: 0, gigabytes: 0 };
-    bucket.redemptions += 1;
-    bucket.gigabytes += redemption.gigabytes;
-    totals.set(key, bucket);
-  }
   const distribution = series.map((address) => {
     const bucket = totals.get(address) ?? { redemptions: 0, gigabytes: 0 };
     return {
@@ -383,6 +410,85 @@ function relayerBreakdown(
   });
 
   return { series, daily, distribution };
+}
+
+/**
+ * New versus returning clients per day over the recent window.
+ *
+ * A client is new on the day it was first deployed and returning on any later day
+ * it settles a redemption, so the two bands never double-count the same client.
+ */
+function dailyUserSeries(
+  actorsByDay: Map<number, Set<string>>,
+  deploymentDayOf: Map<string, number>,
+  lastDay: number,
+): DailyUserPoint[] {
+  const firstDay = lastDay - RECENT_DAYS + 1;
+  const points: DailyUserPoint[] = [];
+  for (let day = firstDay; day <= lastDay; day += 1) {
+    const actors = actorsByDay.get(day);
+    let newClients = 0;
+    let returning = 0;
+    for (const actor of actors ?? []) {
+      if (deploymentDayOf.get(actor) === day) newClients += 1;
+      else returning += 1;
+    }
+    points.push({ date: isoDate(day), newClients, returning });
+  }
+  return points;
+}
+
+/** Share of relayed volume by hour of day, across the whole indexed history. */
+function hourlyDistribution(redemptions: Redemption[]): HourPoint[] {
+  if (!redemptions.length) return [];
+  const hours = new Array<number>(24).fill(0);
+  for (const redemption of redemptions) {
+    hours[new Date(redemption.timestamp * 1000).getUTCHours()] += redemption.gigabytes;
+  }
+  const total = hours.reduce((sum, value) => sum + value, 0);
+  if (total === 0) return [];
+  return hours.map((value, hour) => ({
+    hour: `${String(hour).padStart(2, "0")}:00`,
+    share: value / total,
+  }));
+}
+
+/**
+ * Ticket price, winning probability and the resulting ticket face value over time.
+ *
+ * Both oracles update independently, so the series carries a point at every change
+ * on either timeline, each holding the values in force from that block onward.
+ */
+function ticketParameterSeries(
+  probabilities: Array<[number, number]>,
+  prices: Array<[number, bigint]>,
+  clock: BlockClock,
+): TicketParameterPoint[] {
+  const blocks = [...new Set([...probabilities, ...prices].map(([block]) => block))].sort(
+    (a, b) => a - b,
+  );
+  const at = <T,>(timeline: Array<[number, T]>, block: number, fallback: T): T => {
+    let value = fallback;
+    for (const [updatedAt, entry] of timeline) {
+      if (updatedAt > block) break;
+      value = entry;
+    }
+    return value;
+  };
+
+  return blocks.map((block) => {
+    const winProbability = at(probabilities, block, 0);
+    const priceWei = at(prices, block, 0n);
+    return {
+      date: isoDate(dayIndex(clock(block))),
+      winProbability,
+      ticketPriceWei: priceWei.toString(),
+      ticketValueWei:
+        winProbability > 0
+          ? BigInt(Math.round(Number(priceWei) / winProbability)).toString()
+          : "0",
+    };
+  });
 }
 
 /** Per-client usage, ranked by the caller, over both the recent window and all time. */
@@ -417,19 +523,29 @@ async function querySnapshot(): Promise<AnalyticsSnapshot> {
   const summary = summaryResult.rows[0];
   if (!summary) throw new Error("Blokli chain_info is not initialized");
 
-  const [channelBalances, safeBalances, redemptionRows, deploymentRows, winProbRows] =
-    await Promise.allSettled([
+  const [
+    channelBalances,
+    safeBalances,
+    redemptionRows,
+    deploymentRows,
+    winProbRows,
+    ticketPriceRows,
+  ] = await Promise.allSettled([
       db.query<{ balance: Buffer }>(await sql("channel-balances")),
       db.query<{ balance: Buffer }>(await sql("safe-balances")),
       db.query<RedemptionRow>(await sql("redemptions")),
       db.query<DeploymentRow>(await sql("client-deployments")),
       db.query<WinProbRow>(await sql("win-prob-updates")),
+      db.query<TicketPriceRow>(await sql("ticket-price-updates")),
     ]);
 
   const rawRedemptions =
     redemptionRows.status === "fulfilled" ? redemptionRows.value.rows : [];
   if (redemptionRows.status === "rejected") {
     warnings.push("Redemption history is unavailable; usage panels are empty.");
+  }
+  if (ticketPriceRows.status === "rejected") {
+    warnings.push("Ticket price history is unavailable; ticket parameters are empty.");
   }
   const rawDeployments =
     deploymentRows.status === "fulfilled" ? deploymentRows.value.rows : [];
@@ -463,6 +579,13 @@ async function querySnapshot(): Promise<AnalyticsSnapshot> {
     );
   }
   const probabilityAt = winProbabilityAt(timeline, fallbackWinProb);
+  const priceTimeline: Array<[number, bigint]> =
+    ticketPriceRows.status === "fulfilled"
+      ? ticketPriceRows.value.rows.map((row) => [
+          Number(row.block_number),
+          fromBigEndian(row.ticket_price),
+        ])
+      : [];
 
   const latestBlock = Number(summary.block_number);
   const blocks = [
@@ -484,13 +607,15 @@ async function querySnapshot(): Promise<AnalyticsSnapshot> {
 
   const redemptions: Redemption[] = rawRedemptions.map((row) => {
     const block = Number(row.published_block);
-    const tickets = Number(row.tickets);
+    const timestamp = clock(block);
     return {
+      channelId: row.channel_id,
       source: hex(row.source),
       destination: hex(row.destination),
       block,
-      day: dayIndex(clock(block)),
-      tickets,
+      day: dayIndex(timestamp),
+      timestamp,
+      tickets: Number(row.tickets),
       gigabytes: redemptionVolume(probabilityAt(block)),
     };
   });
@@ -523,6 +648,10 @@ async function querySnapshot(): Promise<AnalyticsSnapshot> {
     distribution: relayers,
   } = relayerBreakdown(redemptions, lastDay);
   const allClients = clientUsage(redemptions, lastDay - WEEK_DAYS + 1);
+  const deploymentDayOf = new Map<string, number>();
+  for (const row of rawDeployments) {
+    deploymentDayOf.set(hex(row.account), dayIndex(clock(Number(row.published_block))));
+  }
   const deployments = rawDeployments
     .map((row) => ({
       address: hex(row.account),
@@ -530,6 +659,17 @@ async function querySnapshot(): Promise<AnalyticsSnapshot> {
     }))
     .reverse()
     .slice(0, DEPLOYMENT_LIMIT);
+  const recentRedemptions = redemptions
+    .slice(-REDEMPTION_FEED_LIMIT)
+    .reverse()
+    .map((redemption) => ({
+      timestamp: new Date(redemption.timestamp * 1000).toISOString(),
+      client: redemption.source,
+      relayer: redemption.destination,
+      channelId: redemption.channelId,
+    }));
+  const currentProbability = timeline.at(-1)?.[1] ?? null;
+  const currentPrice = priceTimeline.at(-1)?.[1] ?? null;
   const latest = activeUsers.at(-1);
   const hasUsage = redemptionRows.status === "fulfilled";
   let latestWeekDeployments = 0;
@@ -561,6 +701,18 @@ async function querySnapshot(): Promise<AnalyticsSnapshot> {
     clients: allClients.slice(0, CLIENT_LIMIT),
     clientCount: allClients.length,
     deployments,
+    dailyUsers: dailyUserSeries(actorsByDay, deploymentDayOf, lastDay),
+    hourly: hourlyDistribution(redemptions),
+    ticketParameters: ticketParameterSeries(timeline, priceTimeline, clock),
+    recentRedemptions,
+    ticket: {
+      winProbability: currentProbability,
+      priceWei: currentPrice?.toString() ?? null,
+      valueWei:
+        currentPrice !== null && currentProbability
+          ? BigInt(Math.round(Number(currentPrice) / currentProbability)).toString()
+          : null,
+    },
     totals: {
       weeklyActiveUsers: latest?.weekly ?? null,
       monthlyActiveUsers: latest?.monthly ?? null,
@@ -602,6 +754,11 @@ function unavailable(message: string): AnalyticsSnapshot {
     clients: [],
     clientCount: 0,
     deployments: [],
+    dailyUsers: [],
+    hourly: [],
+    ticketParameters: [],
+    recentRedemptions: [],
+    ticket: { winProbability: null, priceWei: null, valueWei: null },
     totals: {
       weeklyActiveUsers: null,
       monthlyActiveUsers: null,

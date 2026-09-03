@@ -1,4 +1,6 @@
-const ANCHOR_COUNT = 16;
+// Dense enough that interpolation stays accurate to minutes, which the hour-of-day
+// histogram needs, while still costing a single batched request.
+const ANCHOR_COUNT = 64;
 
 type RpcReply = {
   id: number;

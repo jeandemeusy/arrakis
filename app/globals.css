@@ -306,11 +306,18 @@ main {
 .legend i.deployments {
   background: #4c8f7b;
 }
-.relayer-key {
-  list-style: none;
-  margin: 1px 0 0;
+.legend i.new-client {
+  background: #8d4f68;
+}
+.relayer-legend {
+  margin-top: 1px;
   padding: 18px 26px;
   background: #fbf9f3;
+}
+.relayer-key {
+  list-style: none;
+  margin: 0;
+  padding: 0;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
   gap: 9px 28px;
@@ -330,6 +337,20 @@ main {
 .relayer-key code {
   color: #55534e;
 }
+.legend-toggle {
+  margin-top: 14px;
+  padding: 0;
+  background: none;
+  border: none;
+  font: inherit;
+  font-size: 11px;
+  color: #55534e;
+  cursor: pointer;
+  border-bottom: 1px solid var(--yellow);
+}
+.legend-toggle:hover {
+  color: #17191c;
+}
 .table-card {
   padding-bottom: 14px;
 }
@@ -337,12 +358,14 @@ main {
   padding-left: 14px;
 }
 .table-scroll {
-  max-height: 420px;
+  max-height: 460px;
   overflow-y: auto;
+}
+.chart-split .table-card {
+  min-width: 0;
 }
 .rank-table {
   width: 100%;
-  max-width: 880px;
   table-layout: fixed;
   border-collapse: collapse;
   font-size: 12px;
@@ -367,13 +390,18 @@ main {
   text-overflow: ellipsis;
 }
 .rank-table col.rank {
-  width: 64px;
+  width: 7%;
+  min-width: 56px;
+}
+.rank-table col.count {
+  width: 16%;
 }
 .rank-table col.usage {
-  width: 132px;
+  width: 18%;
 }
 .rank-table col.timestamp {
-  width: 190px;
+  width: 22%;
+  min-width: 170px;
 }
 .rank-table tbody tr:last-child td {
   border-bottom: none;
