@@ -137,7 +137,6 @@ main {
   align-items: end;
   gap: 56px;
 }
-.network-switch,
 /*
  * The strip under a table: how many rows, a filter, then the pager and the tile's
  * own controls. The controls live in this row rather than floating over the card,
@@ -210,11 +209,15 @@ main {
   padding: 0;
   min-inline-size: 0;
 }
+/* A fieldset for the grouping semantics, without the browser's box. */
 .network-switch {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  border: 0;
   margin: 0 0 18px;
+  padding: 0;
+  min-inline-size: 0;
 }
 .network-switch button {
   background: none;
