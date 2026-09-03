@@ -240,9 +240,7 @@ export default function Dashboard({ data }: { data: DashboardData }) {
         </div>
         <div className="intro-copy">
           <p>
-            Gnosis VPN client usage measured directly from Gnosis Chain. Every figure below
-            counts traffic paid for by VPN clients—accounts that never announced themselves
-            as relays—reconstructed from ticket redemptions indexed by Blokli.
+            Gnosis VPN client usage measured directly from Gnosis Chain. Every figure below counts traffic paid for by VPN clients.
           </p>
           <dl className="asof">
             <dt>Last indexed block</dt>
@@ -290,8 +288,7 @@ export default function Dashboard({ data }: { data: DashboardData }) {
             <h2>Unique active users</h2>
           </div>
           <p>
-            A user is a VPN client—an account that bound a key but never announced an
-            address, so it is not relay infrastructure—that either settled tickets on one of
+            A user is a VPN client that either settled tickets on one of
             its channels inside the window or was first deployed inside it.
           </p>
         </div>
@@ -360,8 +357,7 @@ export default function Dashboard({ data }: { data: DashboardData }) {
           </ResponsiveContainer>
           <Empty when={!data.activeUsers.length}>The series appears once the index database reports client redemptions.</Empty>
           <p className="chart-note">
-            Each point counts distinct clients over the preceding 30 and 7 days, so the two
-            lines converge when activity is concentrated in a single week.
+            Each point counts distinct clients over the preceding 30 and 7 days.
           </p>
         </div>
       </section>
@@ -373,9 +369,7 @@ export default function Dashboard({ data }: { data: DashboardData }) {
             <h2>Relayed traffic</h2>
           </div>
           <p>
-            A ticket is issued per packet but only wins with probability p, so each
-            redemption stands in for 650 bytes divided by the winning probability in force
-            at its block.
+            Each packets is assumed to have an average size of 650 bytes.
           </p>
         </div>
         <div className="chart-split">
@@ -635,8 +629,7 @@ export default function Dashboard({ data }: { data: DashboardData }) {
             <h2>Redemptions by relayer</h2>
           </div>
           <p>
-            Which relays carried client traffic over the last thirty days, and how the load
-            is shared. Every relay is charted individually; the key lists the busiest first.
+            Which relays carried client traffic over the last 30 days, and how the load is shared.
           </p>
         </div>
         <div className="chart-split">
@@ -782,8 +775,7 @@ export default function Dashboard({ data }: { data: DashboardData }) {
             <h2>Clients</h2>
           </div>
           <p>
-            Who used the network and when each client first appeared. Volume is only an
-            estimation based on the redemptions seen on chain.
+            Who used the network and when each client first appeared. Volume is only an estimation based on the redemptions seen on chain.
           </p>
         </div>
         <div className="chart-split">
