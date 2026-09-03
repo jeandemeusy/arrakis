@@ -466,13 +466,6 @@ export default function Dashboard({ dashboard }: { dashboard: DashboardPayload }
               Weekly <i className="cumulative" />
               Cumulative
             </div>
-            <div className="axis-badge">
-              {data.winProbability === 'historical'
-                ? 'WIN PROB · HISTORICAL'
-                : data.winProbability === 'current'
-                  ? 'WIN PROB · CURRENT'
-                  : 'WIN PROB · ASSUMED 1'}
-            </div>
           </div>
           <ResponsiveContainer width="100%" height={260}>
             <ComposedChart
