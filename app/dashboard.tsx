@@ -173,9 +173,9 @@ export default function Dashboard({ data }: { data: DashboardData }) {
   // Recharts colours pie slices from a `fill` on each datum, avoiding <Cell>.
   const relayerSlices = useMemo(
     () =>
-      data.relayers.map((relayer, index) => ({
+      data.relayers.map((relayer) => ({
         ...relayer,
-        fill: relayerColor(index),
+        fill: relayerColor(relayer.colorIndex),
       })),
     [data.relayers],
   );
@@ -295,7 +295,7 @@ export default function Dashboard({ data }: { data: DashboardData }) {
         <div className="chart-card main-chart">
           <div className="chart-title">
             <div>
-              <span>DAILY SNAPSHOT OF TRAILING WINDOWS</span>
+              <span>SINCE 01 JAN 2026</span>
               <h3>Monthly and weekly active users</h3>
             </div>
             <div className="legend">
@@ -580,7 +580,7 @@ export default function Dashboard({ data }: { data: DashboardData }) {
                 <Bar dataKey="newClients" name="New" stackId="users" fill={PLUM} />
               </BarChart>
             </ResponsiveContainer>
-            <Empty when={!data.dailyUsers.length}>No client activity in the last thirty days.</Empty>
+            <Empty when={!data.dailyUsers.length}>No client activity in the last 30 days.</Empty>
           </div>
           <div className="chart-card service-chart">
             <div className="chart-title">
@@ -629,14 +629,14 @@ export default function Dashboard({ data }: { data: DashboardData }) {
             <h2>Redemptions by relayer</h2>
           </div>
           <p>
-            Which relays carried client traffic over the last 30 days, and how the load is shared.
+            Which relays carried client traffic, and how the load is shared.
           </p>
         </div>
         <div className="chart-split">
           <div className="chart-card service-chart">
             <div className="chart-title">
               <div>
-                <span>LAST 30 DAYS</span>
+                <span>LAST 7 DAYS</span>
                 <h3>Share of redemptions</h3>
               </div>
             </div>
@@ -663,7 +663,7 @@ export default function Dashboard({ data }: { data: DashboardData }) {
                 />
               </PieChart>
             </ResponsiveContainer>
-            <Empty when={!data.relayers.length}>No client redemptions were indexed in the last thirty days.</Empty>
+            <Empty when={!data.relayers.length}>No client redemptions were indexed in the last 7 days.</Empty>
           </div>
           <div className="chart-card service-chart">
             <div className="chart-title">
@@ -710,7 +710,7 @@ export default function Dashboard({ data }: { data: DashboardData }) {
                 ))}
               </BarChart>
             </ResponsiveContainer>
-            <Empty when={!data.relayerDaily.length}>No client redemptions were indexed in the last thirty days.</Empty>
+            <Empty when={!data.relayerDaily.length}>No client redemptions were indexed in the last 30 days.</Empty>
             <p className="chart-note">
               Volume is an estimate derived from redemptions seen on chain.
             </p>

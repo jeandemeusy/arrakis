@@ -11,8 +11,11 @@ repository and be deployed beside any Blokli instance.
 The browser never receives database credentials. Server-side queries in
 [`sql/v1`](./sql/v1) calculate current network totals, the
 active-user series, weekly usage, per-relayer and per-client breakdowns, and the
-client deployment log. The backend keeps a completed snapshot for 60 seconds
-to avoid querying the index database for every public page view.
+client deployment log. The backend keeps a completed snapshot for 60 seconds so a page view costs no
+database work of its own. Concurrent requests arriving during a refresh share the
+one in-flight run rather than each starting their own, and failures are cached for
+10 seconds so an unreachable index database is not queried again on every request
+while it is down. The cache lives in the process, so each replica holds its own.
 
 Blokli already stores the indexed history, so the dashboard does not duplicate
 events in another datastore. If `RPC_URL` is configured, the backend samples a
@@ -93,7 +96,8 @@ See [`sql/v1/redemptions.sql`](./sql/v1/redemptions.sql).
 one of its channels inside that window, or when it was first deployed inside it —
 so a new client registers on deployment rather than only once its first tickets
 are redeemed. Windows are inclusive of both endpoints: 7 days is `day-6..day`,
-30 days is `day-30..day`.
+30 days is `day-30..day`. The series is plotted from 2026-01-01, matching the
+published `start_day`; the trailing windows still read activity from before it.
 
 **Ticket parameters.** Ticket price and winning probability are both oracle values
 that Blokli stores only at their latest setting, so each timeline is recovered by

@@ -23,6 +23,23 @@ const WEEK_DAYS = 7;
 const MONTH_DAYS = 31;
 /** Window shared by the daily panels: relayer stack, daily users. */
 const RECENT_DAYS = 30;
+/**
+ * First day of the published active-user series.
+ *
+ * Matches `start_day` in the Dune queries. Client accounts predate the Gnosis VPN
+ * programme, so without a floor the chart opens on a long flat run of zeros.
+ */
+const SERIES_START_DAY = Math.floor(Date.UTC(2026, 0, 1) / 1000 / DAY_SECONDS);
+/** How long a good snapshot serves before the queries are run again. */
+const SNAPSHOT_TTL_MS = 60_000;
+/**
+ * How long a failure is remembered.
+ *
+ * Short enough that recovery is picked up quickly, long enough that an outage does
+ * not turn every page view into another round of queries against a database that is
+ * already struggling.
+ */
+const FAILURE_TTL_MS = 10_000;
 const CLIENT_LIMIT = 50;
 const DEPLOYMENT_LIMIT = 100;
 const REDEMPTION_FEED_LIMIT = 100;
@@ -49,6 +66,8 @@ export type Relayer = {
   redemptions: number;
   gigabytes: number;
   share: number;
+  /** Position in `relayerSeries`, so a relayer keeps one colour across panels. */
+  colorIndex: number;
 };
 
 /** One day of relayed volume, keyed by relayer address, for the stacked chart. */
@@ -175,6 +194,7 @@ type Redemption = {
 let pool: Pool | undefined;
 const sqlCache = new Map<string, string>();
 let cachedSnapshot: { expiresAt: number; value: AnalyticsSnapshot } | undefined;
+let refreshing: Promise<AnalyticsSnapshot> | undefined;
 
 function database(): Pool {
   const connectionString = process.env.DATABASE_URL;
@@ -303,8 +323,10 @@ function activeUserSeries(
   const days = [...actorsByDay.keys()].sort((a, b) => a - b);
   if (!days.length) return [];
 
+  // Trailing windows still read activity from before the start day; only the
+  // plotted range is clamped.
   const points: ActiveUserPoint[] = [];
-  for (let day = days[0]; day <= lastDay; day += 1) {
+  for (let day = Math.max(days[0], SERIES_START_DAY); day <= lastDay; day += 1) {
     const weekly = new Set<string>();
     const monthly = new Set<string>();
     let deployments = 0;
@@ -379,14 +401,13 @@ function relayerBreakdown(
   const window = redemptions.filter((redemption) => redemption.day >= firstDay);
   if (!window.length) return { series: [], daily: [], distribution: [] };
 
-  const totals = new Map<string, { redemptions: number; gigabytes: number }>();
+  const volumes = new Map<string, number>();
   const byDay = new Map<number, Map<string, number>>();
   for (const redemption of window) {
-    const bucket = totals.get(redemption.destination) ?? { redemptions: 0, gigabytes: 0 };
-    bucket.redemptions += 1;
-    bucket.gigabytes += redemption.gigabytes;
-    totals.set(redemption.destination, bucket);
-
+    volumes.set(
+      redemption.destination,
+      (volumes.get(redemption.destination) ?? 0) + redemption.gigabytes,
+    );
     const day = byDay.get(redemption.day) ?? new Map<string, number>();
     day.set(
       redemption.destination,
@@ -395,9 +416,12 @@ function relayerBreakdown(
     byDay.set(redemption.day, day);
   }
 
-  const series = [...totals.entries()]
-    .sort(([, a], [, b]) => b.gigabytes - a.gigabytes)
+  // Ordered by volume over the stack's own window, which is the wider of the two,
+  // so every relayer appearing in either panel has a place in this ordering.
+  const series = [...volumes.entries()]
+    .sort(([, a], [, b]) => b - a)
     .map(([address]) => address);
+  const colorIndexOf = new Map(series.map((address, index) => [address, index]));
 
   const daily: RelayerDayPoint[] = [];
   for (let day = firstDay; day <= lastDay; day += 1) {
@@ -407,15 +431,25 @@ function relayerBreakdown(
     daily.push(point);
   }
 
-  const distribution = series.map((address) => {
-    const bucket = totals.get(address) ?? { redemptions: 0, gigabytes: 0 };
-    return {
+  // The share breakdown answers "who is carrying traffic now", so it reads the
+  // trailing week rather than the whole stack window.
+  const recent = window.filter((redemption) => redemption.day > lastDay - WEEK_DAYS);
+  const totals = new Map<string, { redemptions: number; gigabytes: number }>();
+  for (const redemption of recent) {
+    const bucket = totals.get(redemption.destination) ?? { redemptions: 0, gigabytes: 0 };
+    bucket.redemptions += 1;
+    bucket.gigabytes += redemption.gigabytes;
+    totals.set(redemption.destination, bucket);
+  }
+  const distribution = [...totals.entries()]
+    .map(([address, bucket]) => ({
       address,
       redemptions: bucket.redemptions,
       gigabytes: bucket.gigabytes,
-      share: bucket.redemptions / window.length,
-    };
-  });
+      share: bucket.redemptions / recent.length,
+      colorIndex: colorIndexOf.get(address) ?? 0,
+    }))
+    .sort((a, b) => b.redemptions - a.redemptions);
 
   return { series, daily, distribution };
 }
@@ -749,19 +783,43 @@ function unavailable(message: string): AnalyticsSnapshot {
   };
 }
 
-export async function loadAnalytics(): Promise<AnalyticsSnapshot> {
-  if (cachedSnapshot && cachedSnapshot.expiresAt > Date.now()) {
-    return cachedSnapshot.value;
-  }
+/**
+ * Runs the queries once and caches the outcome, successful or not.
+ *
+ * Failures are cached too, on a shorter clock: without that, an unreachable index
+ * database would have every request re-run every query and wait out the statement
+ * timeout, putting the most pressure on the database exactly when it is failing.
+ */
+async function refreshSnapshot(): Promise<AnalyticsSnapshot> {
   try {
     const value = await querySnapshot();
-    cachedSnapshot = { expiresAt: Date.now() + 60_000, value };
+    cachedSnapshot = { expiresAt: Date.now() + SNAPSHOT_TTL_MS, value };
     return value;
   } catch (error) {
-    return unavailable(
+    const value = unavailable(
       error instanceof Error && error.message === "DATABASE_URL is not configured"
         ? error.message
         : "The Blokli index database is currently unavailable.",
     );
+    cachedSnapshot = { expiresAt: Date.now() + FAILURE_TTL_MS, value };
+    return value;
+  } finally {
+    refreshing = undefined;
   }
+}
+
+/**
+ * The cached analytics snapshot, refreshing it when stale.
+ *
+ * Concurrent callers that arrive during a refresh share the one in-flight run. A
+ * page view costs no database work of its own: without this, every request landing
+ * in the window between expiry and the next snapshot would start its own full set
+ * of queries, which is precisely when a burst of traffic arrives.
+ */
+export async function loadAnalytics(): Promise<AnalyticsSnapshot> {
+  if (cachedSnapshot && cachedSnapshot.expiresAt > Date.now()) {
+    return cachedSnapshot.value;
+  }
+  refreshing ??= refreshSnapshot();
+  return refreshing;
 }
