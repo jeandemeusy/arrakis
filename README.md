@@ -31,18 +31,49 @@ blanking the dashboard.
 
 ## Configuration
 
-Copy `.env.example` to `.env.local` for local development:
+The dashboard reads one or more Blokli index databases. Copy `.env.example` to
+`.env.local` for local development.
 
 ```dotenv
-DATABASE_URL=postgresql://dashboard:change-me@blokli-db:5432/blokli
-# Optional
-RPC_URL=https://rpc.gnosischain.com
+NETWORKS='[
+  {"id":"jura","label":"Jura","databaseUrl":"postgresql://dashboard:pw@jura-db:5432/blokli","rpcUrl":"https://rpc.gnosischain.com"},
+  {"id":"dev","label":"Dev","databaseUrl":"postgresql://dashboard:pw@dev-db:5432/blokli"}
+]'
 ```
 
-- `DATABASE_URL` is required and currently supports PostgreSQL Blokli indexes.
-  Use a dedicated read-only database role.
-- `RPC_URL` is optional. Set it to anchor the historical charts to real block
-  timestamps instead of an assumed block cadence.
+- `id` is lowercase letters, digits and dashes, and must be unique. It appears in
+  `/api/v1/dashboard?network=<id>` but never in the page itself.
+- `label` is what the network selector shows. Defaults to the id.
+- `databaseUrl` must be a PostgreSQL connection string. Use a read-only role.
+- `rpcUrl` is optional and per network: set it to anchor that network's charts to
+  real block timestamps instead of an assumed five-second cadence.
+
+A malformed `NETWORKS` is reported rather than ignored — a silent fallback to one
+network would hide a deployment mistake behind a plausible-looking dashboard.
+
+**Single network.** A lone `DATABASE_URL` (with optional `RPC_URL`) still works and
+is read as one unnamed network, so an existing deployment needs no change. The
+selector is hidden when only one network is configured.
+
+## Networks in the UI
+
+The selector switches between each network and **All networks**. Every view is
+computed server-side and sent together, so switching is instant and costs no
+further database work.
+
+In the combined view:
+
+- **Ticket price, winning probability and ticket value show nothing.** Each network
+  runs its own oracles, so a single figure would be a fiction.
+- **Everything else aggregates.** Volume is exact rather than approximate: each
+  redemption is priced with its own network's winning probability at its own block
+  before anything is summed, so networks that price traffic differently still add up
+  correctly.
+- **Participants are counted per network.** The same address on two networks is two
+  clients, because the two chains are unrelated. User counts are a union over the
+  trailing window, not a sum of the per-network counts.
+- **A network that cannot be read is left out** of the totals and named in a warning,
+  rather than taking the whole page down.
 
 ## Toolchain
 

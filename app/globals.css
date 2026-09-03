@@ -101,6 +101,36 @@ main {
   align-items: end;
   gap: 56px;
 }
+.network-switch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 18px;
+}
+.network-switch button {
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 5px 13px;
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  cursor: pointer;
+}
+.network-switch button.active {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: #f6f3ea;
+}
+.row-network {
+  margin-left: 8px;
+  font-style: normal;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
 .status-line {
   display: flex;
   align-items: center;
@@ -323,6 +353,7 @@ main {
 }
 .legend i.cumulative {
   background: var(--ink);
+  height: 2px;
 }
 /* Title, legend and badge share the row, so let them wrap rather than collide. */
 .chart-title {

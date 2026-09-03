@@ -17,9 +17,8 @@ import {
 } from 'recharts';
 import { Database, ExternalLink, ShieldCheck } from 'lucide-react';
 
-import type { AnalyticsSnapshot } from '@/lib/analytics';
-
-export type DashboardData = AnalyticsSnapshot;
+import type { Dashboard as DashboardPayload } from '@/lib/analytics';
+import { COMBINED } from '@/lib/constants';
 
 const AXIS = { fill: '#8a877f', fontSize: 11 };
 const GRID = '#e6e2d8';
@@ -198,9 +197,17 @@ function Metric({
   );
 }
 
-export default function Dashboard({ data }: { data: DashboardData }) {
+export default function Dashboard({ dashboard }: { dashboard: DashboardPayload }) {
   const [scope, setScope] = useState<'weekly' | 'all'>('weekly');
   const [allRelayers, setAllRelayers] = useState(false);
+  const [network, setNetwork] = useState(dashboard.defaultNetwork);
+
+  // Every network's snapshot is already on the page, so switching is instant.
+  const data =
+    dashboard.snapshots[network] ?? dashboard.snapshots[dashboard.defaultNetwork];
+  const combined = network === COMBINED;
+  const labelOf = (id: string) =>
+    dashboard.networks.find((entry) => entry.id === id)?.label ?? id;
   const live = data.source !== 'unavailable';
 
   // Recharts colours pie slices from a `fill` on each datum, avoiding <Cell>.
@@ -272,6 +279,31 @@ export default function Dashboard({ data }: { data: DashboardData }) {
                 ? 'PARTIAL · SOME SERIES UNAVAILABLE'
                 : 'DATA SOURCE UNAVAILABLE'}
           </div>
+          {dashboard.networks.length > 1 && (
+            <div className="network-switch" role="tablist" aria-label="Network">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={combined}
+                className={combined ? 'active' : ''}
+                onClick={() => setNetwork(COMBINED)}
+              >
+                All networks
+              </button>
+              {dashboard.networks.map((entry) => (
+                <button
+                  key={entry.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={network === entry.id}
+                  className={network === entry.id ? 'active' : ''}
+                  onClick={() => setNetwork(entry.id)}
+                >
+                  {entry.label}
+                </button>
+              ))}
+            </div>
+          )}
           <h1>
             Private access.
             <br />
@@ -447,12 +479,6 @@ export default function Dashboard({ data }: { data: DashboardData }) {
               data={data.weeks}
               margin={{ top: 20, right: 6, left: -20, bottom: 0 }}
             >
-              <defs>
-                <linearGradient id="fillCumulative" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor={YELLOW} stopOpacity={0.3} />
-                  <stop offset="100%" stopColor={YELLOW} stopOpacity={0} />
-                </linearGradient>
-              </defs>
               <CartesianGrid vertical={false} stroke={GRID} />
               <XAxis
                 dataKey="label"
@@ -486,14 +512,13 @@ export default function Dashboard({ data }: { data: DashboardData }) {
                 fill={YELLOW}
                 radius={[2, 2, 0, 0]}
               />
-              <Area
+              <Line
                 yAxisId="right"
                 type="monotone"
                 dataKey="cumulativeGigabytes"
                 name="Cumulative volume"
                 stroke={INK}
                 strokeWidth={2}
-                fill="url(#fillCumulative)"
                 dot={false}
               />
             </ComposedChart>
@@ -745,9 +770,10 @@ export default function Dashboard({ data }: { data: DashboardData }) {
               ? relayerSlices
               : relayerSlices.slice(0, LEGEND_PREVIEW)
             ).map((relayer) => (
-              <li key={relayer.address}>
+              <li key={relayer.key}>
                 <i style={{ background: relayer.fill }} />
                 <code>{shortAddress(relayer.address)}</code>
+                {combined && <em className="row-network">{labelOf(relayer.network)}</em>}
                 <strong>{percent(relayer.share)}</strong>
               </li>
             ))}
@@ -866,10 +892,11 @@ export default function Dashboard({ data }: { data: DashboardData }) {
                 </thead>
                 <tbody>
                   {rankedClients.map((client, index) => (
-                    <tr key={client.address}>
+                    <tr key={client.key}>
                       <td>{medal(index)}</td>
                       <td>
                         <code>{client.address}</code>
+                        {combined && <em className="row-network">{labelOf(client.network)}</em>}
                       </td>
                       <td className="numeric">
                         {count(
@@ -924,12 +951,15 @@ export default function Dashboard({ data }: { data: DashboardData }) {
                 </thead>
                 <tbody>
                   {data.deployments.map((deployment) => (
-                    <tr key={deployment.address}>
+                    <tr key={deployment.key}>
                       <td className="timestamp">
                         {formatTimestamp(deployment.timestamp)}
                       </td>
                       <td>
                         <code>{deployment.address}</code>
+                        {combined && (
+                          <em className="row-network">{labelOf(deployment.network)}</em>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -983,7 +1013,7 @@ export default function Dashboard({ data }: { data: DashboardData }) {
               </thead>
               <tbody>
                 {data.recentRedemptions.map((redemption) => (
-                  <tr key={`${redemption.channelId}-${redemption.timestamp}`}>
+                  <tr key={redemption.key}>
                     <td className="timestamp">
                       {formatTimestamp(redemption.timestamp)}
                     </td>
