@@ -166,7 +166,6 @@ type Redemption = {
   channelId: string;
   source: string;
   destination: string;
-  block: number;
   day: number;
   timestamp: number;
   tickets: number;
@@ -240,22 +239,39 @@ function decodeWinProbability(bytes: Buffer): number {
  * Step function over the win-probability timeline: the newest update at or before
  * a block. Redemptions preceding the first update have no probability on record
  * and resolve to zero, which excludes them from volume rather than guessing.
+ *
+ * With no timeline at all the caller's fallback applies to every block, which is
+ * the degraded path where only the current probability is known.
  */
-function winProbabilityAt(timeline: Array<[number, number]>, fallback: number) {
+function winProbabilityAt(
+  timeline: Array<[number, number]>,
+  fallback: number,
+): (block: number) => number {
   if (!timeline.length) return () => fallback;
-  return (block: number) => {
-    let value = 0;
-    for (const [updatedAt, probability] of timeline) {
-      if (updatedAt > block) break;
-      value = probability;
+  return (block) => {
+    let low = 0;
+    let high = timeline.length - 1;
+    let found = -1;
+    while (low <= high) {
+      const middle = (low + high) >> 1;
+      if (timeline[middle][0] <= block) {
+        found = middle;
+        low = middle + 1;
+      } else {
+        high = middle - 1;
+      }
     }
-    return value;
+    return found === -1 ? 0 : timeline[found][1];
   };
 }
 
 /** Volume a redemption accounts for; a zero or unknown probability contributes none. */
 function redemptionVolume(probability: number): number {
   return probability > 0 ? GIGABYTES_PER_REDEMPTION / probability : 0;
+}
+
+function sum<T>(rows: T[], pick: (row: T) => number): number {
+  return rows.reduce((total, row) => total + pick(row), 0);
 }
 
 function dayIndex(timestamp: number): number {
@@ -566,7 +582,6 @@ async function querySnapshot(): Promise<AnalyticsSnapshot> {
       channelId: row.channel_id,
       source: hex(row.source),
       destination: hex(row.destination),
-      block,
       day: dayIndex(timestamp),
       timestamp,
       tickets: Number(row.tickets),
@@ -581,15 +596,21 @@ async function querySnapshot(): Promise<AnalyticsSnapshot> {
     actorsByDay.set(redemption.day, actors);
   }
 
-  // A client's deployment day counts as activity in its own right, so add it to
-  // the actor set as well as reporting it as a deployment.
+  // A client's deployment day counts as activity in its own right, so each one
+  // joins the actor set as well as being reported as a deployment. Resolved once:
+  // the daily counts, the per-client lookup and the feed all read from this list.
+  const deployed = rawDeployments.map((row) => {
+    const timestamp = clock(Number(row.published_block));
+    return { address: hex(row.account), timestamp, day: dayIndex(timestamp) };
+  });
   const deploymentsByDay = new Map<number, number>();
-  for (const row of rawDeployments) {
-    const day = dayIndex(clock(Number(row.published_block)));
-    deploymentsByDay.set(day, (deploymentsByDay.get(day) ?? 0) + 1);
-    const actors = actorsByDay.get(day) ?? new Set<string>();
-    actors.add(hex(row.account));
-    actorsByDay.set(day, actors);
+  const deploymentDayOf = new Map<string, number>();
+  for (const client of deployed) {
+    deploymentsByDay.set(client.day, (deploymentsByDay.get(client.day) ?? 0) + 1);
+    deploymentDayOf.set(client.address, client.day);
+    const actors = actorsByDay.get(client.day) ?? new Set<string>();
+    actors.add(client.address);
+    actorsByDay.set(client.day, actors);
   }
 
   const lastDay = dayIndex(clock(latestBlock));
@@ -602,17 +623,15 @@ async function querySnapshot(): Promise<AnalyticsSnapshot> {
     distribution: relayers,
   } = relayerBreakdown(redemptions, lastDay);
   const allClients = clientUsage(redemptions, lastDay - WEEK_DAYS + 1);
-  const deploymentDayOf = new Map<string, number>();
-  for (const row of rawDeployments) {
-    deploymentDayOf.set(hex(row.account), dayIndex(clock(Number(row.published_block))));
-  }
-  const deployments = rawDeployments
-    .map((row) => ({
-      address: hex(row.account),
-      timestamp: new Date(clock(Number(row.published_block)) * 1000).toISOString(),
-    }))
+
+  // Both queries return oldest first, so the feeds are the tail, newest first.
+  const deployments = deployed
+    .slice(-DEPLOYMENT_LIMIT)
     .reverse()
-    .slice(0, DEPLOYMENT_LIMIT);
+    .map((client) => ({
+      address: client.address,
+      timestamp: new Date(client.timestamp * 1000).toISOString(),
+    }));
   const recentRedemptions = redemptions
     .slice(-REDEMPTION_FEED_LIMIT)
     .reverse()
@@ -626,13 +645,11 @@ async function querySnapshot(): Promise<AnalyticsSnapshot> {
   const currentPrice = priceTimeline.at(-1)?.[1] ?? null;
   const latest = activeUsers.at(-1);
   const hasUsage = redemptionRows.status === "fulfilled";
-  let latestWeekDeployments = 0;
+  const hasDeployments = deploymentRows.status === "fulfilled";
+  let deployments7d = 0;
   for (let offset = 0; offset < WEEK_DAYS; offset += 1) {
-    latestWeekDeployments += deploymentsByDay.get(lastDay - offset) ?? 0;
+    deployments7d += deploymentsByDay.get(lastDay - offset) ?? 0;
   }
-  const sum = (rows: Redemption[], pick: (row: Redemption) => number) =>
-    rows.reduce((total, row) => total + pick(row), 0);
-
   return {
     source: warnings.length ? "degraded" : "live",
     observedAt: new Date().toISOString(),
@@ -678,13 +695,29 @@ async function querySnapshot(): Promise<AnalyticsSnapshot> {
       gigabytesTotal: hasUsage ? sum(redemptions, (row) => row.gigabytes) : null,
       ticketsTotal: hasUsage ? sum(redemptions, (row) => row.tickets) : null,
       relayers7d: hasUsage ? new Set(recent.map((row) => row.destination)).size : null,
-      deployments7d: latestWeekDeployments,
-      deployments30d: latest?.deployments ?? null,
-      clientsDeployed: rawDeployments.length || null,
+      deployments7d: hasDeployments ? deployments7d : null,
+      deployments30d: hasDeployments ? (latest?.deployments ?? null) : null,
+      clientsDeployed: hasDeployments ? deployed.length : null,
     },
     warnings,
   };
 }
+
+/** Every metric unknown: the shape the page renders when a query yields nothing. */
+const EMPTY_TOTALS: AnalyticsSnapshot["totals"] = {
+  weeklyActiveUsers: null,
+  monthlyActiveUsers: null,
+  allTimeUsers: null,
+  redemptions7d: null,
+  redemptionsTotal: null,
+  gigabytes7d: null,
+  gigabytesTotal: null,
+  ticketsTotal: null,
+  relayers7d: null,
+  deployments7d: null,
+  deployments30d: null,
+  clientsDeployed: null,
+};
 
 function unavailable(message: string): AnalyticsSnapshot {
   return {
@@ -711,20 +744,7 @@ function unavailable(message: string): AnalyticsSnapshot {
     hourly: [],
     recentRedemptions: [],
     ticket: { winProbability: null, priceWei: null, valueWei: null },
-    totals: {
-      weeklyActiveUsers: null,
-      monthlyActiveUsers: null,
-      allTimeUsers: null,
-      redemptions7d: null,
-      redemptionsTotal: null,
-      gigabytes7d: null,
-      gigabytesTotal: null,
-      ticketsTotal: null,
-      relayers7d: null,
-      deployments7d: null,
-      deployments30d: null,
-      clientsDeployed: null,
-    },
+    totals: EMPTY_TOTALS,
     warnings: [message],
   };
 }

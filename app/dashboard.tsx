@@ -35,6 +35,41 @@ const LIGHT_TOOLTIP = { border: "1px solid #d9d5cb", borderRadius: 2 };
 const LEGEND_PREVIEW = 5;
 const MEDALS = ["\u{1F947}", "\u{1F948}", "\u{1F949}"];
 
+// Constructing an Intl formatter is expensive and these run per tick and per row.
+const INTEGER = new Intl.NumberFormat("en-US");
+const PERCENT = new Intl.NumberFormat("en", { style: "percent", maximumFractionDigits: 1 });
+const DECIMAL = new Intl.NumberFormat("en", { maximumFractionDigits: 2 });
+const FIXED_2 = new Intl.NumberFormat("en", {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+const COMPACT = new Intl.NumberFormat("en", {
+  notation: "compact",
+  maximumFractionDigits: 1,
+});
+const SIGNIFICANT_2 = new Intl.NumberFormat("en", { maximumSignificantDigits: 2 });
+const DAY = new Intl.DateTimeFormat("en", {
+  day: "2-digit",
+  month: "short",
+  timeZone: "UTC",
+});
+const LONG_DAY = new Intl.DateTimeFormat("en-GB", {
+  day: "2-digit",
+  month: "short",
+  year: "numeric",
+  timeZone: "UTC",
+});
+const TIMESTAMP = new Intl.DateTimeFormat("en-GB", {
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  timeZone: "UTC",
+  hour12: false,
+});
+
 /**
  * A distinct colour per relayer, however many there are.
  *
@@ -53,14 +88,11 @@ function medal(index: number) {
 }
 
 function count(input: number | null) {
-  return input === null ? "—" : new Intl.NumberFormat("en-US").format(input);
+  return input === null ? "—" : INTEGER.format(input);
 }
 
 function percent(share: number) {
-  return new Intl.NumberFormat("en", {
-    style: "percent",
-    maximumFractionDigits: 1,
-  }).format(share);
+  return PERCENT.format(share);
 }
 
 /** Volume arrives in gigabytes; step down so small numbers stay readable. */
@@ -68,22 +100,19 @@ function volume(input: number | null) {
   if (input === null) return "—";
   const [value, unit] =
     input >= 1 ? [input, "GB"] : input >= 0.001 ? [input * 1000, "MB"] : [input * 1e6, "KB"];
-  return `${new Intl.NumberFormat("en", { maximumFractionDigits: 2 }).format(value)} ${unit}`;
+  return `${DECIMAL.format(value)} ${unit}`;
 }
 
 /** The ranking tables quote usage in megabytes, matching the published tables. */
 function megabytes(gigabytes: number) {
-  return new Intl.NumberFormat("en", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(gigabytes * 1000);
+  return FIXED_2.format(gigabytes * 1000);
 }
 
 function compactToken(input: string | null) {
   if (!input) return "—";
   const number = Number(BigInt(input) / 1_000_000_000_000_000n) / 1_000;
   if (!Number.isFinite(number)) return input;
-  return `${new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(number)} wxHOPR`;
+  return `${COMPACT.format(number)} wxHOPR`;
 }
 
 /** wxHOPR has 18 decimals; these amounts are small, so show significant digits. */
@@ -95,8 +124,7 @@ function token(wei: string | null, digits = 6) {
 }
 
 function probability(value: number | null) {
-  if (value === null) return "—";
-  return new Intl.NumberFormat("en", { maximumSignificantDigits: 2 }).format(value);
+  return value === null ? "—" : SIGNIFICANT_2.format(value);
 }
 
 function shortAddress(address: string) {
@@ -106,26 +134,17 @@ function shortAddress(address: string) {
 // Recharts hands both tick and tooltip labels through as ReactNode.
 function formatDay(value: unknown) {
   if (typeof value !== "string") return "";
-  return new Intl.DateTimeFormat("en", {
-    day: "2-digit",
-    month: "short",
-    timeZone: "UTC",
-  }).format(new Date(`${value}T00:00:00Z`));
+  return DAY.format(new Date(`${value}T00:00:00Z`));
 }
 
 function formatTimestamp(value: string) {
-  return new Intl.DateTimeFormat("en-GB", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    timeZone: "UTC",
-    hour12: false,
-  })
-    .format(new Date(value))
-    .replace(",", "");
+  return TIMESTAMP.format(new Date(value)).replace(",", "");
+}
+
+/** Overlay shown in place of a chart or table that has nothing to render. */
+function Empty({ when, children }: { when: boolean; children: string }) {
+  if (!when) return null;
+  return <div className="empty-overlay">{children}</div>;
 }
 
 function Metric({
@@ -229,13 +248,7 @@ export default function Dashboard({ data }: { data: DashboardData }) {
             <dt>Last indexed block</dt>
             <dd>{data.blockNumber ? `#${count(data.blockNumber)}` : "—"}</dd>
             <dt>Observed</dt>
-            <dd>
-              {new Date(data.observedAt).toLocaleDateString("en-GB", {
-                day: "2-digit",
-                month: "short",
-                year: "numeric",
-              })}
-            </dd>
+            <dd>{LONG_DAY.format(new Date(data.observedAt))}</dd>
           </dl>
         </div>
       </section>
@@ -345,11 +358,7 @@ export default function Dashboard({ data }: { data: DashboardData }) {
               />
             </ComposedChart>
           </ResponsiveContainer>
-          {!data.activeUsers.length && (
-            <div className="empty-overlay">
-              The series appears once the index database reports client redemptions.
-            </div>
-          )}
+          <Empty when={!data.activeUsers.length}>The series appears once the index database reports client redemptions.</Empty>
           <p className="chart-note">
             Each point counts distinct clients over the preceding 30 and 7 days, so the two
             lines converge when activity is concentrated in a single week.
@@ -403,9 +412,7 @@ export default function Dashboard({ data }: { data: DashboardData }) {
                 <Bar dataKey="gigabytes" name="Data volume" fill={YELLOW} radius={[2, 2, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
-            {!data.weeks.length && (
-              <div className="empty-overlay">No client redemptions have been indexed yet.</div>
-            )}
+            <Empty when={!data.weeks.length}>No client redemptions have been indexed yet.</Empty>
           </div>
           <div className="chart-card service-chart">
             <div className="chart-title">
@@ -432,9 +439,7 @@ export default function Dashboard({ data }: { data: DashboardData }) {
                 <Bar dataKey="redemptions" name="Redemptions" fill={INK} radius={[2, 2, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
-            {!data.weeks.length && (
-              <div className="empty-overlay">No client redemptions have been indexed yet.</div>
-            )}
+            <Empty when={!data.weeks.length}>No client redemptions have been indexed yet.</Empty>
           </div>
         </div>
         <div className="network-stats network-stats-row">
@@ -508,7 +513,7 @@ export default function Dashboard({ data }: { data: DashboardData }) {
                 formatter={(input: unknown, name: unknown) =>
                   name === "Cumulative volume"
                     ? volume(Number(input))
-                    : new Intl.NumberFormat("en").format(Number(input))
+                    : INTEGER.format(Number(input))
                 }
               />
               <Area
@@ -532,9 +537,7 @@ export default function Dashboard({ data }: { data: DashboardData }) {
               />
             </ComposedChart>
           </ResponsiveContainer>
-          {!data.weeks.length && (
-            <div className="empty-overlay">No client redemptions have been indexed yet.</div>
-          )}
+          <Empty when={!data.weeks.length}>No client redemptions have been indexed yet.</Empty>
         </div>
       </section>
 
@@ -583,9 +586,7 @@ export default function Dashboard({ data }: { data: DashboardData }) {
                 <Bar dataKey="newClients" name="New" stackId="users" fill={PLUM} />
               </BarChart>
             </ResponsiveContainer>
-            {!data.dailyUsers.length && (
-              <div className="empty-overlay">No client activity in the last thirty days.</div>
-            )}
+            <Empty when={!data.dailyUsers.length}>No client activity in the last thirty days.</Empty>
           </div>
           <div className="chart-card service-chart">
             <div className="chart-title">
@@ -618,9 +619,7 @@ export default function Dashboard({ data }: { data: DashboardData }) {
                 <Bar dataKey="share" name="Share of volume" fill={PLUM} radius={[2, 2, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
-            {!data.hourly.length && (
-              <div className="empty-overlay">No volume has been indexed yet.</div>
-            )}
+            <Empty when={!data.hourly.length}>No volume has been indexed yet.</Empty>
             <p className="chart-note">
               Share of relayed volume by hour, UTC. Block timestamps are{" "}
               {data.timebase === "rpc" ? "RPC resolved" : "estimated from block height"}.
@@ -664,18 +663,14 @@ export default function Dashboard({ data }: { data: DashboardData }) {
                   contentStyle={LIGHT_TOOLTIP}
                   formatter={(input: unknown, name: unknown) =>
                     [
-                      `${new Intl.NumberFormat("en").format(Number(input))} redemptions`,
+                      `${INTEGER.format(Number(input))} redemptions`,
                       typeof name === "string" ? shortAddress(name) : "",
                     ] as [string, string]
                   }
                 />
               </PieChart>
             </ResponsiveContainer>
-            {!data.relayers.length && (
-              <div className="empty-overlay">
-                No client redemptions were indexed in the last thirty days.
-              </div>
-            )}
+            <Empty when={!data.relayers.length}>No client redemptions were indexed in the last thirty days.</Empty>
           </div>
           <div className="chart-card service-chart">
             <div className="chart-title">
@@ -703,6 +698,7 @@ export default function Dashboard({ data }: { data: DashboardData }) {
                   cursor={{ fill: "#f2eee5" }}
                   labelFormatter={formatDay}
                   contentStyle={LIGHT_TOOLTIP}
+                  itemSorter={(item) => -Number(item.value ?? 0)}
                   formatter={(input: unknown, name: unknown) =>
                     [
                       volume(Number(input)),
@@ -721,11 +717,7 @@ export default function Dashboard({ data }: { data: DashboardData }) {
                 ))}
               </BarChart>
             </ResponsiveContainer>
-            {!data.relayerDaily.length && (
-              <div className="empty-overlay">
-                No client redemptions were indexed in the last thirty days.
-              </div>
-            )}
+            <Empty when={!data.relayerDaily.length}>No client redemptions were indexed in the last thirty days.</Empty>
             <p className="chart-note">
               Volume is an estimate derived from redemptions seen on chain.
             </p>
@@ -866,11 +858,7 @@ export default function Dashboard({ data }: { data: DashboardData }) {
                 </tbody>
               </table>
             </div>
-            {!rankedClients.length && (
-              <div className="empty-overlay">
-                No client usage has been indexed for this window.
-              </div>
-            )}
+            <Empty when={!rankedClients.length}>No client usage has been indexed for this window.</Empty>
             <p className="chart-note">
               Showing {rankedClients.length} of {data.clientCount} clients with usage.
             </p>
@@ -909,9 +897,7 @@ export default function Dashboard({ data }: { data: DashboardData }) {
                 </tbody>
               </table>
             </div>
-            {!data.deployments.length && (
-              <div className="empty-overlay">No client deployments have been indexed.</div>
-            )}
+            <Empty when={!data.deployments.length}>No client deployments have been indexed.</Empty>
             <p className="chart-note">
               Showing the {data.deployments.length} most recent of{" "}
               {count(data.totals.clientsDeployed)} clients deployed.
@@ -970,9 +956,7 @@ export default function Dashboard({ data }: { data: DashboardData }) {
               </tbody>
             </table>
           </div>
-          {!data.recentRedemptions.length && (
-            <div className="empty-overlay">No redemptions have been indexed.</div>
-          )}
+          <Empty when={!data.recentRedemptions.length}>No redemptions have been indexed.</Empty>
         </div>
       </section>
 

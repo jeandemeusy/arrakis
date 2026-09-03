@@ -533,6 +533,29 @@ main {
 .network-stats .metric strong {
   font-size: 36px;
 }
+/* The row variant is a single line of three; .network-stats' own two-column rules
+   are declared later, so these have to restate the columns and the last-child span. */
+.network-stats.network-stats-row {
+  grid-template-columns: repeat(3, 1fr);
+  border: 0;
+}
+.network-stats.network-stats-row .metric:nth-child(2) {
+  border-right: 1px solid var(--line);
+}
+.network-stats.network-stats-row .metric:last-child {
+  grid-column: auto;
+  border-top: 0;
+  border-right: 0;
+}
+@media (max-width: 860px) {
+  .network-stats.network-stats-row {
+    grid-template-columns: 1fr;
+  }
+  .network-stats.network-stats-row .metric {
+    border-right: 0;
+    border-top: 1px solid var(--line);
+  }
+}
 .empty-overlay {
   position: absolute;
   inset: 120px 32px 42px;
