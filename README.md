@@ -51,6 +51,16 @@ npm start
 
 The JSON representation of the current snapshot is available at
 `/api/v1/dashboard`; it returns HTTP 503 when the database cannot be reached.
+Kubernetes can use `/api/health/live` for liveness and `/api/health/ready` for
+readiness. Readiness checks the cached analytics snapshot and returns HTTP 503
+when the index database is unavailable.
+
+## Container publishing
+
+The `Publish container` GitHub Actions workflow builds and publishes
+`ghcr.io/jeandemeusy/bloklune` whenever `main` or a `v*` tag is pushed. Every
+build receives an immutable `sha-<full-commit-sha>` tag; version tags and the
+mutable `main` convenience tag are also published.
 
 ## Metric governance
 
