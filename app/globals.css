@@ -229,7 +229,6 @@ main {
      more room than the sections' own top padding provides. */
   margin: 0 var(--gutter) 56px;
 }
-.mau-card,
 .metric {
   background: #fffdf8;
   min-height: 206px;
@@ -237,6 +236,17 @@ main {
   display: flex;
   flex-direction: column;
   justify-content: space-between;
+}
+/* The number tile renders the same shape as every other: label, body, note. */
+.metric > strong {
+  font-family: Georgia, serif;
+  font-size: clamp(30px, 3vw, 44px);
+  font-weight: 400;
+  letter-spacing: -0.04em;
+  overflow-wrap: anywhere;
+}
+.metric > span {
+  order: -1;
 }
 .metric-kicker,
 .metric > span {
@@ -252,12 +262,10 @@ main {
 .mau-card {
   border-top: 3px solid var(--yellow);
 }
-.mau-number {
-  font-family: Georgia, serif;
+.mau-card > strong {
   font-size: clamp(52px, 5vw, 76px);
   line-height: 0.9;
   letter-spacing: -0.05em;
-  color: var(--ink);
 }
 .mau-footer {
   display: flex;
@@ -329,16 +337,55 @@ main {
 .chart-card {
   background: #fffdf8;
   position: relative;
+  display: flex;
+  flex-direction: column;
+}
+/*
+ * With the legend moved below the plot, every chart header is a title and a badge
+ * and nothing else, so they are the same height and the plots start at the same
+ * offset. Anything below the plot — legend, footnote — hangs off the bottom, which
+ * keeps the x axes of two cards in a row on the same line.
+ */
+.main-chart > .chart-frame,
+.service-chart > .chart-frame {
+  margin-bottom: auto;
+}
+.chart-card > .chart-note {
+  margin-top: 10px;
 }
 .main-chart {
   background: #fffdf8;
   padding: 30px 26px 20px;
 }
+/*
+ * Two rows, always: the title and its badge, then the legend beneath.
+ *
+ * Letting the legend sit inline made its placement depend on how long the title
+ * happened to be, and a header that wrapped in one card but not its neighbour
+ * started the two charts at different heights, so their x axes disagreed. The
+ * min-height reserves the legend row even in cards that have no legend.
+ */
 .chart-title {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
-  justify-content: space-between;
+  gap: 0 18px;
+  min-height: 56px;
   margin-bottom: 14px;
+}
+.chart-title > div:first-child {
+  order: 1;
+}
+/* Anything the tile puts beside the title — a badge, a switch — sits at the far
+   end of the header row, after it. */
+.chart-title .axis-badge,
+.chart-title .tab-switch {
+  order: 2;
+  margin-left: auto;
+}
+/* The key sits under the plot it explains, clear of the tile's controls. */
+.tile-legend {
+  padding: 12px 74px 0 0;
 }
 .chart-title span,
 .aside-label {
@@ -354,16 +401,23 @@ main {
 }
 .legend {
   color: var(--muted);
-  font-size: 10px;
+  font-size: 12px;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 7px;
+  gap: 6px 18px;
+}
+.legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 .legend i {
-  display: inline-block;
-  width: 18px;
+  display: block;
+  box-sizing: border-box;
+  width: 20px;
   height: 2px;
-  margin-left: 9px;
+  flex: none;
 }
 .legend .actual {
   background: var(--yellow);
@@ -389,10 +443,6 @@ main {
   height: 2px;
 }
 /* Title, legend and badge share the row, so let them wrap rather than collide. */
-.chart-title {
-  flex-wrap: wrap;
-  gap: 10px 18px;
-}
 .relayer-legend {
   margin-top: 1px;
   padding: 18px 26px;
@@ -408,14 +458,14 @@ main {
 }
 .relayer-key li {
   display: grid;
-  grid-template-columns: 10px 1fr auto;
+  grid-template-columns: 12px 1fr auto;
   align-items: center;
   gap: 10px;
-  font-size: 11px;
+  font-size: 12px;
 }
 .relayer-key i {
-  width: 10px;
-  height: 10px;
+  width: 12px;
+  height: 12px;
   border-radius: 2px;
 }
 .relayer-key code {
@@ -635,6 +685,10 @@ main {
   padding: 28px 28px 20px;
   min-height: 375px;
 }
+.main-chart,
+.service-chart {
+  padding-bottom: 34px;
+}
 .service-chart .chart-title span {
   color: #75726b;
 }
@@ -702,6 +756,117 @@ main {
     grid-template-columns: 1fr;
   }
 }
+/* Sits in the card's bottom-right, out of the way of the title row's badges.
+   Quiet until the card is hovered or the button itself takes focus. */
+.chart-actions {
+  position: absolute;
+  right: 12px;
+  bottom: 10px;
+  display: flex;
+  gap: 6px;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.chart-card:hover .chart-actions,
+.chart-actions:focus-within {
+  opacity: 1;
+}
+.chart-actions button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: #fffdf8;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  cursor: pointer;
+}
+.chart-actions button:hover {
+  color: var(--ink);
+  border-color: var(--ink);
+}
+
+.modal-body {
+  overflow: auto;
+}
+/* Enlarged, a number keeps the tile's face and colour and only grows. */
+.modal-number strong {
+  display: block;
+  font-family: Georgia, serif;
+  font-weight: 400;
+  font-size: clamp(64px, 9vw, 132px);
+  line-height: 1;
+  letter-spacing: -0.05em;
+  color: var(--ink);
+  padding: 20px 0 14px;
+}
+.modal-number + p,
+.modal-body > p {
+  color: var(--muted);
+  font-size: 13px;
+  margin: 0;
+}
+.modal {
+  position: relative;
+  width: min(1180px, 92vw);
+  max-height: 88vh;
+  border: 1px solid var(--line);
+  background: #fffdf8;
+  color: var(--ink);
+  padding: 24px 26px 28px;
+}
+.modal::backdrop {
+  background: rgba(17, 19, 21, 0.5);
+}
+.modal-head {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  /* Clear of the close button, which is pinned to the corner. */
+  padding-right: 44px;
+  margin-bottom: 16px;
+}
+.modal-head h2 {
+  margin-right: auto;
+}
+/* A chart can have twenty series, so the key sits under the plot it explains and
+   scrolls rather than pushing the plot out of the dialog. */
+.modal-legend {
+  max-height: 84px;
+  overflow-y: auto;
+  padding-top: 14px;
+  margin-top: 14px;
+  border-top: 1px solid var(--line);
+}
+.modal-head h2 {
+  font-family: Georgia, serif;
+  font-weight: 400;
+  font-size: 22px;
+  margin: 0;
+}
+/* Anchored to the dialog, not to the flow of the heading: a long title or a
+   wrapped legend would otherwise drag it out of the corner. */
+.modal-head button {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  background: none;
+  border: 1px solid var(--line);
+  color: var(--ink);
+  cursor: pointer;
+}
+.modal-head button:hover {
+  border-color: var(--ink);
+}
+
 .empty-overlay {
   position: absolute;
   inset: 120px 32px 42px;
@@ -882,7 +1047,118 @@ footer a {
   .mau-number {
     font-size: 46px;
   }
-  .empty-overlay {
+  /* Sits in the card's bottom-right, out of the way of the title row's badges.
+   Quiet until the card is hovered or the button itself takes focus. */
+.chart-actions {
+  position: absolute;
+  right: 12px;
+  bottom: 10px;
+  display: flex;
+  gap: 6px;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.chart-card:hover .chart-actions,
+.chart-actions:focus-within {
+  opacity: 1;
+}
+.chart-actions button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: #fffdf8;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  cursor: pointer;
+}
+.chart-actions button:hover {
+  color: var(--ink);
+  border-color: var(--ink);
+}
+
+.modal-body {
+  overflow: auto;
+}
+/* Enlarged, a number keeps the tile's face and colour and only grows. */
+.modal-number strong {
+  display: block;
+  font-family: Georgia, serif;
+  font-weight: 400;
+  font-size: clamp(64px, 9vw, 132px);
+  line-height: 1;
+  letter-spacing: -0.05em;
+  color: var(--ink);
+  padding: 20px 0 14px;
+}
+.modal-number + p,
+.modal-body > p {
+  color: var(--muted);
+  font-size: 13px;
+  margin: 0;
+}
+.modal {
+  position: relative;
+  width: min(1180px, 92vw);
+  max-height: 88vh;
+  border: 1px solid var(--line);
+  background: #fffdf8;
+  color: var(--ink);
+  padding: 24px 26px 28px;
+}
+.modal::backdrop {
+  background: rgba(17, 19, 21, 0.5);
+}
+.modal-head {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  /* Clear of the close button, which is pinned to the corner. */
+  padding-right: 44px;
+  margin-bottom: 16px;
+}
+.modal-head h2 {
+  margin-right: auto;
+}
+/* A chart can have twenty series, so the key sits under the plot it explains and
+   scrolls rather than pushing the plot out of the dialog. */
+.modal-legend {
+  max-height: 84px;
+  overflow-y: auto;
+  padding-top: 14px;
+  margin-top: 14px;
+  border-top: 1px solid var(--line);
+}
+.modal-head h2 {
+  font-family: Georgia, serif;
+  font-weight: 400;
+  font-size: 22px;
+  margin: 0;
+}
+/* Anchored to the dialog, not to the flow of the heading: a long title or a
+   wrapped legend would otherwise drag it out of the corner. */
+.modal-head button {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  background: none;
+  border: 1px solid var(--line);
+  color: var(--ink);
+  cursor: pointer;
+}
+.modal-head button:hover {
+  border-color: var(--ink);
+}
+
+.empty-overlay {
     inset: 96px 16px 32px;
   }
   .legend {

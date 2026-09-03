@@ -19,6 +19,7 @@ import { Database, ExternalLink, ShieldCheck } from 'lucide-react';
 
 import type { Dashboard as DashboardPayload } from '@/lib/analytics';
 import { COMBINED } from '@/lib/constants';
+import { Tile, type LegendEntry } from './tile';
 
 const AXIS = { fill: '#8a877f', fontSize: 11 };
 const GRID = '#e6e2d8';
@@ -230,21 +231,33 @@ function Empty({ when, children }: { when: boolean; children: string }) {
   return <div className="empty-overlay">{children}</div>;
 }
 
+/** A number is a tile like any other: same header, same controls. */
 function Metric({
-  eyebrow,
+  id,
+  label,
   figure,
   note,
+  expanded,
+  onExpand,
 }: {
-  eyebrow: string;
+  id: string;
+  label: string;
   figure: string;
   note: string;
+  expanded: string | null;
+  onExpand: (id: string | null) => void;
 }) {
   return (
-    <div className="metric">
-      <span>{eyebrow}</span>
-      <strong>{figure}</strong>
-      <p>{note}</p>
-    </div>
+    <Tile
+      id={id}
+      className="metric"
+      title={label}
+      figure={figure}
+      note={<p>{note}</p>}
+      noteText={note}
+      expanded={expanded}
+      onExpand={onExpand}
+    />
   );
 }
 
@@ -258,6 +271,7 @@ export default function Dashboard({
   const [clientPage, setClientPage] = useState(0);
   const [deploymentPage, setDeploymentPage] = useState(0);
   const [feedPage, setFeedPage] = useState(0);
+  const [enlarged, setEnlarged] = useState<string | null>(null);
   const [network, setNetwork] = useState(dashboard.defaultNetwork);
 
   // Every network's snapshot is already on the page, so switching is instant.
@@ -296,6 +310,55 @@ export default function Dashboard({
     );
   }, [data.clients, scope]);
 
+  // Defined as data once: the card header renders it, the dialog renders it, and
+  // the PNG export paints it. Three surfaces, one source.
+  const activeUsersLegend: LegendEntry[] = [
+    { color: YELLOW, label: '30-day active' },
+    { color: '#9b978d', label: '7-day active' },
+    { color: PLUM, label: 'New clients (30d)', dashed: true },
+  ];
+  const volumeLegend: LegendEntry[] = [
+    { color: YELLOW, label: 'Weekly' },
+    { color: INK, label: 'Cumulative' },
+  ];
+  const dailyUsersLegend: LegendEntry[] = [
+    { color: YELLOW, label: 'Returning' },
+    { color: PLUM, label: 'New' },
+  ];
+  const relayerLegend: LegendEntry[] = relayerSlices.map((relayer) => ({
+    color: relayer.fill,
+    label: shortAddress(relayer.address),
+  }));
+
+  const clientRows = () => [
+    ['rank', 'client', 'network', 'redemptions', 'usage_mb'],
+    ...rankedClients.map((client, index) => [
+      String(index + 1),
+      client.address,
+      client.network,
+      String(
+        scope === 'weekly' ? client.redemptions7d : client.redemptionsTotal,
+      ),
+      (
+        (scope === 'weekly' ? client.gigabytes7d : client.gigabytesTotal) * 1000
+      ).toFixed(2),
+    ]),
+  ];
+  const deploymentRows = () => [
+    ['timestamp', 'client', 'network'],
+    ...data.deployments.map((row) => [row.timestamp, row.address, row.network]),
+  ];
+  const feedRows = () => [
+    ['timestamp', 'client', 'relayer', 'channel', 'network'],
+    ...data.recentRedemptions.map((row) => [
+      row.timestamp,
+      row.client,
+      row.relayer,
+      `0x${row.channelId}`,
+      row.network,
+    ]),
+  ];
+
   const pagesOf = (total: number) => Math.max(1, Math.ceil(total / PAGE_SIZE));
   const clip = (page: number, total: number) =>
     Math.min(page, pagesOf(total) - 1);
@@ -324,7 +387,6 @@ export default function Dashboard({
           </span>
         </a>
         <nav aria-label="Dashboard navigation">
-          <a href="#users">Active users</a>
           <a href="#usage">Usage</a>
           <a href="#activity">Activity</a>
           <a href="#relayers">Relayers</a>
@@ -402,214 +464,241 @@ export default function Dashboard({
       </section>
 
       <section className="headline-grid" aria-label="Headline metrics">
-        <div className="mau-card">
-          <div className="metric-kicker">MONTHLY ACTIVE USERS</div>
-          <div className="mau-number">
-            {count(data.totals.monthlyActiveUsers)}
-          </div>
-          <div className="mau-footer">
-            <span>{count(data.totals.weeklyActiveUsers)} weekly active</span>
-            <small>Trailing 30 and 7 days</small>
-          </div>
-        </div>
+        <Tile
+          id="monthly-active-users"
+          className="metric mau-card"
+          title="MONTHLY ACTIVE USERS"
+          figure={count(data.totals.monthlyActiveUsers)}
+          note={
+            <div className="mau-footer">
+              <span>{count(data.totals.weeklyActiveUsers)} weekly active</span>
+              <small>Trailing 30 and 7 days</small>
+            </div>
+          }
+          noteText={`${count(data.totals.weeklyActiveUsers)} weekly active · trailing 30 and 7 days`}
+          expanded={enlarged}
+          onExpand={setEnlarged}
+        />
         <Metric
-          eyebrow="REDEMPTIONS · 7 DAYS"
+          id="redemptions-7-days"
+          label="REDEMPTIONS · 7 DAYS"
           figure={count(data.totals.redemptions7d)}
           note={`${count(data.totals.redemptionsTotal)} since indexing began`}
+          expanded={enlarged}
+          onExpand={setEnlarged}
         />
         <Metric
-          eyebrow="DATA RELAYED · 7 DAYS"
+          id="data-relayed-7-days"
+          label="DATA RELAYED · 7 DAYS"
           figure={volume(data.totals.gigabytes7d)}
           note={`${volume(data.totals.gigabytesTotal)} cumulative`}
+          expanded={enlarged}
+          onExpand={setEnlarged}
         />
         <Metric
-          eyebrow="NEW CLIENTS · 30 DAYS"
+          id="new-clients-30-days"
+          label="NEW CLIENTS · 30 DAYS"
           figure={count(data.totals.deployments30d)}
           note={`${count(data.totals.deployments7d)} in the last 7 days`}
+          expanded={enlarged}
+          onExpand={setEnlarged}
         />
-      </section>
-
-      <section className="section" id="users">
-        <div className="section-heading">
-          <div>
-            <span className="section-index">01</span>
-            <h2>Unique active users</h2>
-          </div>
-          <p>
-            A user is a VPN client that either settled tickets on one of its
-            channels inside the window or was first deployed inside it.
-          </p>
-        </div>
-        <div className="chart-card main-chart">
-          <div className="chart-title">
-            <div>
-              <span>SINCE 01 JAN 2026</span>
-              <h3>Monthly and weekly active users</h3>
-            </div>
-            <div className="legend">
-              <i className="actual" />
-              30-day <i className="target" />
-              7-day <i className="new-client" />
-              New clients
-            </div>
-          </div>
-          <ResponsiveContainer width="100%" height={330}>
-            <ComposedChart
-              data={data.activeUsers}
-              margin={{ top: 24, right: 18, left: -18, bottom: 0 }}
-            >
-              <defs>
-                <linearGradient id="fillMonthly" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor={YELLOW} stopOpacity={0.45} />
-                  <stop offset="100%" stopColor={YELLOW} stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid
-                vertical={false}
-                stroke={GRID}
-                strokeDasharray="2 5"
-              />
-              <XAxis
-                dataKey="date"
-                axisLine={false}
-                tickLine={false}
-                tick={AXIS}
-                minTickGap={48}
-                tickFormatter={formatDay}
-              />
-              <YAxis
-                axisLine={false}
-                tickLine={false}
-                tick={AXIS}
-                allowDecimals={false}
-              />
-              <Tooltip labelFormatter={formatDay} contentStyle={TOOLTIP} />
-              <Area
-                type="monotone"
-                dataKey="monthly"
-                name="30-day active"
-                stroke={YELLOW}
-                fill="url(#fillMonthly)"
-                strokeWidth={3}
-                dot={false}
-              />
-              <Line
-                type="monotone"
-                dataKey="weekly"
-                name="7-day active"
-                stroke="#9b978d"
-                strokeWidth={1.5}
-                dot={false}
-              />
-              <Line
-                type="monotone"
-                dataKey="deployments"
-                name="New clients (30d)"
-                stroke={PLUM}
-                strokeWidth={1.5}
-                strokeDasharray="4 4"
-                dot={false}
-              />
-            </ComposedChart>
-          </ResponsiveContainer>
-          <Empty when={!data.activeUsers.length}>
-            The series appears once the index database reports client
-            redemptions.
-          </Empty>
-          <p className="chart-note">
-            Each point counts distinct clients over the preceding 30 and 7 days.
-          </p>
-        </div>
       </section>
 
       <section className="section" id="usage">
         <div className="section-heading">
           <div>
-            <span className="section-index">02</span>
-            <h2>Relayed traffic</h2>
+            <span className="section-index">01</span>
+            <h2>Users and traffic</h2>
           </div>
-          <p>Each packets is assumed to have an average size of 650 bytes.</p>
+          <p>
+            A user is a VPN client — an account that bound a key but never
+            announced an address, so it is not relay infrastructure. Volume is
+            derived from the redemptions those clients settled, priced at the
+            winning probability in force at each block.
+          </p>
         </div>
-        <div className="chart-card service-chart">
-          <div className="chart-title">
-            <div>
-              <span>PER WEEK AND CUMULATIVE</span>
-              <h3>Data volume</h3>
-            </div>
-            <div className="legend">
-              <i className="actual" />
-              Weekly <i className="cumulative" />
-              Cumulative
-            </div>
-          </div>
-          <ResponsiveContainer width="100%" height={260}>
-            <ComposedChart
-              data={data.weeks}
-              margin={{ top: 20, right: 6, left: -20, bottom: 0 }}
-            >
-              <CartesianGrid vertical={false} stroke={GRID} />
-              <XAxis
-                dataKey="label"
-                axisLine={false}
-                tickLine={false}
-                tick={AXIS}
-                minTickGap={24}
-              />
-              <YAxis
-                yAxisId="left"
-                axisLine={false}
-                tickLine={false}
-                tick={AXIS}
-              />
-              <YAxis
-                yAxisId="right"
-                orientation="right"
-                axisLine={false}
-                tickLine={false}
-                tick={AXIS}
-              />
-              <Tooltip
-                cursor={CURSOR}
-                contentStyle={TOOLTIP}
-                formatter={(input: unknown) => volume(Number(input))}
-              />
-              <Bar
-                yAxisId="left"
-                dataKey="gigabytes"
-                name="Volume this week"
-                fill={YELLOW}
-                radius={[2, 2, 0, 0]}
-              />
-              <Line
-                yAxisId="right"
-                type="monotone"
-                dataKey="cumulativeGigabytes"
-                name="Cumulative volume"
-                stroke={INK}
-                strokeWidth={2}
-                dot={false}
-              />
-            </ComposedChart>
-          </ResponsiveContainer>
-          <Empty when={!data.weeks.length}>
-            No client redemptions have been indexed yet.
-          </Empty>
+        <div className="chart-split">
+          <Tile
+            id="active-users"
+            className="main-chart"
+            eyebrow="SINCE 01 JAN 2026"
+            title="Monthly and weekly active users"
+            legend={activeUsersLegend}
+            note={
+              <>
+                <Empty when={!data.activeUsers.length}>
+                  The series appears once the index database reports client
+                  redemptions.
+                </Empty>
+                <p className="chart-note">
+                  Each point counts distinct clients over the preceding 30 and 7
+                  days.
+                </p>
+              </>
+            }
+            expanded={enlarged}
+            onExpand={setEnlarged}
+            chart={
+              <ResponsiveContainer width="100%" height={330}>
+                <ComposedChart
+                  data={data.activeUsers}
+                  margin={{ top: 24, right: 18, left: -18, bottom: 0 }}
+                >
+                  <defs>
+                    <linearGradient
+                      id="fillMonthly"
+                      x1="0"
+                      y1="0"
+                      x2="0"
+                      y2="1"
+                    >
+                      <stop offset="0%" stopColor={YELLOW} stopOpacity={0.45} />
+                      <stop offset="100%" stopColor={YELLOW} stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid
+                    vertical={false}
+                    stroke={GRID}
+                    strokeDasharray="2 5"
+                  />
+                  <XAxis
+                    dataKey="date"
+                    axisLine={false}
+                    tickLine={false}
+                    tick={AXIS}
+                    minTickGap={48}
+                    tickFormatter={formatDay}
+                  />
+                  <YAxis
+                    axisLine={false}
+                    tickLine={false}
+                    tick={AXIS}
+                    allowDecimals={false}
+                  />
+                  <Tooltip labelFormatter={formatDay} contentStyle={TOOLTIP} />
+                  <Area
+                    type="monotone"
+                    dataKey="monthly"
+                    name="30-day active"
+                    stroke={YELLOW}
+                    fill="url(#fillMonthly)"
+                    strokeWidth={3}
+                    dot={false}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="weekly"
+                    name="7-day active"
+                    stroke="#9b978d"
+                    strokeWidth={1.5}
+                    dot={false}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="deployments"
+                    name="New clients (30d)"
+                    stroke={PLUM}
+                    strokeWidth={1.5}
+                    strokeDasharray="4 4"
+                    dot={false}
+                  />
+                </ComposedChart>
+              </ResponsiveContainer>
+            }
+          />
+          <Tile
+            id="volume"
+            className="service-chart"
+            eyebrow="PER WEEK AND CUMULATIVE"
+            title="Data volume"
+            legend={volumeLegend}
+            note={
+              <>
+                <Empty when={!data.weeks.length}>
+                  No client redemptions have been indexed yet.
+                </Empty>
+              </>
+            }
+            expanded={enlarged}
+            onExpand={setEnlarged}
+            chart={
+              <ResponsiveContainer width="100%" height={330}>
+                <ComposedChart
+                  data={data.weeks}
+                  margin={{ top: 20, right: 6, left: -20, bottom: 0 }}
+                >
+                  <CartesianGrid vertical={false} stroke={GRID} />
+                  <XAxis
+                    dataKey="label"
+                    axisLine={false}
+                    tickLine={false}
+                    tick={AXIS}
+                    minTickGap={24}
+                  />
+                  <YAxis
+                    yAxisId="left"
+                    axisLine={false}
+                    tickLine={false}
+                    tick={AXIS}
+                  />
+                  <YAxis
+                    yAxisId="right"
+                    orientation="right"
+                    axisLine={false}
+                    tickLine={false}
+                    tick={AXIS}
+                  />
+                  <Tooltip
+                    cursor={CURSOR}
+                    contentStyle={TOOLTIP}
+                    formatter={(input: unknown) => volume(Number(input))}
+                  />
+                  <Bar
+                    yAxisId="left"
+                    dataKey="gigabytes"
+                    name="Volume this week"
+                    fill={YELLOW}
+                    radius={[2, 2, 0, 0]}
+                  />
+                  <Line
+                    yAxisId="right"
+                    type="monotone"
+                    dataKey="cumulativeGigabytes"
+                    name="Cumulative volume"
+                    stroke={INK}
+                    strokeWidth={2}
+                    dot={false}
+                  />
+                </ComposedChart>
+              </ResponsiveContainer>
+            }
+          />
         </div>
         <div className="network-stats network-stats-row">
           <Metric
-            eyebrow="TOTAL REDEMPTIONS"
+            id="total-redemptions"
+            label="TOTAL REDEMPTIONS"
             figure={count(data.totals.redemptionsTotal)}
             note={`${count(data.totals.ticketsTotal)} tickets settled across them`}
+            expanded={enlarged}
+            onExpand={setEnlarged}
           />
           <Metric
-            eyebrow="TOTAL DATA RELAYED"
+            id="total-data-relayed"
+            label="TOTAL DATA RELAYED"
             figure={volume(data.totals.gigabytesTotal)}
             note="Client traffic since indexing began"
+            expanded={enlarged}
+            onExpand={setEnlarged}
           />
           <Metric
-            eyebrow="ACTIVE CHANNELS"
+            id="active-channels"
+            label="ACTIVE CHANNELS"
             figure={count(data.openChannels)}
             note={`${compactToken(data.channelBalance)} allocated`}
+            expanded={enlarged}
+            onExpand={setEnlarged}
           />
         </div>
       </section>
@@ -617,7 +706,7 @@ export default function Dashboard({
       <section className="section" id="activity">
         <div className="section-heading">
           <div>
-            <span className="section-index">03</span>
+            <span className="section-index">02</span>
             <h2>Daily activity</h2>
           </div>
           <p>
@@ -626,118 +715,126 @@ export default function Dashboard({
           </p>
         </div>
         <div className="chart-split">
-          <div className="chart-card service-chart">
-            <div className="chart-title">
-              <div>
-                <span>LAST 30 DAYS</span>
-                <h3>Daily users</h3>
-              </div>
-              <div className="legend">
-                <i className="actual" />
-                Returning <i className="new-client" />
-                New
-              </div>
-            </div>
-            <ResponsiveContainer width="100%" height={250}>
-              <BarChart
-                data={data.dailyUsers}
-                margin={{ top: 20, right: 10, left: -24, bottom: 0 }}
-              >
-                <CartesianGrid vertical={false} stroke={GRID} />
-                <XAxis
-                  dataKey="date"
-                  axisLine={false}
-                  tickLine={false}
-                  tick={AXIS}
-                  minTickGap={40}
-                  tickFormatter={formatDay}
-                />
-                <YAxis
-                  allowDecimals={false}
-                  axisLine={false}
-                  tickLine={false}
-                  tick={AXIS}
-                />
-                <Tooltip
-                  cursor={CURSOR}
-                  labelFormatter={formatDay}
-                  contentStyle={TOOLTIP}
-                />
-                <Bar
-                  dataKey="returning"
-                  name="Returning"
-                  stackId="users"
-                  fill={YELLOW}
-                />
-                <Bar
-                  dataKey="newClients"
-                  name="New"
-                  stackId="users"
-                  fill={PLUM}
-                />
-              </BarChart>
-            </ResponsiveContainer>
-            <Empty when={!data.dailyUsers.length}>
-              No client activity in the last 30 days.
-            </Empty>
-          </div>
-          <div className="chart-card service-chart">
-            <div className="chart-title">
-              <div>
-                <span>ALL INDEXED HISTORY</span>
-                <h3>Usage distribution over the day</h3>
-              </div>
-            </div>
-            <ResponsiveContainer width="100%" height={250}>
-              <BarChart
-                data={data.hourly}
-                margin={{ top: 20, right: 10, left: -18, bottom: 0 }}
-              >
-                <CartesianGrid vertical={false} stroke={GRID} />
-                <XAxis
-                  dataKey="hour"
-                  axisLine={false}
-                  tickLine={false}
-                  tick={AXIS}
-                  minTickGap={24}
-                />
-                <YAxis
-                  axisLine={false}
-                  tickLine={false}
-                  tick={AXIS}
-                  tickFormatter={(input: unknown) => percent(Number(input))}
-                />
-                <Tooltip
-                  cursor={CURSOR}
-                  contentStyle={TOOLTIP}
-                  formatter={(input: unknown) => percent(Number(input))}
-                />
-                <Bar
-                  dataKey="share"
-                  name="Share of volume"
-                  fill={PLUM}
-                  radius={[2, 2, 0, 0]}
-                />
-              </BarChart>
-            </ResponsiveContainer>
-            <Empty when={!data.hourly.length}>
-              No volume has been indexed yet.
-            </Empty>
-            <p className="chart-note">
-              Share of relayed volume by hour, UTC. Block timestamps are{' '}
-              {data.timebase === 'rpc'
-                ? 'RPC resolved'
-                : 'estimated from block height'}
-              .
-            </p>
-          </div>
+          <Tile
+            id="daily-users"
+            className="service-chart"
+            eyebrow="LAST 30 DAYS"
+            title="Daily users"
+            legend={dailyUsersLegend}
+            note={
+              <>
+                <Empty when={!data.dailyUsers.length}>
+                  No client activity in the last 30 days.
+                </Empty>
+              </>
+            }
+            expanded={enlarged}
+            onExpand={setEnlarged}
+            chart={
+              <ResponsiveContainer width="100%" height={250}>
+                <BarChart
+                  data={data.dailyUsers}
+                  margin={{ top: 20, right: 10, left: -24, bottom: 0 }}
+                >
+                  <CartesianGrid vertical={false} stroke={GRID} />
+                  <XAxis
+                    dataKey="date"
+                    axisLine={false}
+                    tickLine={false}
+                    tick={AXIS}
+                    minTickGap={40}
+                    tickFormatter={formatDay}
+                  />
+                  <YAxis
+                    allowDecimals={false}
+                    axisLine={false}
+                    tickLine={false}
+                    tick={AXIS}
+                  />
+                  <Tooltip
+                    cursor={CURSOR}
+                    labelFormatter={formatDay}
+                    contentStyle={TOOLTIP}
+                  />
+                  <Bar
+                    dataKey="returning"
+                    name="Returning"
+                    stackId="users"
+                    fill={YELLOW}
+                  />
+                  <Bar
+                    dataKey="newClients"
+                    name="New"
+                    stackId="users"
+                    fill={PLUM}
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+            }
+          />
+          <Tile
+            id="hourly"
+            className="service-chart"
+            eyebrow="ALL INDEXED HISTORY"
+            title="Usage distribution over the day"
+            note={
+              <>
+                <Empty when={!data.hourly.length}>
+                  No volume has been indexed yet.
+                </Empty>
+                <p className="chart-note">
+                  Share of relayed volume by hour, UTC. Block timestamps are{' '}
+                  {data.timebase === 'rpc'
+                    ? 'RPC resolved'
+                    : 'estimated from block height'}
+                  .
+                </p>
+              </>
+            }
+            expanded={enlarged}
+            onExpand={setEnlarged}
+            chart={
+              <ResponsiveContainer width="100%" height={250}>
+                <BarChart
+                  data={data.hourly}
+                  margin={{ top: 20, right: 10, left: -18, bottom: 0 }}
+                >
+                  <CartesianGrid vertical={false} stroke={GRID} />
+                  <XAxis
+                    dataKey="hour"
+                    axisLine={false}
+                    tickLine={false}
+                    tick={AXIS}
+                    minTickGap={24}
+                  />
+                  <YAxis
+                    axisLine={false}
+                    tickLine={false}
+                    tick={AXIS}
+                    tickFormatter={(input: unknown) => percent(Number(input))}
+                  />
+                  <Tooltip
+                    cursor={CURSOR}
+                    contentStyle={TOOLTIP}
+                    formatter={(input: unknown) => percent(Number(input))}
+                  />
+                  <Bar
+                    dataKey="share"
+                    name="Share of volume"
+                    fill={PLUM}
+                    radius={[2, 2, 0, 0]}
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+            }
+          />
         </div>
       </section>
 
       <section className="section" id="relayers">
         <div className="section-heading">
           <div>
-            <span className="section-index">04</span>
+            <span className="section-index">03</span>
             <h2>Redemptions by relayer</h2>
           </div>
           <p>
@@ -745,94 +842,110 @@ export default function Dashboard({
           </p>
         </div>
         <div className="chart-split">
-          <div className="chart-card service-chart">
-            <div className="chart-title">
-              <div>
-                <span>LAST 7 DAYS</span>
-                <h3>Share of redemptions</h3>
-              </div>
-            </div>
-            <ResponsiveContainer width="100%" height={300}>
-              <PieChart>
-                <Pie
-                  data={relayerSlices}
-                  dataKey="redemptions"
-                  nameKey="address"
-                  innerRadius="55%"
-                  outerRadius="82%"
-                  paddingAngle={1}
-                  stroke="none"
-                  isAnimationActive={false}
-                />
-                <Tooltip
-                  contentStyle={ADDRESS_TOOLTIP}
-                  formatter={(input: unknown, name: unknown) =>
-                    [
-                      `${INTEGER.format(Number(input))} redemptions`,
-                      typeof name === 'string' ? name : '',
-                    ] as [string, string]
-                  }
-                />
-              </PieChart>
-            </ResponsiveContainer>
-            <Empty when={!data.relayers.length}>
-              No client redemptions were indexed in the last 7 days.
-            </Empty>
-          </div>
-          <div className="chart-card service-chart">
-            <div className="chart-title">
-              <div>
-                <span>LAST 30 DAYS</span>
-                <h3>Estimated daily volume per relayer</h3>
-              </div>
-            </div>
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart
-                data={data.relayerDaily}
-                margin={{ top: 20, right: 10, left: -18, bottom: 0 }}
-              >
-                <CartesianGrid vertical={false} stroke={GRID} />
-                <XAxis
-                  dataKey="date"
-                  axisLine={false}
-                  tickLine={false}
-                  tick={AXIS}
-                  minTickGap={40}
-                  tickFormatter={formatDay}
-                />
-                <YAxis axisLine={false} tickLine={false} tick={AXIS} />
-                <Tooltip
-                  cursor={CURSOR}
-                  labelFormatter={formatDay}
-                  contentStyle={ADDRESS_TOOLTIP}
-                  itemSorter={(item) => -Number(item.value ?? 0)}
-                  formatter={(input: unknown, name: unknown) =>
-                    [
-                      volume(Number(input)),
-                      typeof name === 'string'
-                        ? (addressOfSeries.get(name) ?? name)
-                        : '',
-                    ] as [string, string]
-                  }
-                />
-                {data.relayerSeries.map((entry, index) => (
-                  <Bar
-                    key={entry.key}
-                    dataKey={entry.key}
-                    stackId="relayers"
-                    fill={relayerColor(index, data.relayerSeries.length)}
+          <Tile
+            id="share"
+            className="service-chart"
+            eyebrow="LAST 7 DAYS"
+            title="Share of redemptions"
+            legend={relayerLegend}
+            showLegend={false}
+            note={
+              <>
+                <Empty when={!data.relayers.length}>
+                  No client redemptions were indexed in the last 7 days.
+                </Empty>
+              </>
+            }
+            expanded={enlarged}
+            onExpand={setEnlarged}
+            chart={
+              <ResponsiveContainer width="100%" height={300}>
+                <PieChart>
+                  <Pie
+                    data={relayerSlices}
+                    dataKey="redemptions"
+                    nameKey="address"
+                    innerRadius="55%"
+                    outerRadius="82%"
+                    paddingAngle={1}
+                    stroke="none"
                     isAnimationActive={false}
                   />
-                ))}
-              </BarChart>
-            </ResponsiveContainer>
-            <Empty when={!data.relayerDaily.length}>
-              No client redemptions were indexed in the last 30 days.
-            </Empty>
-            <p className="chart-note">
-              Volume is an estimate derived from redemptions seen on chain.
-            </p>
-          </div>
+                  <Tooltip
+                    contentStyle={ADDRESS_TOOLTIP}
+                    formatter={(input: unknown, name: unknown) =>
+                      [
+                        `${INTEGER.format(Number(input))} redemptions`,
+                        typeof name === 'string' ? name : '',
+                      ] as [string, string]
+                    }
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+            }
+          />
+          <Tile
+            id="relayer-volume"
+            className="service-chart"
+            eyebrow="LAST 30 DAYS"
+            title="Estimated daily volume per relayer"
+            legend={relayerLegend}
+            showLegend={false}
+            note={
+              <>
+                <Empty when={!data.relayerDaily.length}>
+                  No client redemptions were indexed in the last 30 days.
+                </Empty>
+                <p className="chart-note">
+                  Volume is an estimate derived from redemptions seen on chain.
+                </p>
+              </>
+            }
+            expanded={enlarged}
+            onExpand={setEnlarged}
+            chart={
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart
+                  data={data.relayerDaily}
+                  margin={{ top: 20, right: 10, left: -18, bottom: 0 }}
+                >
+                  <CartesianGrid vertical={false} stroke={GRID} />
+                  <XAxis
+                    dataKey="date"
+                    axisLine={false}
+                    tickLine={false}
+                    tick={AXIS}
+                    minTickGap={40}
+                    tickFormatter={formatDay}
+                  />
+                  <YAxis axisLine={false} tickLine={false} tick={AXIS} />
+                  <Tooltip
+                    cursor={CURSOR}
+                    labelFormatter={formatDay}
+                    contentStyle={ADDRESS_TOOLTIP}
+                    itemSorter={(item) => -Number(item.value ?? 0)}
+                    formatter={(input: unknown, name: unknown) =>
+                      [
+                        volume(Number(input)),
+                        typeof name === 'string'
+                          ? (addressOfSeries.get(name) ?? name)
+                          : '',
+                      ] as [string, string]
+                    }
+                  />
+                  {data.relayerSeries.map((entry, index) => (
+                    <Bar
+                      key={entry.key}
+                      dataKey={entry.key}
+                      stackId="relayers"
+                      fill={relayerColor(index, data.relayerSeries.length)}
+                      isAnimationActive={false}
+                    />
+                  ))}
+                </BarChart>
+              </ResponsiveContainer>
+            }
+          />
         </div>
         <div className="relayer-legend">
           <ol className="relayer-key">
@@ -865,7 +978,7 @@ export default function Dashboard({
       <section className="section" id="ticket">
         <div className="section-heading">
           <div>
-            <span className="section-index">05</span>
+            <span className="section-index">04</span>
             <h2>Ticket parameters</h2>
           </div>
           <p>
@@ -875,19 +988,28 @@ export default function Dashboard({
         </div>
         <div className="network-stats network-stats-row">
           <Metric
-            eyebrow="WINNING PROBABILITY"
+            id="winning-probability"
+            label="WINNING PROBABILITY"
             figure={probability(data.ticket.winProbability)}
             note="Current network minimum"
+            expanded={enlarged}
+            onExpand={setEnlarged}
           />
           <Metric
-            eyebrow="TICKET PRICE"
+            id="ticket-price"
+            label="TICKET PRICE"
             figure={token(data.ticket.priceWei)}
             note="Cost of relaying one packet, one hop"
+            expanded={enlarged}
+            onExpand={setEnlarged}
           />
           <Metric
-            eyebrow="TICKET VALUE"
+            id="ticket-value"
+            label="TICKET VALUE"
             figure={token(data.ticket.valueWei, 4)}
             note="Price ÷ probability, for one remaining hop"
+            expanded={enlarged}
+            onExpand={setEnlarged}
           />
         </div>
       </section>
@@ -895,7 +1017,7 @@ export default function Dashboard({
       <section className="section" id="clients">
         <div className="section-heading">
           <div>
-            <span className="section-index">06</span>
+            <span className="section-index">05</span>
             <h2>Clients</h2>
           </div>
           <p>
@@ -904,16 +1026,17 @@ export default function Dashboard({
           </p>
         </div>
         <div className="chart-split table-split">
-          <div className="chart-card table-card">
-            <div className="chart-title">
-              <div>
-                <span>USAGE PER CLIENT</span>
-                <h3>
-                  {scope === 'weekly'
-                    ? 'Weekly most active users'
-                    : 'Most active users'}
-                </h3>
-              </div>
+          <Tile
+            id="clients-table"
+            className="table-card"
+            rows={clientRows}
+            eyebrow="USAGE PER CLIENT"
+            title={
+              scope === 'weekly'
+                ? 'Weekly most active users'
+                : 'Most active users'
+            }
+            badge={
               <fieldset className="tab-switch">
                 <legend className="sr-only">Ranking window</legend>
                 <button
@@ -933,7 +1056,30 @@ export default function Dashboard({
                   All time
                 </button>
               </fieldset>
-            </div>
+            }
+            note={
+              <>
+                <Empty when={!rankedClients.length}>
+                  No client usage has been indexed for this window.
+                </Empty>
+                <p className="chart-note">
+                  {count(rankedClients.length)} of {count(data.clientCount)}{' '}
+                  clients had usage in this window.
+                </p>
+              </>
+            }
+            footer={
+              <Pager
+                page={clientAt}
+                pages={pagesOf(rankedClients.length)}
+                total={rankedClients.length}
+                onChange={setClientPage}
+                label="Most active users pages"
+              />
+            }
+            expanded={enlarged}
+            onExpand={setEnlarged}
+          >
             <div className="table-scroll">
               <table className="rank-table">
                 <caption className="sr-only">
@@ -994,31 +1140,37 @@ export default function Dashboard({
                 </tbody>
               </table>
             </div>
-            <Empty when={!rankedClients.length}>
-              No client usage has been indexed for this window.
-            </Empty>
-            <Pager
-              page={clientAt}
-              pages={pagesOf(rankedClients.length)}
-              total={rankedClients.length}
-              onChange={setClientPage}
-              label="Most active users pages"
-            />
-            <p className="chart-note">
-              {count(rankedClients.length)} of {count(data.clientCount)} clients
-              had usage in this window.
-            </p>
-          </div>
-          <div className="chart-card table-card">
-            <div className="chart-title">
-              <div>
-                <span>EDGE NODE KEY-BINDINGS</span>
-                <h3>Client deployments</h3>
-              </div>
+          </Tile>
+          <Tile
+            id="deployments-table"
+            className="table-card"
+            rows={deploymentRows}
+            eyebrow="EDGE NODE KEY-BINDINGS"
+            title="Client deployments"
+            badge={
               <div className="axis-badge">
                 {count(data.totals.clientsDeployed)} total
               </div>
-            </div>
+            }
+            note={
+              <>
+                <Empty when={!data.deployments.length}>
+                  No client deployments have been indexed.
+                </Empty>
+              </>
+            }
+            footer={
+              <Pager
+                page={deploymentAt}
+                pages={pagesOf(data.deployments.length)}
+                total={data.deployments.length}
+                onChange={setDeploymentPage}
+                label="Client deployment pages"
+              />
+            }
+            expanded={enlarged}
+            onExpand={setEnlarged}
+          >
             <div className="table-scroll">
               <table className="rank-table">
                 <caption className="sr-only">
@@ -1048,38 +1200,53 @@ export default function Dashboard({
                 </tbody>
               </table>
             </div>
-            <Empty when={!data.deployments.length}>
-              No client deployments have been indexed.
-            </Empty>
-            <Pager
-              page={deploymentAt}
-              pages={pagesOf(data.deployments.length)}
-              total={data.deployments.length}
-              onChange={setDeploymentPage}
-              label="Client deployment pages"
-            />
-          </div>
+          </Tile>
         </div>
       </section>
 
       <section className="section" id="redemptions">
         <div className="section-heading">
           <div>
-            <span className="section-index">07</span>
+            <span className="section-index">06</span>
             <h2>Most recent redemptions</h2>
           </div>
           <p>Latest redemptions per channel, newest first.</p>
         </div>
-        <div className="chart-card table-card">
-          <div className="chart-title">
-            <div>
-              <span>LATEST REDEMPTIONS PER CHANNEL</span>
-              <h3>Redemption feed</h3>
-            </div>
+        <Tile
+          id="feed-table"
+          className="table-card"
+          rows={feedRows}
+          eyebrow="LATEST REDEMPTIONS PER CHANNEL"
+          title="Redemption feed"
+          badge={
             <div className="axis-badge">
               {count(data.totals.redemptionsTotal)} total
             </div>
-          </div>
+          }
+          note={
+            <>
+              <Empty when={!data.recentRedemptions.length}>
+                No redemptions have been indexed.
+              </Empty>
+              <p className="chart-note">
+                The feed keeps the most recent{' '}
+                {count(data.recentRedemptions.length)} of{' '}
+                {count(data.totals.redemptionsTotal)} redemptions.
+              </p>
+            </>
+          }
+          footer={
+            <Pager
+              page={feedAt}
+              pages={pagesOf(data.recentRedemptions.length)}
+              total={data.recentRedemptions.length}
+              onChange={setFeedPage}
+              label="Redemption feed pages"
+            />
+          }
+          expanded={enlarged}
+          onExpand={setEnlarged}
+        >
           <div className="table-scroll">
             <table className="rank-table feed-table">
               <caption className="sr-only">
@@ -1113,22 +1280,7 @@ export default function Dashboard({
               </tbody>
             </table>
           </div>
-          <Empty when={!data.recentRedemptions.length}>
-            No redemptions have been indexed.
-          </Empty>
-          <Pager
-            page={feedAt}
-            pages={pagesOf(data.recentRedemptions.length)}
-            total={data.recentRedemptions.length}
-            onChange={setFeedPage}
-            label="Redemption feed pages"
-          />
-          <p className="chart-note">
-            The feed keeps the most recent{' '}
-            {count(data.recentRedemptions.length)} of{' '}
-            {count(data.totals.redemptionsTotal)} redemptions.
-          </p>
-        </div>
+        </Tile>
       </section>
 
       <section className="methodology" id="methodology">
