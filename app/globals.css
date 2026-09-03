@@ -32,7 +32,7 @@
   top: 12px;
 }
 
-:root {
+  :root {
   --ink: #111315;
   --paper: #f2efe7;
   --yellow: #ffd84d;
@@ -42,6 +42,8 @@
   --gutter: clamp(24px, 5vw, 76px);
   /* Hairline between adjacent panels, drawn by a grid gap over --line. */
   --seam: 1px;
+  /* One gap between tiles, horizontally and vertically, everywhere. */
+  --grid-gap: 8px;
 }
 * {
   box-sizing: border-box;
@@ -149,15 +151,15 @@ main {
   padding: 14px 26px 0;
 }
 /* Counting and filtering on the left; moving and exporting on the right. */
+.tile-foot .pager {
+  margin: 0;
+  padding: 0;
+}
 .tile-foot-end {
   display: flex;
   align-items: center;
   gap: 10px;
   margin-left: auto;
-}
-.tile-foot .pager {
-  margin: 0;
-  padding: 0;
 }
 .tile-foot .chart-actions {
   position: static;
@@ -286,13 +288,6 @@ main {
   font-weight: 600;
 }
 .headline-grid {
-  background: var(--line);
-  color: var(--ink);
-  gap: var(--seam);
-  display: grid;
-  grid-template-columns: 1.35fr repeat(3, 1fr);
-  /* The summary band is a bigger break than the gap between sections, so it gets
-     more room than the sections' own top padding provides. */
   margin: 0 var(--gutter) 56px;
 }
 .metric {
@@ -400,6 +395,49 @@ main {
   background: var(--line);
   border: 1px solid var(--line);
 }
+/*
+ * Every tile is placed on the same twelve-column grid, so a row is any
+ * combination of spans that adds to twelve and the gap between two tiles is the
+ * same wherever they sit — beside each other, or stacked in the next row.
+ */
+.tile-grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: var(--grid-gap);
+}
+.tile-grid + .tile-grid,
+.tile-grid + .relayer-legend,
+.relayer-legend + .tile-grid {
+  margin-top: var(--grid-gap);
+}
+.span-1 { grid-column: span 1; }
+.span-2 { grid-column: span 2; }
+.span-3 { grid-column: span 3; }
+.span-4 { grid-column: span 4; }
+.span-6 { grid-column: span 6; }
+.span-12 { grid-column: span 12; }
+
+@media (max-width: 900px) {
+  /* Halves become full width; thirds and quarters pair up. */
+  .span-6,
+  .span-12 {
+    grid-column: span 12;
+  }
+  .span-3,
+  .span-4 {
+    grid-column: span 6;
+  }
+}
+@media (max-width: 560px) {
+  .span-1,
+  .span-2,
+  .span-3,
+  .span-4,
+  .span-6 {
+    grid-column: span 12;
+  }
+}
+
 .chart-card {
   background: #fffdf8;
   position: relative;
@@ -637,7 +675,7 @@ main {
   overflow: visible;
   text-overflow: clip;
 }
-.chart-split .table-card {
+.table-card {
   min-width: 0;
 }
 .rank-table {
@@ -727,31 +765,6 @@ main {
   color: #17191c;
   border-bottom-color: var(--yellow);
 }
-.chart-split {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--seam);
-  background: var(--line);
-}
-.network-stats-row {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: var(--seam);
-  margin-top: var(--seam);
-}
-/* The ranking tables are two separate readings, so they sit apart rather than
-   sharing a hairline divider like the chart panels do. Compound selector because
-   .chart-split sets the same properties and is declared alongside it. */
-.chart-split.table-split {
-  gap: 22px;
-  background: transparent;
-}
-@media (max-width: 900px) {
-  .chart-split,
-  .network-stats-row {
-    grid-template-columns: 1fr;
-  }
-}
 .service-chart {
   padding: 28px 28px 34px;
   min-height: 375px;
@@ -777,51 +790,6 @@ main {
   font-size: 10px;
   line-height: 1.5;
   margin: 4px 0 0;
-}
-.network-stats {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  border: 1px solid var(--line);
-}
-.network-stats .metric {
-  min-height: 185px;
-  border-color: var(--line);
-  color: var(--ink);
-  padding: 24px;
-}
-.network-stats .metric:nth-child(2) {
-  border-right: 0;
-}
-.network-stats .metric:last-child {
-  grid-column: 1/-1;
-  border-top: 1px solid var(--line);
-}
-.network-stats .metric > span,
-.network-stats .metric p {
-  color: #7d7b75;
-}
-.network-stats .metric strong {
-  font-size: 36px;
-}
-/* The row variant is a single line of three. Seams come from the grid gap alone,
-   like every other panel group; a border here would sit on top of the gap and make
-   one seam twice as wide as its neighbour. .network-stats' own two-column rules are
-   declared later, hence the compound selector. */
-.network-stats.network-stats-row {
-  grid-template-columns: repeat(3, 1fr);
-  background: var(--line);
-  border: 0;
-}
-.network-stats.network-stats-row .metric {
-  border: 0;
-}
-.network-stats.network-stats-row .metric:last-child {
-  grid-column: auto;
-}
-@media (max-width: 900px) {
-  .network-stats.network-stats-row {
-    grid-template-columns: 1fr;
-  }
 }
 /* Sits in the card's bottom-right, out of the way of the title row's badges.
    Quiet until the card is hovered or the button itself takes focus. */
@@ -1049,16 +1017,7 @@ footer a {
   }
 }
 @media (max-width: 560px) {
-  :where(a, button, [tabindex]):focus-visible {
-  outline: 2px solid #8a6d00;
-  outline-offset: 2px;
-  border-radius: 2px;
-}
-
-/* Visually hidden but reachable: table captions and link context. */
-
-
-:root {
+  :root {
     --gutter: 18px;
   }
   .source-link {
@@ -1095,15 +1054,7 @@ footer a {
   .legend {
     display: none;
   }
-  .network-stats {
-    grid-template-columns: 1fr;
-  }
-  .network-stats:not(.network-stats-row) .metric:nth-child(2) {
-    border-top: 1px solid var(--line);
-  }
-  .network-stats .metric:last-child {
-    grid-column: auto;
-  }
+  
   .methodology {
     padding: 40px var(--gutter) 32px;
   }

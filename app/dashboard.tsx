@@ -282,6 +282,7 @@ function Metric({
   label,
   figure,
   note,
+  span,
   expanded,
   onExpand,
 }: {
@@ -289,13 +290,14 @@ function Metric({
   label: string;
   figure: string;
   note: string;
+  span: 3 | 4;
   expanded: string | null;
   onExpand: (id: string | null) => void;
 }) {
   return (
     <Tile
       id={id}
-      className="metric"
+      className={`metric span-${span}`}
       title={label}
       figure={figure}
       note={<p>{note}</p>}
@@ -529,10 +531,10 @@ export default function Dashboard({
         </div>
       </section>
 
-      <section className="headline-grid" aria-label="Headline metrics">
+      <section className="headline-grid tile-grid" aria-label="Headline metrics">
         <Tile
           id="monthly-active-users"
-          className="metric mau-card"
+          className="metric mau-card span-3"
           title="MONTHLY ACTIVE USERS"
           figure={count(data.totals.monthlyActiveUsers)}
           note={
@@ -547,6 +549,7 @@ export default function Dashboard({
         />
         <Metric
           id="redemptions-7-days"
+          span={3}
           label="REDEMPTIONS · 7 DAYS"
           figure={count(data.totals.redemptions7d)}
           note={`${count(data.totals.redemptionsTotal)} since indexing began`}
@@ -555,6 +558,7 @@ export default function Dashboard({
         />
         <Metric
           id="data-relayed-7-days"
+          span={3}
           label="DATA RELAYED · 7 DAYS"
           figure={volume(data.totals.gigabytes7d)}
           note={`${volume(data.totals.gigabytesTotal)} cumulative`}
@@ -563,6 +567,7 @@ export default function Dashboard({
         />
         <Metric
           id="new-clients-30-days"
+          span={3}
           label="NEW CLIENTS · 30 DAYS"
           figure={count(data.totals.deployments30d)}
           note={`${count(data.totals.deployments7d)} in the last 7 days`}
@@ -584,10 +589,10 @@ export default function Dashboard({
             winning probability in force at each block.
           </p>
         </div>
-        <div className="chart-split">
+        <div className="tile-grid">
           <Tile
             id="active-users"
-            className="main-chart"
+            className="main-chart span-6"
             eyebrow="SINCE 01 JAN 2026"
             title="Monthly and weekly active users"
             legend={activeUsersLegend}
@@ -675,7 +680,7 @@ export default function Dashboard({
           />
           <Tile
             id="volume"
-            className="service-chart"
+            className="service-chart span-6"
             eyebrow="PER WEEK AND CUMULATIVE"
             title="Data volume"
             legend={volumeLegend}
@@ -741,9 +746,10 @@ export default function Dashboard({
             }
           />
         </div>
-        <div className="network-stats network-stats-row">
+        <div className="tile-grid">
           <Metric
             id="total-redemptions"
+            span={4}
             label="TOTAL REDEMPTIONS"
             figure={count(data.totals.redemptionsTotal)}
             note={`${count(data.totals.ticketsTotal)} tickets settled across them`}
@@ -752,6 +758,7 @@ export default function Dashboard({
           />
           <Metric
             id="total-data-relayed"
+            span={4}
             label="TOTAL DATA RELAYED"
             figure={volume(data.totals.gigabytesTotal)}
             note="Client traffic since indexing began"
@@ -760,6 +767,7 @@ export default function Dashboard({
           />
           <Metric
             id="active-channels"
+            span={4}
             label="ACTIVE CHANNELS"
             figure={count(data.openChannels)}
             note={`${compactToken(data.channelBalance)} allocated`}
@@ -780,10 +788,10 @@ export default function Dashboard({
             traffic.
           </p>
         </div>
-        <div className="chart-split">
+        <div className="tile-grid">
           <Tile
             id="daily-users"
-            className="service-chart"
+            className="service-chart span-6"
             eyebrow="LAST 30 DAYS"
             title="Daily users"
             legend={dailyUsersLegend}
@@ -840,7 +848,7 @@ export default function Dashboard({
           />
           <Tile
             id="hourly"
-            className="service-chart"
+            className="service-chart span-6"
             eyebrow="ALL INDEXED HISTORY"
             title="Usage distribution over the day"
             note={
@@ -907,10 +915,10 @@ export default function Dashboard({
             Which relays carried client traffic, and how the load is shared.
           </p>
         </div>
-        <div className="chart-split">
+        <div className="tile-grid">
           <Tile
             id="share"
-            className="service-chart"
+            className="service-chart span-6"
             eyebrow="LAST 7 DAYS"
             title="Share of redemptions"
             legend={relayerLegend}
@@ -952,7 +960,7 @@ export default function Dashboard({
           />
           <Tile
             id="relayer-volume"
-            className="service-chart"
+            className="service-chart span-6"
             eyebrow="LAST 30 DAYS"
             title="Estimated daily volume per relayer"
             legend={relayerLegend}
@@ -1013,7 +1021,7 @@ export default function Dashboard({
             }
           />
         </div>
-        <div className="relayer-legend">
+        <div className="relayer-legend span-12">
           <ol className="relayer-key">
             {(allRelayers
               ? relayerSlices
@@ -1052,9 +1060,10 @@ export default function Dashboard({
             stand now.
           </p>
         </div>
-        <div className="network-stats network-stats-row">
+        <div className="tile-grid">
           <Metric
             id="winning-probability"
+            span={4}
             label="WINNING PROBABILITY"
             figure={probability(data.ticket.winProbability)}
             note="Current network minimum"
@@ -1063,6 +1072,7 @@ export default function Dashboard({
           />
           <Metric
             id="ticket-price"
+            span={4}
             label="TICKET PRICE"
             figure={token(data.ticket.priceWei)}
             note="Cost of relaying one packet, one hop"
@@ -1071,6 +1081,7 @@ export default function Dashboard({
           />
           <Metric
             id="ticket-value"
+            span={4}
             label="TICKET VALUE"
             figure={token(data.ticket.valueWei, 4)}
             note="Price ÷ probability, for one remaining hop"
@@ -1091,10 +1102,10 @@ export default function Dashboard({
             only an estimation based on the redemptions seen on chain.
           </p>
         </div>
-        <div className="chart-split table-split">
+        <div className="tile-grid">
           <Tile
             id="clients-table"
-            className="table-card"
+            className="table-card span-6"
             rows={clientRows}
             rowCount={visibleClients.length}
             search={{
@@ -1214,7 +1225,7 @@ export default function Dashboard({
           </Tile>
           <Tile
             id="deployments-table"
-            className="table-card"
+            className="table-card span-6"
             rows={deploymentRows}
             rowCount={visibleDeployments.length}
             search={{
@@ -1285,7 +1296,7 @@ export default function Dashboard({
         </div>
         <Tile
           id="feed-table"
-          className="table-card"
+          className="table-card span-12"
           rows={feedRows}
           rowCount={visibleRedemptions.length}
           search={{
