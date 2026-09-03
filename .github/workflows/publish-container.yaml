@@ -6,6 +6,7 @@ on:
       - main
     tags:
       - "v*"
+  pull_request:
 
 permissions:
   contents: read
@@ -19,14 +20,47 @@ env:
   IMAGE_NAME: ghcr.io/jeandemeusy/bloklune
 
 jobs:
-  publish:
+  check:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@21a544727d0c62386e78b4befe52d19ad12692e3 # v14
+        with:
+          extra-conf: |
+            accept-flake-config = true
+
+      - name: Cache the Nix store
+        uses: DeterminateSystems/magic-nix-cache-action@565684385bcd71bad329742eefe8d12f2e765b39 # v8
+
+      - name: Type check and lint
+        run: |
+          nix develop --command npm ci
+          nix develop --command npx tsc --noEmit
+          nix develop --command npm run lint
+
+  publish:
+    needs: check
+    runs-on: ubuntu-latest
+    # Pull requests are built by `check` but never published.
+    if: github.event_name == 'push'
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@21a544727d0c62386e78b4befe52d19ad12692e3 # v14
+        with:
+          extra-conf: |
+            accept-flake-config = true
+
+      - name: Cache the Nix store
+        uses: DeterminateSystems/magic-nix-cache-action@565684385bcd71bad329742eefe8d12f2e765b39 # v8
+
+      - name: Build the image
+        run: nix build .#container --print-build-logs
 
       - name: Sign in to GHCR
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
@@ -35,24 +69,20 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Generate image metadata
-        id: metadata
-        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
-        with:
-          images: ${{ env.IMAGE_NAME }}
-          tags: |
-            type=sha,format=long,prefix=sha-
-            type=ref,event=tag
-            type=raw,value=main,enable=${{ github.ref == 'refs/heads/main' }}
-
-      - name: Build and publish image
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
-        with:
-          context: .
-          push: true
-          tags: ${{ steps.metadata.outputs.tags }}
-          labels: ${{ steps.metadata.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          provenance: true
-          sbom: true
+      - name: Tag and push
+        run: |
+          set -euo pipefail
+          # buildLayeredImage writes a tarball; load it, then retag every name the
+          # publish is meant to carry.
+          docker load < result
+          tags="sha-${{ github.sha }}"
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            tags="$tags ${{ github.ref_name }}"
+          fi
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            tags="$tags main"
+          fi
+          for tag in $tags; do
+            docker tag "$IMAGE_NAME:latest" "$IMAGE_NAME:$tag"
+            docker push "$IMAGE_NAME:$tag"
+          done

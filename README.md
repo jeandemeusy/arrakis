@@ -44,6 +44,18 @@ RPC_URL=https://rpc.gnosischain.com
 - `RPC_URL` is optional. Set it to anchor the historical charts to real block
   timestamps instead of an assumed block cadence.
 
+## Toolchain
+
+The repository ships a Nix flake with Node 22 and `psql`. With direnv installed:
+
+```bash
+direnv allow
+```
+
+The shell then loads on `cd` into the directory, and `.env.local` (git-ignored) is
+sourced for `DATABASE_URL`, `RPC_URL` and friends. Without direnv, `nix develop`
+gives the same shell. Without Nix, install Node 22.13 or newer by hand.
+
 ## Run
 
 Node.js 22.13 or newer is required.
@@ -68,10 +80,40 @@ when the index database is unavailable.
 
 ## Container publishing
 
-The `Publish container` GitHub Actions workflow builds and publishes
-`ghcr.io/jeandemeusy/bloklune` whenever `main` or a `v*` tag is pushed. Every
-build receives an immutable `sha-<full-commit-sha>` tag; version tags and the
-mutable `main` convenience tag are also published.
+The image is built from the flake, so the container and the development shell
+resolve the same pinned toolchain:
+
+```bash
+nix build .#container   # Linux only; dockerTools does not run on macOS
+docker load < result
+```
+
+`nix build .#bloklune` produces the same application tree without wrapping it in
+an image, and `result/bin/bloklune` runs it directly. Both use Next's standalone
+output, so only the dependencies `next build` actually traced are shipped.
+
+The `Publish container` workflow type-checks and lints every pull request, and on
+a push to `main` or a `v*` tag builds the image and publishes it to
+`ghcr.io/jeandemeusy/bloklune`. Every build receives an immutable
+`sha-<full-commit-sha>` tag; version tags and the mutable `main` convenience tag
+are also published.
+
+## Working on the UI without a database
+
+```bash
+npm run dev:fixtures
+```
+
+`DASHBOARD_FIXTURES=1` makes `loadAnalytics` return a synthetic snapshot instead of
+querying, so the whole page renders with no `DATABASE_URL`, no index database and no
+deploy in the loop. The generator is seeded, so reloads produce identical numbers
+and a styling change is the only thing that moves between two screenshots. It
+deliberately produces a long relayer tail, a wide client spread and uneven daily
+activity, since those are the shapes that break layouts.
+
+The fixture fabricates the finished snapshot rather than exercising the aggregation
+in `lib/analytics.ts`. It validates rendering only — never read agreement there as
+evidence that the real derivations are correct.
 
 ## Metric definitions
 

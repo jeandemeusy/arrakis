@@ -5,6 +5,7 @@ import path from "node:path";
 
 import { Pool, type QueryResultRow } from "pg";
 
+import { fixtureSnapshot } from "./fixtures";
 import { resolveBlockClock, type BlockClock } from "./rpc";
 
 /**
@@ -483,7 +484,7 @@ function dailyUserSeries(
 /** Share of relayed volume by hour of day, across the whole indexed history. */
 function hourlyDistribution(redemptions: Redemption[]): HourPoint[] {
   if (!redemptions.length) return [];
-  const hours = new Array<number>(24).fill(0);
+  const hours = Array.from({ length: 24 }, () => 0);
   for (const redemption of redemptions) {
     hours[new Date(redemption.timestamp * 1000).getUTCHours()] += redemption.gigabytes;
   }
@@ -817,6 +818,9 @@ async function refreshSnapshot(): Promise<AnalyticsSnapshot> {
  * of queries, which is precisely when a burst of traffic arrives.
  */
 export async function loadAnalytics(): Promise<AnalyticsSnapshot> {
+  // UI work against synthetic data, with no database and no deploy in the loop.
+  if (process.env.DASHBOARD_FIXTURES === "1") return fixtureSnapshot();
+
   if (cachedSnapshot && cachedSnapshot.expiresAt > Date.now()) {
     return cachedSnapshot.value;
   }

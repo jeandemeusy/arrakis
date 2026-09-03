@@ -28,6 +28,8 @@ yarn-error.log*
 # local environment
 .env*
 !.env.example
+# The direnv entrypoint is shared tooling, not local config; secrets live in .env.local.
+!.envrc
 .pre-commit-config.yaml
 
 # deployment and generated files
@@ -38,3 +40,8 @@ next-env.d.ts
 /work/
 
 .wrangler/
+
+# nix / direnv
+.direnv/
+result
+result-*
