@@ -22,6 +22,12 @@ const DAY_SECONDS = 86_400;
 const WEEK_DAYS = 7;
 const MONTH_DAYS = 31;
 const RELAYER_LIMIT = 12;
+/** Relayers charted individually in the daily stack; the rest collapse into "Other". */
+const RELAYER_STACK_LIMIT = 6;
+const RELAYER_STACK_DAYS = 30;
+const CLIENT_LIMIT = 50;
+const DEPLOYMENT_LIMIT = 100;
+export const OTHER_RELAYERS = "Other";
 
 export type ActiveUserPoint = {
   date: string;
@@ -47,6 +53,22 @@ export type Relayer = {
   share: number;
 };
 
+/** One day of relayed volume, keyed by relayer address, for the stacked chart. */
+export type RelayerDayPoint = { date: string } & Record<string, number | string>;
+
+export type Client = {
+  address: string;
+  gigabytes7d: number;
+  gigabytesTotal: number;
+  redemptions7d: number;
+  redemptionsTotal: number;
+};
+
+export type Deployment = {
+  address: string;
+  timestamp: string;
+};
+
 export type AnalyticsSnapshot = {
   source: "live" | "degraded" | "unavailable";
   observedAt: string;
@@ -62,6 +84,11 @@ export type AnalyticsSnapshot = {
   activeUsers: ActiveUserPoint[];
   weeks: WeekPoint[];
   relayers: Relayer[];
+  relayerDaily: RelayerDayPoint[];
+  relayerSeries: string[];
+  clients: Client[];
+  clientCount: number;
+  deployments: Deployment[];
   totals: {
     weeklyActiveUsers: number | null;
     monthlyActiveUsers: number | null;
@@ -309,6 +336,77 @@ function relayerDistribution(recent: Redemption[]): Relayer[] {
     .slice(0, RELAYER_LIMIT);
 }
 
+/**
+ * Daily relayed volume per relayer over the recent window.
+ *
+ * Relayers beyond the top few collapse into a single "Other" band so the stack
+ * stays readable; every day in the window is emitted, including quiet ones, so
+ * the chart does not imply activity on days that had none.
+ */
+function relayerDailySeries(
+  redemptions: Redemption[],
+  lastDay: number,
+): { points: RelayerDayPoint[]; series: string[] } {
+  const firstDay = lastDay - RELAYER_STACK_DAYS + 1;
+  const window = redemptions.filter((redemption) => redemption.day >= firstDay);
+  if (!window.length) return { points: [], series: [] };
+
+  const totals = new Map<string, number>();
+  for (const redemption of window) {
+    totals.set(
+      redemption.destination,
+      (totals.get(redemption.destination) ?? 0) + redemption.gigabytes,
+    );
+  }
+  const ranked = [...totals.entries()].sort(([, a], [, b]) => b - a);
+  const charted = new Set(
+    ranked.slice(0, RELAYER_STACK_LIMIT).map(([address]) => address),
+  );
+  const hasOther = ranked.length > charted.size;
+  const series = [...charted, ...(hasOther ? [OTHER_RELAYERS] : [])];
+
+  const byDay = new Map<number, Map<string, number>>();
+  for (const redemption of window) {
+    const key = charted.has(redemption.destination)
+      ? redemption.destination
+      : OTHER_RELAYERS;
+    const day = byDay.get(redemption.day) ?? new Map<string, number>();
+    day.set(key, (day.get(key) ?? 0) + redemption.gigabytes);
+    byDay.set(redemption.day, day);
+  }
+
+  const points: RelayerDayPoint[] = [];
+  for (let day = firstDay; day <= lastDay; day += 1) {
+    const values = byDay.get(day);
+    const point: RelayerDayPoint = { date: isoDate(day) };
+    for (const key of series) point[key] = values?.get(key) ?? 0;
+    points.push(point);
+  }
+  return { points, series };
+}
+
+/** Per-client usage, ranked by the caller, over both the recent window and all time. */
+function clientUsage(redemptions: Redemption[], firstRecentDay: number): Client[] {
+  const buckets = new Map<string, Client>();
+  for (const redemption of redemptions) {
+    const client = buckets.get(redemption.source) ?? {
+      address: redemption.source,
+      gigabytes7d: 0,
+      gigabytesTotal: 0,
+      redemptions7d: 0,
+      redemptionsTotal: 0,
+    };
+    client.gigabytesTotal += redemption.gigabytes;
+    client.redemptionsTotal += 1;
+    if (redemption.day >= firstRecentDay) {
+      client.gigabytes7d += redemption.gigabytes;
+      client.redemptions7d += 1;
+    }
+    buckets.set(redemption.source, client);
+  }
+  return [...buckets.values()].sort((a, b) => b.gigabytesTotal - a.gigabytesTotal);
+}
+
 async function querySnapshot(): Promise<AnalyticsSnapshot> {
   const db = database();
   const warnings: string[] = [];
@@ -420,6 +518,18 @@ async function querySnapshot(): Promise<AnalyticsSnapshot> {
   const weeks = weeklySeries(redemptions);
   const recent = redemptions.filter((redemption) => redemption.day > lastDay - WEEK_DAYS);
   const relayers = relayerDistribution(recent);
+  const { points: relayerDaily, series: relayerSeries } = relayerDailySeries(
+    redemptions,
+    lastDay,
+  );
+  const allClients = clientUsage(redemptions, lastDay - WEEK_DAYS + 1);
+  const deployments = rawDeployments
+    .map((row) => ({
+      address: hex(row.account),
+      timestamp: new Date(clock(Number(row.published_block)) * 1000).toISOString(),
+    }))
+    .reverse()
+    .slice(0, DEPLOYMENT_LIMIT);
   const latest = activeUsers.at(-1);
   const hasUsage = redemptionRows.status === "fulfilled";
   let latestWeekDeployments = 0;
@@ -446,6 +556,11 @@ async function querySnapshot(): Promise<AnalyticsSnapshot> {
     activeUsers,
     weeks,
     relayers,
+    relayerDaily,
+    relayerSeries,
+    clients: allClients.slice(0, CLIENT_LIMIT),
+    clientCount: allClients.length,
+    deployments,
     totals: {
       weeklyActiveUsers: latest?.weekly ?? null,
       monthlyActiveUsers: latest?.monthly ?? null,
@@ -482,6 +597,11 @@ function unavailable(message: string): AnalyticsSnapshot {
     activeUsers: [],
     weeks: [],
     relayers: [],
+    relayerDaily: [],
+    relayerSeries: [],
+    clients: [],
+    clientCount: 0,
+    deployments: [],
     totals: {
       weeklyActiveUsers: null,
       monthlyActiveUsers: null,

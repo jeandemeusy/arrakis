@@ -10,7 +10,8 @@ repository and be deployed beside any Blokli instance.
 
 The browser never receives database credentials. Server-side queries in
 [`sql/v1`](./sql/v1) calculate current network totals, the
-active-user series, weekly usage and the relayer distribution. The backend keeps a completed snapshot for 60 seconds
+active-user series, weekly usage, per-relayer and per-client breakdowns, and the
+client deployment log. The backend keeps a completed snapshot for 60 seconds
 to avoid querying the index database for every public page view.
 
 Blokli already stores the indexed history, so the dashboard does not duplicate

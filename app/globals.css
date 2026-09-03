@@ -306,6 +306,90 @@ main {
 .legend i.deployments {
   background: #4c8f7b;
 }
+.relayer-key {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0 4px;
+  display: grid;
+  gap: 5px;
+}
+.relayer-key li {
+  display: grid;
+  grid-template-columns: 10px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  font-size: 11px;
+}
+.relayer-key i {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+.relayer-key code {
+  color: #55534e;
+}
+.table-card {
+  padding-bottom: 14px;
+}
+.table-scroll {
+  max-height: 420px;
+  overflow-y: auto;
+}
+.rank-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.rank-table th {
+  text-align: left;
+  font-weight: 400;
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #98958e;
+  padding: 8px 10px;
+  background: #f4f1e8;
+  position: sticky;
+  top: 0;
+}
+.rank-table td {
+  padding: 9px 10px;
+  border-bottom: 1px solid #ece8de;
+}
+.rank-table tbody tr:last-child td {
+  border-bottom: none;
+}
+.rank-table code {
+  font-size: 11px;
+  color: #35332f;
+}
+.rank-table .numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.rank-table .timestamp {
+  font-variant-numeric: tabular-nums;
+  color: #55534e;
+  white-space: nowrap;
+}
+.tab-switch {
+  display: flex;
+  gap: 18px;
+}
+.tab-switch button {
+  background: none;
+  border: none;
+  padding: 0 0 3px;
+  font: inherit;
+  font-size: 13px;
+  color: #98958e;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+}
+.tab-switch button.active {
+  color: #17191c;
+  border-bottom-color: var(--yellow);
+}
 .chart-split {
   display: grid;
   grid-template-columns: 1fr 1fr;

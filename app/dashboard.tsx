@@ -1,12 +1,16 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import {
   Area,
+  AreaChart,
   Bar,
   BarChart,
   CartesianGrid,
   ComposedChart,
   Line,
+  Pie,
+  PieChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -14,7 +18,7 @@ import {
 } from "recharts";
 import { Database, ExternalLink, Radio, ShieldCheck, Users } from "lucide-react";
 
-import type { AnalyticsSnapshot } from "@/lib/analytics";
+import { OTHER_RELAYERS, type AnalyticsSnapshot } from "@/lib/analytics";
 
 export type DashboardData = AnalyticsSnapshot;
 
@@ -28,6 +32,54 @@ const DARK_TOOLTIP = {
   borderRadius: 2,
 };
 const LIGHT_TOOLTIP = { border: "1px solid #d9d5cb", borderRadius: 2 };
+const SLICE_COLORS = [
+  "#ffd84d",
+  "#17191c",
+  "#4c8f7b",
+  "#c98b3a",
+  "#7a7fa6",
+  "#b25a4d",
+  "#9aa0a6",
+];
+const MEDALS = ["\u{1F947}", "\u{1F948}", "\u{1F949}"];
+
+function sliceColor(index: number) {
+  return SLICE_COLORS[index % SLICE_COLORS.length];
+}
+
+function medal(index: number) {
+  return MEDALS[index] ?? String(index + 1);
+}
+
+function percent(share: number) {
+  return new Intl.NumberFormat("en", {
+    style: "percent",
+    maximumFractionDigits: 1,
+  }).format(share);
+}
+
+/** The ranking tables quote usage in megabytes, matching the published tables. */
+function megabytes(gigabytes: number) {
+  return new Intl.NumberFormat("en", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(gigabytes * 1000);
+}
+
+function formatTimestamp(value: string) {
+  return new Intl.DateTimeFormat("en-GB", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    timeZone: "UTC",
+    hour12: false,
+  })
+    .format(new Date(value))
+    .replace(",", "");
+}
 
 function count(input: number | null) {
   return input === null ? "—" : new Intl.NumberFormat("en-US").format(input);
@@ -81,9 +133,30 @@ function Metric({
 }
 
 export default function Dashboard({ data }: { data: DashboardData }) {
+  const [scope, setScope] = useState<"weekly" | "all">("weekly");
   const live = data.source !== "unavailable";
   const hasUsers = data.activeUsers.length > 0;
   const hasWeeks = data.weeks.length > 0;
+  const relayerStackSize = data.relayerSeries.filter(
+    (relayer) => relayer !== OTHER_RELAYERS,
+  ).length;
+
+  // Recharts colours pie slices from a `fill` on each datum, avoiding <Cell>.
+  const relayerSlices = useMemo(
+    () => data.relayers.map((relayer, index) => ({ ...relayer, fill: sliceColor(index) })),
+    [data.relayers],
+  );
+
+  const rankedClients = useMemo(() => {
+    const ranked = [...data.clients].sort((a, b) =>
+      scope === "weekly"
+        ? b.gigabytes7d - a.gigabytes7d
+        : b.gigabytesTotal - a.gigabytesTotal,
+    );
+    return scope === "weekly"
+      ? ranked.filter((client) => client.gigabytes7d > 0)
+      : ranked.filter((client) => client.gigabytesTotal > 0);
+  }, [data.clients, scope]);
 
   return (
     <main>
@@ -101,6 +174,8 @@ export default function Dashboard({ data }: { data: DashboardData }) {
           <a href="#usage">Usage</a>
           <a href="#growth">Growth</a>
           <a href="#relayers">Relayers</a>
+          <a href="#clients">Clients</a>
+          <a href="#deployments">Deployments</a>
           <a href="#methodology">Methodology</a>
         </nav>
         <a
@@ -461,87 +536,250 @@ export default function Dashboard({ data }: { data: DashboardData }) {
             <h2>Redemptions by relayer</h2>
           </div>
           <p>
-            Which relays carried client traffic over the last seven days. A flat
-            distribution means sessions are spread across many relays rather than
-            concentrated in a few.
+            Which relays carried client traffic, and how the load is shared. A single
+            dominant slice means sessions are concentrated on one relay rather than
+            spread across the network.
           </p>
         </div>
-        <div className="network-grid">
+        <div className="chart-split">
           <div className="chart-card service-chart">
             <div className="chart-title">
               <div>
                 <span>LAST 7 DAYS</span>
-                <h3>Redemptions by relayer</h3>
+                <h3>Share of redemptions</h3>
               </div>
             </div>
-            <ResponsiveContainer width="100%" height={280}>
-              <BarChart
-                data={data.relayers}
-                layout="vertical"
-                margin={{ top: 10, right: 16, left: 8, bottom: 0 }}
-              >
-                <CartesianGrid horizontal={false} stroke="#e6e2d8" />
-                <XAxis
-                  type="number"
-                  axisLine={false}
-                  tickLine={false}
-                  tick={LIGHT_AXIS}
-                  allowDecimals={false}
-                />
-                <YAxis
-                  type="category"
-                  dataKey="address"
-                  width={132}
-                  axisLine={false}
-                  tickLine={false}
-                  tick={LIGHT_AXIS}
-                  tickFormatter={(value: unknown) =>
-                    typeof value === "string" ? shortAddress(value) : ""
-                  }
+            <ResponsiveContainer width="100%" height={300}>
+              <PieChart>
+                <Pie
+                  data={relayerSlices}
+                  dataKey="redemptions"
+                  nameKey="address"
+                  innerRadius="55%"
+                  outerRadius="82%"
+                  paddingAngle={1}
+                  stroke="none"
+                  isAnimationActive={false}
                 />
                 <Tooltip
-                  cursor={{ fill: "#f2eee5" }}
                   contentStyle={LIGHT_TOOLTIP}
-                  formatter={(input: unknown) =>
-                    new Intl.NumberFormat("en").format(Number(input))
+                  formatter={(input: unknown, name: unknown) =>
+                    [
+                      `${new Intl.NumberFormat("en").format(Number(input))} redemptions`,
+                      typeof name === "string" ? shortAddress(name) : "",
+                    ] as [string, string]
                   }
                 />
-                <Bar
-                  dataKey="redemptions"
-                  name="Redemptions"
-                  fill={INK}
-                  radius={[0, 2, 2, 0]}
-                />
-              </BarChart>
+              </PieChart>
             </ResponsiveContainer>
             {!data.relayers.length && (
               <div className="empty-overlay">
                 No client redemptions were indexed in the last seven days.
               </div>
             )}
+            <ol className="relayer-key">
+              {relayerSlices.map((relayer) => (
+                <li key={relayer.address}>
+                  <i style={{ background: relayer.fill }} />
+                  <code>{shortAddress(relayer.address)}</code>
+                  <strong>{percent(relayer.share)}</strong>
+                </li>
+              ))}
+            </ol>
           </div>
-          <div className="network-stats">
-            <Metric
-              eyebrow="RELAYERS SERVING CLIENTS"
-              figure={count(data.totals.relayers7d)}
-              note="Distinct destinations, last 7 days"
-            />
-            <Metric
-              eyebrow="CLIENTS DEPLOYED"
-              figure={count(data.totals.clientsDeployed)}
-              note={`${count(data.totals.allTimeUsers)} have paid for a session`}
-            />
-            <Metric
-              eyebrow="INDEXED SAFES"
-              figure={count(data.safes)}
-              note={`${compactToken(data.safeBalance)} held`}
-            />
-            <Metric
-              eyebrow="INDEX SCHEMA"
-              figure={data.schemaVersion ?? "—"}
-              note={`${count(data.accounts)} on-chain accounts indexed`}
-            />
+          <div className="chart-card service-chart">
+            <div className="chart-title">
+              <div>
+                <span>LAST 30 DAYS</span>
+                <h3>Estimated daily volume per relayer</h3>
+              </div>
+            </div>
+            <ResponsiveContainer width="100%" height={300}>
+              <AreaChart
+                data={data.relayerDaily}
+                margin={{ top: 20, right: 10, left: -18, bottom: 0 }}
+              >
+                <CartesianGrid vertical={false} stroke="#e6e2d8" />
+                <XAxis
+                  dataKey="date"
+                  axisLine={false}
+                  tickLine={false}
+                  tick={LIGHT_AXIS}
+                  minTickGap={40}
+                  tickFormatter={formatDay}
+                />
+                <YAxis axisLine={false} tickLine={false} tick={LIGHT_AXIS} />
+                <Tooltip
+                  labelFormatter={formatDay}
+                  contentStyle={LIGHT_TOOLTIP}
+                  formatter={(input: unknown, name: unknown) =>
+                    [
+                      volume(Number(input)),
+                      typeof name === "string" && name !== OTHER_RELAYERS
+                        ? shortAddress(name)
+                        : OTHER_RELAYERS,
+                    ] as [string, string]
+                  }
+                />
+                {data.relayerSeries.map((relayer, index) => (
+                  <Area
+                    key={relayer}
+                    type="monotone"
+                    dataKey={relayer}
+                    stackId="relayers"
+                    stroke="none"
+                    fill={sliceColor(index)}
+                    isAnimationActive={false}
+                  />
+                ))}
+              </AreaChart>
+            </ResponsiveContainer>
+            {!data.relayerDaily.length && (
+              <div className="empty-overlay">
+                No client redemptions were indexed in the last thirty days.
+              </div>
+            )}
+            <p className="chart-note">
+              Volume is an estimate derived from redemptions seen on chain, stacked per
+              relayer. Relays outside the top {relayerStackSize} are grouped as {OTHER_RELAYERS}.
+            </p>
           </div>
+        </div>
+        <div className="network-stats network-stats-row">
+          <Metric
+            eyebrow="RELAYERS SERVING CLIENTS"
+            figure={count(data.totals.relayers7d)}
+            note="Distinct destinations, last 7 days"
+          />
+          <Metric
+            eyebrow="INDEXED SAFES"
+            figure={count(data.safes)}
+            note={`${compactToken(data.safeBalance)} held`}
+          />
+          <Metric
+            eyebrow="INDEX SCHEMA"
+            figure={data.schemaVersion ?? "—"}
+            note={`${count(data.accounts)} on-chain accounts indexed`}
+          />
+        </div>
+      </section>
+
+      <section className="section" id="clients">
+        <div className="section-heading">
+          <div>
+            <span className="section-index">05</span>
+            <h2>Most active users</h2>
+          </div>
+          <p>
+            Volume is only an estimation based on the redemptions seen on chain.
+          </p>
+        </div>
+        <div className="chart-card table-card">
+          <div className="chart-title">
+            <div className="tab-switch" role="tablist" aria-label="Ranking window">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={scope === "weekly"}
+                className={scope === "weekly" ? "active" : ""}
+                onClick={() => setScope("weekly")}
+              >
+                Weekly most active users
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={scope === "all"}
+                className={scope === "all" ? "active" : ""}
+                onClick={() => setScope("all")}
+              >
+                Most active users
+              </button>
+            </div>
+            <div className="axis-badge">{data.clientCount} clients</div>
+          </div>
+          <table className="rank-table">
+            <thead>
+              <tr>
+                <th scope="col">rank</th>
+                <th scope="col">client</th>
+                <th scope="col" className="numeric">
+                  usage (MB)
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {rankedClients.map((client, index) => (
+                <tr key={client.address}>
+                  <td>{medal(index)}</td>
+                  <td>
+                    <code>{client.address}</code>
+                  </td>
+                  <td className="numeric">
+                    {megabytes(
+                      scope === "weekly" ? client.gigabytes7d : client.gigabytesTotal,
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {!rankedClients.length && (
+            <div className="empty-overlay">
+              No client usage has been indexed for this window.
+            </div>
+          )}
+        </div>
+      </section>
+
+      <section className="section" id="deployments">
+        <div className="section-heading">
+          <div>
+            <span className="section-index">06</span>
+            <h2>Gnosis VPN clients&rsquo; deployments</h2>
+          </div>
+          <p>
+            Edge node key bindings—the moment each client first appeared on chain,
+            newest first.
+          </p>
+        </div>
+        <div className="chart-card table-card">
+          <div className="chart-title">
+            <div>
+              <span>EDGE NODE KEY-BINDINGS</span>
+              <h3>Client deployments</h3>
+            </div>
+            <div className="axis-badge">
+              {data.timebase === "rpc" ? "TIME · RPC RESOLVED" : "TIME · ESTIMATED"}
+            </div>
+          </div>
+          <div className="table-scroll">
+            <table className="rank-table">
+              <thead>
+                <tr>
+                  <th scope="col">timestamp</th>
+                  <th scope="col">client</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.deployments.map((deployment) => (
+                  <tr key={deployment.address}>
+                    <td className="timestamp">{formatTimestamp(deployment.timestamp)}</td>
+                    <td>
+                      <code>{deployment.address}</code>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {!data.deployments.length && (
+            <div className="empty-overlay">No client deployments have been indexed.</div>
+          )}
+          <p className="chart-note">
+            Showing the {data.deployments.length} most recent of{" "}
+            {count(data.totals.clientsDeployed)} clients deployed.
+          </p>
         </div>
       </section>
 
