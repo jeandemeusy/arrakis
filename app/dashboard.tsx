@@ -207,9 +207,7 @@ export default function Dashboard({ data }: { data: DashboardData }) {
         </div>
         <div className="intro-copy">
           <p>
-            Gnosis VPN client usage measured directly from Gnosis Chain. Every figure
-            below counts traffic paid for by VPN clients—accounts that never announced
-            themselves as relays—reconstructed from ticket redemptions indexed by Blokli.
+            Gnosis VPN client usage measured directly from Gnosis Chain. Every figure below counts traffic paid by VPN clients.
           </p>
           <div className="asof">
             <span>LAST INDEXED BLOCK</span>
@@ -263,9 +261,7 @@ export default function Dashboard({ data }: { data: DashboardData }) {
             <h2>Unique active users</h2>
           </div>
           <p>
-            A user is a VPN client—an account that bound a key but never announced an
-            address, so it is not relay infrastructure—that either settled tickets on
-            one of its channels inside the window or was first deployed inside it.
+            A user is a VPN client that either settled tickets on one of its channels inside the window or was first deployed inside it.
           </p>
         </div>
         <div className="chart-card main-chart">
@@ -337,9 +333,7 @@ export default function Dashboard({ data }: { data: DashboardData }) {
             </div>
           )}
           <p className="chart-note">
-            Each point counts distinct clients over the preceding 30 and 7 days, so the
-            two lines converge when activity is concentrated in a single week. New
-            clients counts first deployments in the same 30-day window.
+            Each point counts distinct clients over the preceding 30 and 7 days, so the two lines converge when activity is concentrated in a single week. New clients counts first deployments in the same 30-day window.
           </p>
         </div>
       </section>
@@ -351,9 +345,7 @@ export default function Dashboard({ data }: { data: DashboardData }) {
             <h2>Relayed traffic</h2>
           </div>
           <p>
-            A ticket is issued per packet but only wins with probability p, so each
-            redemption stands in for 650&nbsp;bytes divided by the winning probability
-            in force at its block.
+            A ticket is assumed to have been carried alongside a packet of average size of 650 bytes.
           </p>
         </div>
         <div className="chart-split">
@@ -455,8 +447,7 @@ export default function Dashboard({ data }: { data: DashboardData }) {
             <h2>Cumulative growth</h2>
           </div>
           <p>
-            The running totals behind the weekly bars—useful for reading the trajectory
-            rather than week-to-week noise.
+            The running totals behind the weekly bars—useful for reading the trajectory rather than week-to-week noise.
           </p>
         </div>
         <div className="chart-card main-chart">
@@ -537,9 +528,7 @@ export default function Dashboard({ data }: { data: DashboardData }) {
             <h2>Redemptions by relayer</h2>
           </div>
           <p>
-            Which relays carried client traffic, and how the load is shared. A single
-            dominant slice means sessions are concentrated on one relay rather than
-            spread across the network.
+            Which relays carried client traffic, and how the load is shared. A single dominant slice means sessions are concentrated on one relay rather than spread across the network.
           </p>
         </div>
         <div className="chart-split">
@@ -641,8 +630,7 @@ export default function Dashboard({ data }: { data: DashboardData }) {
               </div>
             )}
             <p className="chart-note">
-              Volume is an estimate derived from redemptions seen on chain, stacked per
-              relayer. Relays outside the top {relayerStackSize} are grouped as {OTHER_RELAYERS}.
+              Volume is an estimate derived from redemptions seen on chain, stacked per relayer. Relays outside the top {relayerStackSize} are grouped as {OTHER_RELAYERS}.
             </p>
           </div>
         </div>
@@ -795,27 +783,21 @@ export default function Dashboard({ data }: { data: DashboardData }) {
             <span>01</span>
             <h3>Client traffic only</h3>
             <p>
-              Relays announce themselves on chain. A channel sourced by an account that
-              never announced is a VPN client paying for its own sessions, so only those
-              channels are counted.
+              Relays announce themselves on chain. A channel sourced by an account that never announced is a VPN client paying for its own sessions, so only those channels are counted.
             </p>
           </div>
           <div>
             <span>02</span>
             <h3>Redemptions</h3>
             <p>
-              Blokli appends a channel state row per on-chain event, and only
-              TicketRedeemed advances the ticket index. A row whose index advances is a
-              redemption; the increment is the tickets it settled.
+              Blokli appends a channel state row per on-chain event, and only TicketRedeemed advances the ticket index. A row whose index advances is a redemption; the increment is the tickets it settled.
             </p>
           </div>
           <div>
             <span>03</span>
             <h3>Data volume</h3>
             <p>
-              Each redemption accounts for 650 / (2<sup>30</sup> &times; p) GB, where p is
-              the winning probability from the oracle&rsquo;s update history at that block.
-              Redemptions predating the first update are excluded.
+              Each redemption accounts for 650 / (2<sup>30</sup> &times; p) GB, where p is the winning probability from the oracle&rsquo;s update history at that block. Redemptions predating the first update are excluded.
             </p>
           </div>
         </div>
