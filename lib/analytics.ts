@@ -5,6 +5,7 @@ import path from "node:path";
 
 import { Pool, type QueryResultRow } from "pg";
 
+import { OTHER_RELAYERS } from "./constants";
 import { resolveBlockClock, type BlockClock } from "./rpc";
 
 /**
@@ -27,7 +28,6 @@ const RELAYER_STACK_LIMIT = 6;
 const RELAYER_STACK_DAYS = 30;
 const CLIENT_LIMIT = 50;
 const DEPLOYMENT_LIMIT = 100;
-export const OTHER_RELAYERS = "Other";
 
 export type ActiveUserPoint = {
   date: string;

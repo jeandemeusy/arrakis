@@ -18,7 +18,8 @@ import {
 } from "recharts";
 import { Database, ExternalLink, Radio, ShieldCheck, Users } from "lucide-react";
 
-import { OTHER_RELAYERS, type AnalyticsSnapshot } from "@/lib/analytics";
+import { OTHER_RELAYERS } from "@/lib/constants";
+import type { AnalyticsSnapshot } from "@/lib/analytics";
 
 export type DashboardData = AnalyticsSnapshot;
 
