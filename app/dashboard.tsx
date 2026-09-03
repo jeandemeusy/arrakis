@@ -42,7 +42,9 @@ function shortAddress(address: string) {
   return `${address.slice(0, 8)}…${address.slice(-6)}`;
 }
 
-function formatDay(value: string) {
+// Recharts hands both tick and tooltip labels through as ReactNode.
+function formatDay(value: unknown) {
+  if (typeof value !== "string") return "";
   return new Intl.DateTimeFormat("en", {
     day: "2-digit",
     month: "short",
