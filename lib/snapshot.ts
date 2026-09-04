@@ -193,19 +193,18 @@ export type ClientDetail = {
   network: string;
   deployedAt: string | null;
   /**
-   * Settlement, not redemption.
+   * When the client was first and last seen paying for traffic.
    *
-   * The same on-chain event is a redemption from the relay's side and a payout
-   * from the client's. This record is the client's, so it uses the client's
-   * vocabulary throughout: the client creates a ticket per packet, and a
-   * settlement is one batch of them being cashed in by a relay.
+   * A client leaves no trace of its own on chain: what is visible is a relay
+   * redeeming a ticket the client issued. These are the bounds of that trace,
+   * which is the closest thing to the client's own lifetime on record.
    */
-  firstSettlement: string | null;
-  lastSettlement: string | null;
-  settlements: number;
+  firstSeen: string | null;
+  lastSeen: string | null;
+  redemptions: number;
   tickets: number;
   gigabytes: number;
-  /** Distinct days the client had at least one settlement on. */
+  /** Distinct days a relay redeemed at least one of this client's tickets. */
   activeDays: number;
   /** Volume per day over the recent window, zero-filled so the bars line up. */
   daily: Array<{ date: string; gigabytes: number }>;
@@ -213,7 +212,7 @@ export type ClientDetail = {
   relayers: Array<{
     key: string;
     address: string;
-    settlements: number;
+    redemptions: number;
     gigabytes: number;
     share: number;
     /** Position in the shared relayer ordering, or -1 when it has no colour. */
@@ -367,8 +366,8 @@ function weekLabel(day: number): string {
 /**
  * Daily snapshots of the trailing 7- and 30-day active-user counts.
  *
- * A client is active in a window when it settled a redemption on one of its
- * channels inside that window, or when it was first deployed inside it. Counting
+ * A client is active in a window when a redemption landed on one of its channels
+ * inside that window, or when it was first deployed inside it. Counting
  * the deployment day means a freshly deployed client registers immediately rather
  * than only once its first tickets are redeemed.
  */
@@ -532,7 +531,8 @@ function relayerBreakdown(
  * New versus returning clients per day over the recent window.
  *
  * A client is new on the day it was first deployed and returning on any later day
- * it settles a redemption, so the two bands never double-count the same client.
+ * a redemption lands on one of its channels, so the two bands never double-count
+ * the same client.
  */
 function dailyUserSeries(
   actorsByDay: Map<number, Set<string>>,
@@ -696,24 +696,24 @@ function clientDetails(
   type Draft = {
     address: string;
     network: string;
-    settlements: number;
+    redemptions: number;
     tickets: number;
     gigabytes: number;
-    /** Null until the client settles anything; a deployed client may never. */
+    /** Null until a relay redeems against the client; some never do. */
     first: number | null;
     last: number | null;
     days: Set<number>;
     byDay: Map<number, number>;
     byRelayer: Map<
       string,
-      { address: string; settlements: number; gigabytes: number }
+      { address: string; redemptions: number; gigabytes: number }
     >;
   };
 
   const blank = (network: string, address: string): Draft => ({
     address,
     network,
-    settlements: 0,
+    redemptions: 0,
     tickets: 0,
     gigabytes: 0,
     first: null,
@@ -724,7 +724,7 @@ function clientDetails(
   });
 
   const drafts = new Map<string, Draft>();
-  // Seeded from the deployments, so a client that has never settled anything
+  // Seeded from the deployments, so a client nothing was ever redeemed against
   // still has a record. Its row opens like any other, and "nothing yet" is an
   // answer — a row that quietly behaves differently is not.
   for (const client of deployed) {
@@ -740,7 +740,7 @@ function clientDetails(
       draft = blank(redemption.network, redemption.source);
       drafts.set(key, draft);
     }
-    draft.settlements += 1;
+    draft.redemptions += 1;
     draft.tickets += redemption.tickets;
     draft.gigabytes += redemption.gigabytes;
     draft.first =
@@ -762,10 +762,10 @@ function clientDetails(
     const relayerKey = identity(redemption.network, redemption.destination);
     const relayer = draft.byRelayer.get(relayerKey) ?? {
       address: redemption.destination,
-      settlements: 0,
+      redemptions: 0,
       gigabytes: 0,
     };
-    relayer.settlements += 1;
+    relayer.redemptions += 1;
     relayer.gigabytes += redemption.gigabytes;
     draft.byRelayer.set(relayerKey, relayer);
   }
@@ -785,13 +785,13 @@ function clientDetails(
         deployedAt === undefined
           ? null
           : new Date(deployedAt * 1000).toISOString(),
-      firstSettlement:
+      firstSeen:
         draft.first === null
           ? null
           : new Date(draft.first * 1000).toISOString(),
-      lastSettlement:
+      lastSeen:
         draft.last === null ? null : new Date(draft.last * 1000).toISOString(),
-      settlements: draft.settlements,
+      redemptions: draft.redemptions,
       tickets: draft.tickets,
       gigabytes: draft.gigabytes,
       activeDays: draft.days.size,
@@ -800,10 +800,10 @@ function clientDetails(
         .map(([relayerKey, relayer]) => ({
           key: relayerKey,
           address: relayer.address,
-          settlements: relayer.settlements,
+          redemptions: relayer.redemptions,
           gigabytes: relayer.gigabytes,
-          share: draft.settlements
-            ? relayer.settlements / draft.settlements
+          share: draft.redemptions
+            ? relayer.redemptions / draft.redemptions
             : 0,
           colorIndex: colorIndexOf.get(relayerKey) ?? -1,
         }))

@@ -110,7 +110,7 @@ function dataset(
     );
   });
 
-  // One client is deployed and never settles anything. It is a real shape — a
+  // One client is deployed and nothing is ever redeemed against it. It is a
   // node that was set up and never used — and the only one that exercises the
   // empty client record.
   const idle = clients.at(-1);

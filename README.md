@@ -166,12 +166,16 @@ by announced accounts are relay-to-relay hops, not client usage.
 **Redemptions.** Blokli appends one `channel_state` row per on-chain channel
 event, and `TicketRedeemed` is the only event that advances `ticket_index`. A row
 whose ticket index exceeds its predecessor's (within the same channel epoch) is
-therefore a redemption, and the increment is the number of tickets it settled.
-See [`sql/v1/redemptions.sql`](./sql/v1/redemptions.sql).
+therefore a redemption. The increment is *not* the number of tickets redeemed: a
+client numbers a ticket for every packet it sends, only winning tickets are
+redeemed, and the contract advances the index past the winner to block replay —
+so the jump swallows every losing ticket issued in between and estimates the
+packets that redemption paid for. Exactly one ticket is redeemed per
+redemption. See [`sql/v1/redemptions.sql`](./sql/v1/redemptions.sql).
 
 **Active users.** A client is an account that bound a key (`account`, written from
 `KeyBinding`) but never announced an address (`announcement`, written from
-`AddressAnnouncement`). It is active in a window when it settled a redemption on
+`AddressAnnouncement`). It is active in a window when a redemption landed on
 one of its channels inside that window, or when it was first deployed inside it —
 so a new client registers on deployment rather than only once its first tickets
 are redeemed. Windows are inclusive of both endpoints: 7 days is `day-6..day`,

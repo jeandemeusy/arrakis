@@ -1364,12 +1364,6 @@ main {
   color: #35332f;
 }
 
-.client-span {
-  margin: 14px 0 0;
-  font-size: 12px;
-  color: var(--muted);
-}
-
 /* Identity, not history: the network belongs beside the address it qualifies. */
 .client-network {
   padding: 2px 7px;

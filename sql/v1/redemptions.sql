@@ -2,8 +2,15 @@
 --
 -- Blokli writes one channel_state row per on-chain channel event. A TicketRedeemed
 -- event is the only event that advances ticket_index, so a row whose ticket_index
--- is greater than its predecessor's marks a redemption on that channel, and the
--- increment is the number of tickets that redemption settled.
+-- is greater than its predecessor's marks a redemption on that channel.
+--
+-- The increment is not the number of tickets redeemed. A client numbers a
+-- ticket for every packet it sends and only winning tickets are redeemed, and the
+-- contract advances the index past the winner to block replay — so the jump
+-- swallows every losing ticket issued in between. `tickets` is therefore an
+-- estimate of the packets that redemption paid for, and its ratio to the number of
+-- redemptions should track the winning probability. One ticket is redeemed per
+-- redemption.
 --
 -- Only channels opened BY a client are counted. Nodes that relay traffic announce
 -- themselves on chain; an account that never announced is not part of the network

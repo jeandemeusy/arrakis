@@ -143,6 +143,18 @@ function count(input: number | null) {
   return input === null ? '—' : INTEGER.format(input);
 }
 
+/**
+ * Packets paid for, rounded to the nearest ten thousand.
+ *
+ * The count comes from ticket-index jumps rather than from packets themselves,
+ * so its last digits are precision it has not earned. Rounding says the figure
+ * is an estimate before the label has to.
+ */
+function packets(input: number | null) {
+  if (input === null) return '—';
+  return INTEGER.format(Math.round(input / 10_000) * 10_000);
+}
+
 function percent(share: number) {
   return PERCENT.format(share);
 }
@@ -515,6 +527,14 @@ function CohortGrid({
   const width = left + months * cell;
   const full = top + cohorts.length * cell + 4;
 
+  // A young dashboard has three columns and a viewBox a fifth the width of the
+  // card. Scaled to fill it, the squares come out the size of a thumb and the
+  // labels bigger than the tile's own title. Capping the scale keeps a cell the
+  // same size whatever the grid's shape — which is the point of a grid read by
+  // comparing squares. The cap lifts when the tile is enlarged.
+  const maxCell = height > 300 ? 52 : 34;
+  const scale = maxCell / cell;
+
   const show = (
     event: { clientX: number; clientY: number },
     cell: { label: string; share: number; active: number; size: number },
@@ -538,6 +558,12 @@ function CohortGrid({
         viewBox={`0 0 ${width} ${full}`}
         width="100%"
         height={height}
+        style={{
+          display: 'block',
+          margin: '0 auto',
+          maxWidth: width * scale,
+          maxHeight: full * scale,
+        }}
         preserveAspectRatio="xMidYMid meet"
         // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- an <svg> cannot be an <img>
         role="img"
@@ -679,8 +705,8 @@ function ClientDialog({
           <ol className="client-timeline">
             {[
               { label: 'Deployed', at: detail.deployedAt },
-              { label: 'First seen', at: detail.firstSettlement },
-              { label: 'Last seen', at: detail.lastSettlement },
+              { label: 'First seen', at: detail.firstSeen },
+              { label: 'Last seen', at: detail.lastSeen },
             ].map((step) => (
               <li key={step.label}>
                 <span className="timeline-mark" aria-hidden="true" />
@@ -743,7 +769,7 @@ function ClientDialog({
                   <tr>
                     <th scope="col">relay</th>
                     <th scope="col" className="numeric">
-                      settlements
+                      redemptions
                     </th>
                     <th scope="col" className="numeric">
                       share
@@ -768,7 +794,7 @@ function ClientDialog({
                         />
                         <AddressLink address={relayer.address} />
                       </td>
-                      <td className="numeric">{count(relayer.settlements)}</td>
+                      <td className="numeric">{count(relayer.redemptions)}</td>
                       <td className="numeric">{percent(relayer.share)}</td>
                       <td className="numeric">
                         {megabytes(relayer.gigabytes)}
@@ -1164,7 +1190,7 @@ export default function Dashboard({
           <p>
             A user is a VPN client — an account that bound a key but never
             announced an address, so it is not relay infrastructure. Volume is
-            derived from the redemptions those clients settled, priced at the
+            derived from the redemptions on client channels, priced at the
             winning probability in force at each block.
           </p>
         </div>
@@ -1334,7 +1360,7 @@ export default function Dashboard({
             span={4}
             label="TOTAL REDEMPTIONS"
             figure={count(data.totals.redemptionsTotal)}
-            note={`${count(data.totals.ticketsTotal)} tickets settled across them`}
+            note={`An estimated ${packets(data.totals.ticketsTotal)} packets paid for`}
             expanded={enlarged}
             onExpand={setEnlarged}
           />
@@ -1971,7 +1997,10 @@ export default function Dashboard({
             <p>
               Blokli appends a channel state row per on-chain event, and only
               TicketRedeemed advances the ticket index. A row whose index
-              advances is a redemption; the increment is the tickets it settled.
+              advances is a redemption. The jump is not the tickets redeemed: a
+              client numbers a ticket for every packet it sends and only winning
+              tickets are redeemed, so the gap estimates the packets paid for in
+              between.
             </p>
           </div>
           <div>
