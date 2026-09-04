@@ -290,9 +290,15 @@ export type AnalyticsSnapshot = {
     gigabytesDownstreamTotal: number | null;
     /** Downstream per unit of upstream. The check on the whole inference. */
     downstreamRatio: number | null;
-    /** Relay-to-relay volume: the probe floor that was subtracted. */
+    /** Downstream before the probe floor came off, so the correction is visible. */
+    gigabytesDownstreamRaw: number | null;
+    /** How much the floor actually removed. */
+    probeFloorGigabytes: number | null;
+    /** Probe volume the rate was calibrated from. */
     probeGigabytesTotal: number | null;
-    /** Announced payers taken to be exits. A shrinking set is a warning sign. */
+    /** Exits named in configuration. Zero means they were guessed instead. */
+    exitsNamed: number | null;
+    /** Exits actually seen paying a relay. Below `exitsNamed`, some went quiet. */
     exitsSeen: number | null;
     ticketsTotal: number | null;
     relayers7d: number | null;
@@ -340,16 +346,24 @@ type Traffic = {
 /**
  * Splits redemptions by direction.
  *
- * The relay set has to be derived before anything else can be classified: a
- * relay is only identifiable as the node a client paid, so upstream defines it
- * and everything else is read against it. An announced payer that is not a
- * relay, paying a relay, is an exit returning traffic — that is the inference
- * this whole direction split rests on, and its assumption is that exits are
- * never themselves chosen to relay client traffic. If they are, they land in
- * the relay set and their traffic is filed as probing, which understates
- * downstream silently. `exits` is reported so that set can be watched.
+ * The relay set is derived first: a relay is only identifiable as the node a
+ * client paid, so upstream defines it and everything else is read against it.
+ *
+ * Exits are named in configuration, and that is not a convenience. Nothing on
+ * chain separates an exit from a relay — both announce — so the alternative is
+ * identifying them by elimination, which breaks the moment an exit also relays
+ * for a client: it joins the relay set, its return traffic is filed as probing,
+ * and downstream understates itself with nothing to show for it.
+ *
+ * With no list configured the elimination heuristic still runs, so a deployment
+ * that has not named its exits gets an estimate rather than nothing — carrying
+ * that caveat. `exitsSeen` reports how many were actually observed paying, which
+ * against a known list says whether any have gone quiet.
  */
-function classify(redemptions: Redemption[]): Traffic & { exits: Set<string> } {
+function classify(
+  redemptions: Redemption[],
+  knownExits: Set<string>,
+): Traffic & { exits: Set<string> } {
   const relays = new Set<string>();
   for (const redemption of redemptions) {
     if (!redemption.sourceAnnounced) {
@@ -363,6 +377,7 @@ function classify(redemptions: Redemption[]): Traffic & { exits: Set<string> } {
     probe: [],
     exits: new Set<string>(),
   };
+  const named = knownExits.size > 0;
   for (const redemption of redemptions) {
     if (!redemption.sourceAnnounced) {
       traffic.upstream.push(redemption);
@@ -370,9 +385,20 @@ function classify(redemptions: Redemption[]): Traffic & { exits: Set<string> } {
     }
     const payer = identity(redemption.network, redemption.source);
     const paid = identity(redemption.network, redemption.destination);
+
+    // Membership, checked before anything else, is what makes a named exit
+    // survive also being a relay.
+    if (named && knownExits.has(payer)) {
+      traffic.downstream.push(redemption);
+      traffic.exits.add(payer);
+      continue;
+    }
     // Only hops terminating at a known relay can be part of a VPN session.
     if (!relays.has(paid)) continue;
-    if (relays.has(payer)) {
+    if (named || relays.has(payer)) {
+      // Once the exits are named, everything else paying a relay is probing —
+      // and a payer that never relays is the better calibration sample, since
+      // it pays for its own probes and for nobody else's forwarding.
       traffic.probe.push(redemption);
     } else {
       traffic.downstream.push(redemption);
@@ -385,45 +411,79 @@ function classify(redemptions: Redemption[]): Traffic & { exits: Set<string> } {
 /**
  * Downstream volume per day, with the probe floor taken out.
  *
- * Every node probes the network, exits included, so a candidate exit's channel
- * carries return traffic and probing mixed together. Relay-to-relay traffic is
- * probing and nothing else, which gives a per-node-per-day probe rate measured
- * rather than assumed; multiplying it by the number of candidates active that
- * day estimates how much of their volume was probing, and the rest is
- * downstream. Clamped at zero: on a quiet day the correction can exceed the
- * candidates' own volume, and negative traffic is not a thing.
+ * The floor only applies when the exits were guessed. Named in configuration,
+ * an exit paying a relay is the return path by definition — a measurement, not
+ * an inference — and there is nothing to correct: subtracting a modelled probe
+ * cost from a known quantity can only make it wrong.
+ *
+ * Guessed, the set is announced payers that are not relays, which is every node
+ * on the network that probes without ever relaying. Then it matters. Every node
+ * probes, exits included, so a guessed exit's channel carries return traffic and
+ * probing mixed together. The probe bucket is probing and nothing else, which
+ * gives a per-node-per-day probe rate measured rather than assumed; multiplying
+ * it by the payers active that day estimates how much of their volume was
+ * probing, and the rest is downstream.
+ *
+ * The rate is a low quantile of what payers spend, not their average, and that
+ * distinction is the whole correction. Probes take several hops and only
+ * forwarders are paid, so a relay pays for its own probes *and* for carrying
+ * everyone else's, while an exit pays only the first hop of its own. Averaging
+ * bills an exit for forwarding it never did, by roughly the mean hop count —
+ * enough to wipe out the entire downstream figure. The quiet end of the
+ * distribution is the payer doing least forwarding, which is the closest thing
+ * to a node's own probing cost the chain exposes.
  */
+const PROBE_QUANTILE = 0.1;
+
 function downstreamByRelayDay(
   candidates: Redemption[],
   probes: Redemption[],
-): Map<number, Map<string, number>> {
+  applyFloor: boolean,
+): { perRelay: Map<number, Map<string, number>>; floor: Map<number, number> } {
   const gather = (rows: Redemption[]) => {
     const volume = new Map<number, number>();
     const senders = new Map<number, Set<string>>();
+    // What each payer spent, so the rate can be read off the quiet end.
+    const bySender = new Map<number, Map<string, number>>();
     // Where the traffic landed, keyed by the relay that was paid.
     const arrivals = new Map<number, Map<string, number>>();
     for (const row of rows) {
       volume.set(row.day, (volume.get(row.day) ?? 0) + row.gigabytes);
+      const sender = identity(row.network, row.source);
       const set = senders.get(row.day) ?? new Set<string>();
-      set.add(identity(row.network, row.source));
+      set.add(sender);
       senders.set(row.day, set);
+      const spend = bySender.get(row.day) ?? new Map<string, number>();
+      spend.set(sender, (spend.get(sender) ?? 0) + row.gigabytes);
+      bySender.set(row.day, spend);
       const byRelay = arrivals.get(row.day) ?? new Map<string, number>();
       const relay = identity(row.network, row.destination);
       byRelay.set(relay, (byRelay.get(relay) ?? 0) + row.gigabytes);
       arrivals.set(row.day, byRelay);
     }
-    return { volume, senders, arrivals };
+    return { volume, senders, bySender, arrivals };
   };
 
   const probed = gather(probes);
   const candidate = gather(candidates);
 
   const out = new Map<number, Map<string, number>>();
+  const floors = new Map<number, number>();
   for (const [day, byRelay] of candidate.arrivals) {
-    const probingNodes = probed.senders.get(day)?.size ?? 0;
+    if (!applyFloor) {
+      out.set(day, new Map(byRelay));
+      floors.set(day, 0);
+      continue;
+    }
     const probeVolume = probed.volume.get(day) ?? 0;
-    const perNode = probingNodes ? probeVolume / probingNodes : 0;
+    const spend = [...(probed.bySender.get(day)?.values() ?? [])].sort(
+      (a, b) => a - b,
+    );
+    const perNode = spend.length
+      ? spend[Math.floor(spend.length * PROBE_QUANTILE)]
+      : 0;
     const floor = perNode * (candidate.senders.get(day)?.size ?? 0);
+    floors.set(day, floor);
     // Nothing says where an exit's own probes land, so the relays' probes of
     // each other stand in for it: the floor is spread over relays in the same
     // proportion that observed probe traffic arrives at them.
@@ -449,7 +509,7 @@ function downstreamByRelayDay(
     for (const [relay, volume] of adjusted) adjusted.set(relay, volume * scale);
     out.set(day, adjusted);
   }
-  return out;
+  return { perRelay: out, floor: floors };
 }
 
 /** Collapses the per-relay estimate to a daily network total. */
@@ -492,6 +552,8 @@ export type NetworkDataset = {
   };
   timebase: 'rpc' | 'estimated';
   winProbability: 'historical' | 'current' | 'assumed';
+  /** Configured exit addresses, lowercased. Empty falls back to elimination. */
+  exits: string[];
   panels: Panels;
   warnings: string[];
 };
@@ -1090,13 +1152,40 @@ export function buildSnapshot(datasets: NetworkDataset[]): AnalyticsSnapshot {
   // Everything that names a participant reads upstream only: it is the one
   // direction whose payer is the client itself. Downstream is real traffic with
   // no client in it, so it stays an aggregate.
+  const knownExits = new Set(
+    datasets.flatMap((dataset) =>
+      dataset.exits.map((address) => identity(dataset.network, address)),
+    ),
+  );
   const {
     upstream: redemptions,
     downstream: candidates,
     probe: probes,
     exits,
-  } = classify(all);
-  const downstreamPerRelay = downstreamByRelayDay(candidates, probes);
+  } = classify(all, knownExits);
+  // Per network, never pooled. The probe rate is a quantile of what nodes spend,
+  // and a small network's nodes spend less in absolute terms than a large one's —
+  // pooled, the quiet end of one network sets the floor for the other, and the
+  // combined figure stops matching the sum of its parts.
+  const downstreamPerRelay = new Map<number, Map<string, number>>();
+  const probeFloor = new Map<number, number>();
+  for (const dataset of datasets) {
+    const mine = (rows: Redemption[]) =>
+      rows.filter((row) => row.network === dataset.network);
+    const { perRelay, floor } = downstreamByRelayDay(
+      mine(candidates),
+      mine(probes),
+      dataset.exits.length === 0,
+    );
+    for (const [day, byRelay] of perRelay) {
+      const merged = downstreamPerRelay.get(day) ?? new Map<string, number>();
+      for (const [relay, volume] of byRelay) merged.set(relay, volume);
+      downstreamPerRelay.set(day, merged);
+    }
+    for (const [day, value] of floor) {
+      probeFloor.set(day, (probeFloor.get(day) ?? 0) + value);
+    }
+  }
   const downstream = totalByDay(downstreamPerRelay);
   const deployed = datasets.flatMap((dataset) => dataset.deployed);
   const warnings = datasets.flatMap((dataset) =>
@@ -1254,9 +1343,16 @@ export function buildSnapshot(datasets: NetworkDataset[]): AnalyticsSnapshot {
       gigabytesDownstreamTotal: hasUsage ? downstreamTotal : null,
       downstreamRatio:
         hasUsage && upstreamTotal > 0 ? downstreamTotal / upstreamTotal : null,
+      gigabytesDownstreamRaw: hasUsage
+        ? sum(candidates, (row) => row.gigabytes)
+        : null,
+      probeFloorGigabytes: hasUsage
+        ? [...probeFloor.values()].reduce((total, value) => total + value, 0)
+        : null,
       probeGigabytesTotal: hasUsage
         ? sum(probes, (row) => row.gigabytes)
         : null,
+      exitsNamed: hasUsage ? knownExits.size : null,
       exitsSeen: hasUsage ? exits.size : null,
       ticketsTotal: hasUsage ? sum(redemptions, (row) => row.tickets) : null,
       relayers7d: hasUsage
@@ -1283,7 +1379,10 @@ export const EMPTY_TOTALS: AnalyticsSnapshot['totals'] = {
   gigabytesDownstream7d: null,
   gigabytesDownstreamTotal: null,
   downstreamRatio: null,
+  gigabytesDownstreamRaw: null,
+  probeFloorGigabytes: null,
   probeGigabytesTotal: null,
+  exitsNamed: null,
   exitsSeen: null,
   ticketsTotal: null,
   relayers7d: null,

@@ -456,6 +456,7 @@ async function queryNetwork(network: NetworkConfig): Promise<NetworkDataset> {
     },
     timebase,
     winProbability,
+    exits: network.exits,
     panels,
     warnings,
   };

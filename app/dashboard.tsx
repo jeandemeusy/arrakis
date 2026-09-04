@@ -889,6 +889,9 @@ export default function Dashboard({
     dashboard.networks.find((entry) => entry.id === id)?.label ?? id;
   const live = data.source !== 'unavailable';
   const panels = data.panels;
+  // Named exits make downstream a measurement; guessed ones make it an estimate,
+  // and the page should not claim the same confidence for both.
+  const namedExits = (data.totals.exitsNamed ?? 0) > 0;
 
   // Switching network drops the drill-down: the client keys are per network, so
   // the open record would either vanish or, worse, name a different participant.
@@ -933,7 +936,10 @@ export default function Dashboard({
   ];
   const volumeLegend: LegendEntry[] = [
     { color: YELLOW, label: 'Upstream' },
-    { color: PLUM, label: 'Downstream (inferred)' },
+    {
+      color: PLUM,
+      label: namedExits ? 'Downstream' : 'Downstream (inferred)',
+    },
     { color: INK, label: 'Cumulative' },
   ];
   const dailyUsersLegend: LegendEntry[] = [
@@ -1050,11 +1056,7 @@ export default function Dashboard({
         Skip to content
       </a>
       <header className="topbar">
-        <a
-          className="brand"
-          href="#top"
-          aria-label="Gnosis VPN network intelligence home"
-        >
+        <a className="brand" href="#top" aria-label="Bloklune home">
           <span className="brand-mark">
             <span />
           </span>
@@ -1317,10 +1319,11 @@ export default function Dashboard({
                 </Empty>
                 <p className="chart-note">
                   Upstream is paid for by the client and attributable to it.
-                  Downstream is paid for by the exit, so it is network-wide only
-                  — inferred from relays paid by announced nodes that never
-                  relay for a client, less the probe traffic relays pay each
-                  other.
+                  Downstream is paid for by the exit, whose channels name no
+                  client, so it is never attributable to one.{' '}
+                  {namedExits
+                    ? 'The exits are named in configuration, so it is measured rather than inferred.'
+                    : 'No exits are configured, so they are inferred from relays paid by announced nodes that never relay for a client, less the probe traffic relays pay each other.'}
                 </p>
               </>
             }
@@ -1419,7 +1422,11 @@ export default function Dashboard({
             span={3}
             label="DOWNSTREAM · 7 DAYS"
             figure={volume(data.totals.gigabytesDownstream7d)}
-            note={`${multiple(data.totals.downstreamRatio)} upstream · inferred, probe traffic removed`}
+            note={
+              namedExits
+                ? `${multiple(data.totals.downstreamRatio)} upstream · paid by ${count(data.totals.exitsSeen)} of ${count(data.totals.exitsNamed)} known exits`
+                : `${multiple(data.totals.downstreamRatio)} upstream · exits inferred, probe traffic removed`
+            }
             expanded={enlarged}
             onExpand={setEnlarged}
           />
@@ -1653,7 +1660,9 @@ export default function Dashboard({
                 <p className="chart-note">
                   {flow === 'upstream'
                     ? 'Client traffic, split by the relay each client paid.'
-                    : 'The return path, split by the relay each exit paid. Inferred rather than attributed — no client appears in these channels — and the probe floor is spread across relays in proportion to the probe traffic they already receive.'}
+                    : namedExits
+                      ? 'The return path, split by the relay each exit paid. No client appears in these channels, so it is a relay breakdown and never a client one.'
+                      : 'The return path, split by the relay each exit paid. The exits are inferred rather than configured, and the probe floor is spread across relays in proportion to the probe traffic they already receive.'}
                 </p>
               </>
             }

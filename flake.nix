@@ -1,5 +1,5 @@
 {
-  description = "Gnosis VPN network intelligence dashboard";
+  description = "Bloklune — Gnosis VPN on-chain metrics dashboard";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";

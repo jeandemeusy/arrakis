@@ -1,4 +1,4 @@
-# Gnosis VPN Network Intelligence
+# Bloklune
 
 A public, read-only investor dashboard powered by a Blokli index database. The
 application is intentionally self-contained so it can live in a dedicated
@@ -47,9 +47,59 @@ NETWORKS='[
 - `databaseUrl` must be a PostgreSQL connection string. Use a read-only role.
 - `rpcUrl` is optional and per network: set it to anchor that network's charts to
   real block timestamps instead of an assumed five-second cadence.
+- `exits` is optional and per network: the addresses of that network's exit nodes.
+  See below.
 
 A malformed `NETWORKS` is reported rather than ignored — a silent fallback to one
 network would hide a deployment mistake behind a plausible-looking dashboard.
+
+### Exit addresses
+
+Downstream volume can only be attributed if the exits are named. Nothing on chain
+separates an exit from a relay — both announce — so the alternative is identifying
+exits by elimination, and that breaks the moment an exit also relays for a client:
+it joins the relay set, its return traffic is filed as probing, and downstream
+understates itself with nothing on the page to show for it.
+
+Name them per network:
+
+```dotenv
+NETWORKS='[
+  {"id":"jura-prod","label":"Jura","databaseUrl":"postgresql://…",
+   "exits":["0x64885d2d2bc9df7b415aac184e020c632d715dff",
+            "0x12b78461da59e8317c61bd249ea0dea2aa9527de",
+            "0x1062696f8eec5b71bfa6be7e52df1d7457428106",
+            "0x00d7096439d1f731c73574adb7e4a9f3b7775326",
+            "0xd8efe2ebe14c8cc193d5a9f5afd81276549fad67",
+            "0xcd9d0e23cd999dfc0d1400d837f8e612dbbbdfaa",
+            "0x7220cfe91f369bfe79f883c2891e97407d7a4d48"]},
+  {"id":"jura-dev","label":"Dev","databaseUrl":"postgresql://…",
+   "exits":["0xe686ade652a815e0e26803c1a795f9d65c82e06e",
+            "0x7b2b69c52ec97907d7a3b2d2724ba92781b7def7",
+            "0x7f25c474f26488b2e29343c881f0cdc0e6d02abd"]}
+]'
+```
+
+Or set `EXITS` to a comma-separated list to apply the same exits to every network;
+a network naming its own overrides it. Addresses are lowercased on read, so
+checksummed input is fine. A malformed address throws rather than being skipped —
+an exit dropped for a typo would take its traffic out of the downstream figure
+silently.
+
+Once they are named, any redemption from a known exit to a relay is downstream —
+no correction is applied, because there is nothing left to guess. The page says
+"measured" rather than "inferred" and drops the caveat from the chart notes.
+
+With no exits configured anywhere the elimination heuristic runs instead: exits
+are taken to be announced payers that never relay, and because every node probes
+the network, a probe floor is estimated from relay-to-relay traffic and
+subtracted. That is a real estimate with a real error bar, and the page says so.
+`totals.gigabytesDownstreamRaw` and `totals.probeFloorGigabytes` expose what the
+correction did.
+
+`totals.exitsNamed` and `totals.exitsSeen` report how many exits are configured
+and how many were actually observed paying a relay. Seen below named means some
+have gone quiet — worth chasing, since their traffic is missing from the figure.
 
 **Single network.** A lone `DATABASE_URL` (with optional `RPC_URL`) still works and
 is read as one unnamed network, so an existing deployment needs no change. The

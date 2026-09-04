@@ -112,10 +112,12 @@ function dataset(
   const days = Math.max(1, lastDay - startDay + 1);
   const relayers = Array.from({ length: config.relayers }, () => address(next));
   const clients = Array.from({ length: config.clients }, () => address(next));
-  // Exits announce, like relays, and are told apart only by never relaying for
-  // a client. The fixture keeps the two sets disjoint, which is the assumption
-  // the direction split rests on.
+  // Exits announce, exactly as relays do. One of them also relays for clients,
+  // which is the case that breaks identification by elimination: it lands in the
+  // relay set, so its return traffic would be filed as probing and lost. Naming
+  // the exits is what survives it, and this is the fixture that proves it.
   const exits = Array.from({ length: config.exits }, () => address(next));
+  const relayPool = [...relayers, exits[0]];
 
   // Each client appears at some point in the window and stays around afterwards.
   const deployedOn = new Map<string, number>();
@@ -152,7 +154,7 @@ function dataset(
         channelId: channelId(next),
         source: active[Math.floor(next() * active.length)],
         // A skewed pick gives the long tail the donut and stack need to be tested.
-        destination: relayers[Math.floor(next() ** 2 * relayers.length)],
+        destination: relayPool[Math.floor(next() ** 2 * relayPool.length)],
         day,
         timestamp,
         tickets: 30 + Math.floor(next() * 60),
@@ -183,24 +185,33 @@ function dataset(
     // Probing: every announced node measures the network, indifferent to
     // whether anyone used the VPN. A relay's probes land in the calibration set;
     // an exit's land among the downstream candidates, which is precisely the
-    // contamination the estimate has to subtract back out. Generating both is
-    // what makes the fixture a test of the correction rather than of the code
-    // path around it.
+    // contamination the estimate has to subtract back out.
+    //
+    // Probes take one to three paid hops, and that asymmetry is the point: a
+    // relay pays for its own probes AND for forwarding everyone else's, while
+    // an exit only ever pays the first hop of its own. A per-node rate averaged
+    // over relays therefore charges an exit for forwarding it never did. The
+    // fixture has to generate the multi-hop case or it cannot catch that.
     for (const prober of [...relayers, ...exits]) {
       for (let i = 0; i < PROBES_PER_NODE_DAY; i += 1) {
-        const peer = relayers[Math.floor(next() * relayers.length)];
-        if (peer === prober) continue;
-        redemptions.push({
-          network: config.id,
-          channelId: channelId(next),
-          source: prober,
-          destination: peer,
-          day,
-          timestamp: day * DAY_SECONDS + Math.floor(next() * DAY_SECONDS),
-          tickets: 1 + Math.floor(next() * 4),
-          gigabytes: perRedemption,
-          sourceAnnounced: true,
-        });
+        let payer = prober;
+        const hops = 1 + Math.floor(next() * 3);
+        for (let hop = 0; hop < hops; hop += 1) {
+          const peer = relayers[Math.floor(next() * relayers.length)];
+          if (peer === payer) break;
+          redemptions.push({
+            network: config.id,
+            channelId: channelId(next),
+            source: payer,
+            destination: peer,
+            day,
+            timestamp: day * DAY_SECONDS + Math.floor(next() * DAY_SECONDS),
+            tickets: 1 + Math.floor(next() * 4),
+            gigabytes: perRedemption,
+            sourceAnnounced: true,
+          });
+          payer = peer;
+        }
       }
     }
   }
@@ -260,6 +271,8 @@ function dataset(
     },
     timebase: 'rpc',
     winProbability: 'historical',
+    // The fixture names its exits, as a real deployment should.
+    exits,
     panels,
     warnings: [
       'Fixture data — DASHBOARD_FIXTURES is enabled, nothing here is real.',

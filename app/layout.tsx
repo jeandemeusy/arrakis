@@ -1,21 +1,21 @@
-import type { Metadata } from "next";
-import "./globals.css";
+import type { Metadata } from 'next';
+import './globals.css';
 
 export const metadata: Metadata = {
-  title: "Gnosis VPN — Network Intelligence",
+  title: 'Bloklune',
   description:
-    "Public, on-chain Gnosis VPN adoption and HOPR network metrics powered by Blokli.",
+    'Public, on-chain Gnosis VPN adoption and HOPR network metrics powered by Blokli.',
   openGraph: {
-    title: "Gnosis VPN — Network Intelligence",
+    title: 'Bloklune',
     description:
-      "Private access. Public proof. Finalized on-chain metrics powered by Blokli.",
-    type: "website",
+      'Private access. Public proof. Finalized on-chain metrics powered by Blokli.',
+    type: 'website',
   },
   twitter: {
-    card: "summary_large_image",
-    title: "Gnosis VPN — Network Intelligence",
+    card: 'summary_large_image',
+    title: 'Bloklune',
     description:
-      "Private access. Public proof. Finalized on-chain metrics powered by Blokli.",
+      'Private access. Public proof. Finalized on-chain metrics powered by Blokli.',
   },
 };
 
