@@ -45,7 +45,11 @@ export type WeekPoint = {
   label: string;
   redemptions: number;
   tickets: number;
+  /** Client to exit. The only direction attributable to a participant. */
   gigabytes: number;
+  /** Exit back to client, inferred — see `downstreamByRelayDay`. */
+  downstreamGigabytes: number;
+  /** Running total of both directions. */
   cumulativeGigabytes: number;
 };
 
@@ -246,6 +250,8 @@ export type AnalyticsSnapshot = {
   weeks: WeekPoint[];
   relayers: Relayer[];
   relayerDaily: RelayerDayPoint[];
+  /** The same relays, the same colours, the inferred return direction. */
+  relayerDownstreamDaily: RelayerDayPoint[];
   relayerSeries: RelayerSeries[];
   clients: Client[];
   clientCount: number;
@@ -276,6 +282,18 @@ export type AnalyticsSnapshot = {
     redemptionsTotal: number | null;
     gigabytes7d: number | null;
     gigabytesTotal: number | null;
+    /**
+     * Downstream is inferred, not attributed: the exit pays for the return path
+     * and its channel names no client, so these are network-wide only.
+     */
+    gigabytesDownstream7d: number | null;
+    gigabytesDownstreamTotal: number | null;
+    /** Downstream per unit of upstream. The check on the whole inference. */
+    downstreamRatio: number | null;
+    /** Relay-to-relay volume: the probe floor that was subtracted. */
+    probeGigabytesTotal: number | null;
+    /** Announced payers taken to be exits. A shrinking set is a warning sign. */
+    exitsSeen: number | null;
     ticketsTotal: number | null;
     relayers7d: number | null;
     deployments7d: number | null;
@@ -295,7 +313,155 @@ export type Redemption = {
   timestamp: number;
   tickets: number;
   gigabytes: number;
+  /** Whether the payer announced. Announced payers are relays and exits. */
+  sourceAnnounced: boolean;
 };
+
+/**
+ * Redemptions split by what the payment was for.
+ *
+ * Payment follows the sender of each hop and the destination of a packet is
+ * never paid, so one VPN session leaves exactly two paid hops on chain: the
+ * client paying a relay on the way out, and the exit paying a relay on the way
+ * back. Those are `upstream` and `downstream`.
+ *
+ * `probe` is relay-to-relay traffic. Relays neither start VPN sessions nor
+ * receive them, so a payment between two relays carries no VPN payload at all —
+ * it is nodes measuring the network. That makes it useless as traffic and
+ * valuable as a control: it is a clean sample of what probing costs per node,
+ * which is the correction `downstreamByRelayDay` applies.
+ */
+type Traffic = {
+  upstream: Redemption[];
+  downstream: Redemption[];
+  probe: Redemption[];
+};
+
+/**
+ * Splits redemptions by direction.
+ *
+ * The relay set has to be derived before anything else can be classified: a
+ * relay is only identifiable as the node a client paid, so upstream defines it
+ * and everything else is read against it. An announced payer that is not a
+ * relay, paying a relay, is an exit returning traffic — that is the inference
+ * this whole direction split rests on, and its assumption is that exits are
+ * never themselves chosen to relay client traffic. If they are, they land in
+ * the relay set and their traffic is filed as probing, which understates
+ * downstream silently. `exits` is reported so that set can be watched.
+ */
+function classify(redemptions: Redemption[]): Traffic & { exits: Set<string> } {
+  const relays = new Set<string>();
+  for (const redemption of redemptions) {
+    if (!redemption.sourceAnnounced) {
+      relays.add(identity(redemption.network, redemption.destination));
+    }
+  }
+
+  const traffic: Traffic & { exits: Set<string> } = {
+    upstream: [],
+    downstream: [],
+    probe: [],
+    exits: new Set<string>(),
+  };
+  for (const redemption of redemptions) {
+    if (!redemption.sourceAnnounced) {
+      traffic.upstream.push(redemption);
+      continue;
+    }
+    const payer = identity(redemption.network, redemption.source);
+    const paid = identity(redemption.network, redemption.destination);
+    // Only hops terminating at a known relay can be part of a VPN session.
+    if (!relays.has(paid)) continue;
+    if (relays.has(payer)) {
+      traffic.probe.push(redemption);
+    } else {
+      traffic.downstream.push(redemption);
+      traffic.exits.add(payer);
+    }
+  }
+  return traffic;
+}
+
+/**
+ * Downstream volume per day, with the probe floor taken out.
+ *
+ * Every node probes the network, exits included, so a candidate exit's channel
+ * carries return traffic and probing mixed together. Relay-to-relay traffic is
+ * probing and nothing else, which gives a per-node-per-day probe rate measured
+ * rather than assumed; multiplying it by the number of candidates active that
+ * day estimates how much of their volume was probing, and the rest is
+ * downstream. Clamped at zero: on a quiet day the correction can exceed the
+ * candidates' own volume, and negative traffic is not a thing.
+ */
+function downstreamByRelayDay(
+  candidates: Redemption[],
+  probes: Redemption[],
+): Map<number, Map<string, number>> {
+  const gather = (rows: Redemption[]) => {
+    const volume = new Map<number, number>();
+    const senders = new Map<number, Set<string>>();
+    // Where the traffic landed, keyed by the relay that was paid.
+    const arrivals = new Map<number, Map<string, number>>();
+    for (const row of rows) {
+      volume.set(row.day, (volume.get(row.day) ?? 0) + row.gigabytes);
+      const set = senders.get(row.day) ?? new Set<string>();
+      set.add(identity(row.network, row.source));
+      senders.set(row.day, set);
+      const byRelay = arrivals.get(row.day) ?? new Map<string, number>();
+      const relay = identity(row.network, row.destination);
+      byRelay.set(relay, (byRelay.get(relay) ?? 0) + row.gigabytes);
+      arrivals.set(row.day, byRelay);
+    }
+    return { volume, senders, arrivals };
+  };
+
+  const probed = gather(probes);
+  const candidate = gather(candidates);
+
+  const out = new Map<number, Map<string, number>>();
+  for (const [day, byRelay] of candidate.arrivals) {
+    const probingNodes = probed.senders.get(day)?.size ?? 0;
+    const probeVolume = probed.volume.get(day) ?? 0;
+    const perNode = probingNodes ? probeVolume / probingNodes : 0;
+    const floor = perNode * (candidate.senders.get(day)?.size ?? 0);
+    // Nothing says where an exit's own probes land, so the relays' probes of
+    // each other stand in for it: the floor is spread over relays in the same
+    // proportion that observed probe traffic arrives at them.
+    const landing = probed.arrivals.get(day);
+    const adjusted = new Map<string, number>();
+    let kept = 0;
+    for (const [relay, volume] of byRelay) {
+      const share =
+        probeVolume > 0 ? (landing?.get(relay) ?? 0) / probeVolume : 0;
+      const remaining = Math.max(0, volume - floor * share);
+      adjusted.set(relay, remaining);
+      kept += remaining;
+    }
+
+    // Clamping each relay on its own loses the excess wherever the floor
+    // overshot, which would bias the network total upwards and leave the stack
+    // no longer adding up to the figure beside it. Rescaling to the total the
+    // day is actually owed puts that excess back on the relays with room for
+    // it, so the two agree by construction.
+    const dayVolume = candidate.volume.get(day) ?? 0;
+    const owed = Math.max(0, dayVolume - floor);
+    const scale = kept > 0 ? owed / kept : 0;
+    for (const [relay, volume] of adjusted) adjusted.set(relay, volume * scale);
+    out.set(day, adjusted);
+  }
+  return out;
+}
+
+/** Collapses the per-relay estimate to a daily network total. */
+function totalByDay(byRelayDay: Map<number, Map<string, number>>) {
+  const out = new Map<number, number>();
+  for (const [day, byRelay] of byRelayDay) {
+    let total = 0;
+    for (const volume of byRelay.values()) total += volume;
+    out.set(day, total);
+  }
+  return out;
+}
 
 export type DeployedClient = {
   network: string;
@@ -407,37 +573,58 @@ function activeUserSeries(
   return points;
 }
 
-function weeklySeries(redemptions: Redemption[]): WeekPoint[] {
+function weeklySeries(
+  redemptions: Redemption[],
+  downstream: Map<number, number>,
+): WeekPoint[] {
   const buckets = new Map<
     number,
-    { redemptions: number; tickets: number; gigabytes: number }
+    {
+      redemptions: number;
+      tickets: number;
+      gigabytes: number;
+      downstreamGigabytes: number;
+    }
   >();
-  for (const redemption of redemptions) {
-    // Anchor each week to the Monday containing it. Unix day 0 was a Thursday,
-    // so shift by three days before flooring to a week boundary.
-    const week = Math.floor((redemption.day + 3) / 7) * 7 - 3;
+  // Anchor each week to the Monday containing it. Unix day 0 was a Thursday, so
+  // shift by three days before flooring to a week boundary.
+  const weekOf = (day: number) => Math.floor((day + 3) / 7) * 7 - 3;
+  const bucketOf = (week: number) => {
     const bucket = buckets.get(week) ?? {
       redemptions: 0,
       tickets: 0,
       gigabytes: 0,
+      downstreamGigabytes: 0,
     };
+    buckets.set(week, bucket);
+    return bucket;
+  };
+
+  // Downstream is a per-day estimate rather than a set of rows, so it is folded
+  // in by day; a week with only downstream still gets a bar.
+  for (const [day, gigabytes] of downstream) {
+    bucketOf(weekOf(day)).downstreamGigabytes += gigabytes;
+  }
+
+  for (const redemption of redemptions) {
+    const bucket = bucketOf(weekOf(redemption.day));
     bucket.redemptions += 1;
     bucket.tickets += redemption.tickets;
     bucket.gigabytes += redemption.gigabytes;
-    buckets.set(week, bucket);
   }
 
   let cumulativeGigabytes = 0;
   return [...buckets.entries()]
     .sort(([a], [b]) => a - b)
     .map(([week, bucket]) => {
-      cumulativeGigabytes += bucket.gigabytes;
+      cumulativeGigabytes += bucket.gigabytes + bucket.downstreamGigabytes;
       return {
         key: isoDate(week),
         label: weekLabel(week),
         redemptions: bucket.redemptions,
         tickets: bucket.tickets,
         gigabytes: bucket.gigabytes,
+        downstreamGigabytes: bucket.downstreamGigabytes,
         cumulativeGigabytes,
       };
     });
@@ -452,15 +639,19 @@ function weeklySeries(redemptions: Redemption[]): WeekPoint[] {
  */
 function relayerBreakdown(
   redemptions: Redemption[],
+  downstream: Map<number, Map<string, number>>,
   lastDay: number,
 ): {
   series: RelayerSeries[];
   daily: RelayerDayPoint[];
+  downstreamDaily: RelayerDayPoint[];
   distribution: Relayer[];
 } {
   const firstDay = lastDay - RECENT_DAYS + 1;
   const window = redemptions.filter((redemption) => redemption.day >= firstDay);
-  if (!window.length) return { series: [], daily: [], distribution: [] };
+  if (!window.length) {
+    return { series: [], daily: [], downstreamDaily: [], distribution: [] };
+  }
 
   const named = new Map<string, { address: string; network: string }>();
   const volumes = new Map<string, number>();
@@ -477,27 +668,53 @@ function relayerBreakdown(
     byDay.set(redemption.day, day);
   }
 
+  // Relays that only appear downstream in this window still need a series, or
+  // the second chart would silently drop them. They go after the upstream ones
+  // so the existing ordering — and every colour that depends on it — is
+  // untouched by the addition.
+  const downstreamVolumes = new Map<string, number>();
+  for (let day = firstDay; day <= lastDay; day += 1) {
+    for (const [key, gigabytes] of downstream.get(day) ?? []) {
+      downstreamVolumes.set(key, (downstreamVolumes.get(key) ?? 0) + gigabytes);
+    }
+  }
+
   // Ordered by volume over the stack's own window, which is the wider of the two,
   // so every relayer appearing in either panel has a place in this ordering.
-  const series: RelayerSeries[] = [...volumes.entries()]
-    .sort(([, a], [, b]) => b - a)
-    .map(([key]) => ({
-      key,
-      address: named.get(key)?.address ?? key,
-      network: named.get(key)?.network ?? '',
-    }));
+  const order = [
+    ...[...volumes.entries()].sort(([, a], [, b]) => b - a).map(([key]) => key),
+    ...[...downstreamVolumes.entries()]
+      .filter(([key]) => !volumes.has(key))
+      .sort(([, a], [, b]) => b - a)
+      .map(([key]) => key),
+  ];
+  const series: RelayerSeries[] = order.map((key) => ({
+    key,
+    address: named.get(key)?.address ?? key.slice(key.indexOf(' ') + 1),
+    network: named.get(key)?.network ?? key.slice(0, key.indexOf(' ')),
+  }));
   const colorIndexOf = new Map(
     series.map((entry, index) => [entry.key, index]),
   );
 
-  const daily: RelayerDayPoint[] = [];
-  for (let day = firstDay; day <= lastDay; day += 1) {
-    const values = byDay.get(day);
-    const point: RelayerDayPoint = { date: isoDate(day) };
-    for (const entry of series)
-      point[entry.key] = values?.get(entry.key) ?? null;
-    daily.push(point);
-  }
+  const stack = (source: Map<number, Map<string, number>>) => {
+    const points: RelayerDayPoint[] = [];
+    for (let day = firstDay; day <= lastDay; day += 1) {
+      const values = source.get(day);
+      const point: RelayerDayPoint = { date: isoDate(day) };
+      for (const entry of series) {
+        const value = values?.get(entry.key) ?? null;
+        // Zero and absent both mean "carried nothing"; null keeps the relay out
+        // of the tooltip instead of padding it with a row of noughts.
+        point[entry.key] = value ? value : null;
+      }
+      points.push(point);
+    }
+    return points;
+  };
+
+  const daily = stack(byDay);
+  const downstreamDaily = stack(downstream);
 
   // The share breakdown answers "who is carrying traffic now", so it reads the
   // trailing week rather than the whole stack window.
@@ -524,7 +741,7 @@ function relayerBreakdown(
     }))
     .sort((a, b) => b.redemptions - a.redemptions);
 
-  return { series, daily, distribution };
+  return { series, daily, downstreamDaily, distribution };
 }
 
 /**
@@ -869,7 +1086,18 @@ function bigTotalOf(values: Array<bigint | null>): string | null {
  */
 export function buildSnapshot(datasets: NetworkDataset[]): AnalyticsSnapshot {
   const combined = datasets.length > 1;
-  const redemptions = datasets.flatMap((dataset) => dataset.redemptions);
+  const all = datasets.flatMap((dataset) => dataset.redemptions);
+  // Everything that names a participant reads upstream only: it is the one
+  // direction whose payer is the client itself. Downstream is real traffic with
+  // no client in it, so it stays an aggregate.
+  const {
+    upstream: redemptions,
+    downstream: candidates,
+    probe: probes,
+    exits,
+  } = classify(all);
+  const downstreamPerRelay = downstreamByRelayDay(candidates, probes);
+  const downstream = totalByDay(downstreamPerRelay);
   const deployed = datasets.flatMap((dataset) => dataset.deployed);
   const warnings = datasets.flatMap((dataset) =>
     combined
@@ -904,8 +1132,9 @@ export function buildSnapshot(datasets: NetworkDataset[]): AnalyticsSnapshot {
   const {
     series: relayerSeries,
     daily: relayerDaily,
+    downstreamDaily: relayerDownstreamDaily,
     distribution: relayers,
-  } = relayerBreakdown(redemptions, lastDay);
+  } = relayerBreakdown(redemptions, downstreamPerRelay, lastDay);
   const colorIndexOf = new Map(
     relayerSeries.map((entry, index) => [entry.key, index]),
   );
@@ -946,6 +1175,19 @@ export function buildSnapshot(datasets: NetworkDataset[]): AnalyticsSnapshot {
     deployments7d += deploymentsByDay.get(lastDay - offset) ?? 0;
   }
 
+  const downstreamTotal = [...downstream.values()].reduce(
+    (total, value) => total + value,
+    0,
+  );
+  const upstreamTotal = sum(redemptions, (row) => row.gigabytes);
+  const downstreamOver = (days: number) => {
+    let total = 0;
+    for (let offset = 0; offset < days; offset += 1) {
+      total += downstream.get(lastDay - offset) ?? 0;
+    }
+    return total;
+  };
+
   const single = datasets.length === 1 ? datasets[0] : undefined;
   return {
     source: warnings.length ? 'degraded' : 'live',
@@ -970,9 +1212,10 @@ export function buildSnapshot(datasets: NetworkDataset[]): AnalyticsSnapshot {
     ),
     safeBalance: bigTotalOf(datasets.map((dataset) => dataset.safeBalance)),
     activeUsers,
-    weeks: weeklySeries(redemptions),
+    weeks: weeklySeries(redemptions, downstream),
     relayers,
     relayerDaily,
+    relayerDownstreamDaily,
     relayerSeries,
     clients: allClients,
     clientCount: allClients.length,
@@ -1007,6 +1250,14 @@ export function buildSnapshot(datasets: NetworkDataset[]): AnalyticsSnapshot {
       gigabytesTotal: hasUsage
         ? sum(redemptions, (row) => row.gigabytes)
         : null,
+      gigabytesDownstream7d: hasUsage ? downstreamOver(WEEK_DAYS) : null,
+      gigabytesDownstreamTotal: hasUsage ? downstreamTotal : null,
+      downstreamRatio:
+        hasUsage && upstreamTotal > 0 ? downstreamTotal / upstreamTotal : null,
+      probeGigabytesTotal: hasUsage
+        ? sum(probes, (row) => row.gigabytes)
+        : null,
+      exitsSeen: hasUsage ? exits.size : null,
       ticketsTotal: hasUsage ? sum(redemptions, (row) => row.tickets) : null,
       relayers7d: hasUsage
         ? new Set(recent.map((row) => identity(row.network, row.destination)))
@@ -1029,6 +1280,11 @@ export const EMPTY_TOTALS: AnalyticsSnapshot['totals'] = {
   redemptionsTotal: null,
   gigabytes7d: null,
   gigabytesTotal: null,
+  gigabytesDownstream7d: null,
+  gigabytesDownstreamTotal: null,
+  downstreamRatio: null,
+  probeGigabytesTotal: null,
+  exitsSeen: null,
   ticketsTotal: null,
   relayers7d: null,
   deployments7d: null,
@@ -1053,6 +1309,7 @@ export function unavailableSnapshot(message: string): AnalyticsSnapshot {
     weeks: [],
     relayers: [],
     relayerDaily: [],
+    relayerDownstreamDaily: [],
     relayerSeries: [],
     clients: [],
     clientCount: 0,

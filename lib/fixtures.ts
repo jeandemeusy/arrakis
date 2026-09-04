@@ -37,6 +37,7 @@ const NETWORKS = [
     label: 'Jura',
     clients: 60,
     relayers: 14,
+    exits: 4,
     winProbability: 0.000004,
   },
   {
@@ -44,9 +45,20 @@ const NETWORKS = [
     label: 'Dev',
     clients: 18,
     relayers: 5,
+    exits: 2,
     winProbability: 0.00002,
   },
 ] as const;
+
+/**
+ * Downstream volume as a multiple of upstream.
+ *
+ * Browsing is lopsided — a request is small and its answer is not — so a VPN
+ * that came back symmetric would be the suspicious fixture, not this one.
+ */
+const DOWNSTREAM_RATIO = 8;
+/** Probe hops each announced node pays for per day, traffic or no traffic. */
+const PROBES_PER_NODE_DAY = 3;
 
 /** Deterministic PRNG (mulberry32) so the fixture never shifts between reloads. */
 function random(seed: number) {
@@ -100,6 +112,10 @@ function dataset(
   const days = Math.max(1, lastDay - startDay + 1);
   const relayers = Array.from({ length: config.relayers }, () => address(next));
   const clients = Array.from({ length: config.clients }, () => address(next));
+  // Exits announce, like relays, and are told apart only by never relaying for
+  // a client. The fixture keeps the two sets disjoint, which is the assumption
+  // the direction split rests on.
+  const exits = Array.from({ length: config.exits }, () => address(next));
 
   // Each client appears at some point in the window and stays around afterwards.
   const deployedOn = new Map<string, number>();
@@ -141,7 +157,51 @@ function dataset(
         timestamp,
         tickets: 30 + Math.floor(next() * 60),
         gigabytes: perRedemption,
+        sourceAnnounced: false,
       });
+    }
+
+    // The return path: the exit pays a relay, so it names no client.
+    const returning = Math.round(
+      count * DOWNSTREAM_RATIO * (0.8 + next() * 0.4),
+    );
+    for (let i = 0; i < returning; i += 1) {
+      const hour = Math.floor(6 + next() * 14);
+      redemptions.push({
+        network: config.id,
+        channelId: channelId(next),
+        source: exits[Math.floor(next() * exits.length)],
+        destination: relayers[Math.floor(next() ** 2 * relayers.length)],
+        day,
+        timestamp: day * DAY_SECONDS + hour * 3600 + Math.floor(next() * 3600),
+        tickets: 30 + Math.floor(next() * 60),
+        gigabytes: perRedemption,
+        sourceAnnounced: true,
+      });
+    }
+
+    // Probing: every announced node measures the network, indifferent to
+    // whether anyone used the VPN. A relay's probes land in the calibration set;
+    // an exit's land among the downstream candidates, which is precisely the
+    // contamination the estimate has to subtract back out. Generating both is
+    // what makes the fixture a test of the correction rather than of the code
+    // path around it.
+    for (const prober of [...relayers, ...exits]) {
+      for (let i = 0; i < PROBES_PER_NODE_DAY; i += 1) {
+        const peer = relayers[Math.floor(next() * relayers.length)];
+        if (peer === prober) continue;
+        redemptions.push({
+          network: config.id,
+          channelId: channelId(next),
+          source: prober,
+          destination: peer,
+          day,
+          timestamp: day * DAY_SECONDS + Math.floor(next() * DAY_SECONDS),
+          tickets: 1 + Math.floor(next() * 4),
+          gigabytes: perRedemption,
+          sourceAnnounced: true,
+        });
+      }
     }
   }
 
@@ -163,7 +223,7 @@ function dataset(
     lastDay,
     blockNumber: LATEST_BLOCK,
     schemaVersion: '1.5.0-fixture',
-    accounts: config.clients + config.relayers,
+    accounts: config.clients + config.relayers + config.exits,
     safes: config.clients,
     openChannels: config.clients * 2,
     channelBalance:
@@ -210,7 +270,18 @@ function dataset(
   };
 }
 
+/**
+ * Built once and kept.
+ *
+ * The generator is seeded, so every call produces the same dashboard; with both
+ * traffic directions and per-day probing it also produces a few hundred thousand
+ * rows, and regenerating those on every page view made the fixture slower than
+ * the database it stands in for.
+ */
+let built: Dashboard | undefined;
+
 export function fixtureDashboard(): Dashboard {
+  if (built) return built;
   const next = random(SEED);
   const lastDay = dayIndex(Date.now() / 1000);
   const startDay = dayIndex(Date.UTC(2026, 0, 1) / 1000);
@@ -222,9 +293,10 @@ export function fixtureDashboard(): Dashboard {
   for (const set of datasets) snapshots[set.network] = buildSnapshot([set]);
   snapshots[COMBINED] = buildSnapshot(datasets);
 
-  return {
+  built = {
     networks: NETWORKS.map(({ id, label }) => ({ id, label })),
     snapshots,
     defaultNetwork: COMBINED,
   };
+  return built;
 }

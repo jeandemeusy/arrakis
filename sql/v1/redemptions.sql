@@ -12,10 +12,19 @@
 -- redemptions should track the winning probability. One ticket is redeemed per
 -- redemption.
 --
--- Only channels opened BY a client are counted. Nodes that relay traffic announce
--- themselves on chain; an account that never announced is not part of the network
--- infrastructure, so it is a VPN client paying for its own sessions. Channels
--- sourced by announced accounts are relay-to-relay hops, not client usage.
+-- Every redemption paid TO an announced node is returned, tagged with whether its
+-- payer announced. The caller classifies from there, because the classification
+-- needs the whole set at once:
+--
+--   unannounced -> announced   a client paying a relay: upstream VPN traffic.
+--   announced   -> announced   either an exit paying a relay on the return path,
+--                              or a node probing the network. Which one it is
+--                              depends on whether the payer is itself a relay,
+--                              and that is only knowable after the relay set has
+--                              been derived from the upstream rows.
+--
+-- A relay announces itself; an account that never announced is not infrastructure,
+-- so it is a VPN client paying for its own sessions.
 WITH ordered AS (
   SELECT
     cs.channel_id,
@@ -38,6 +47,9 @@ SELECT
   channel.concrete_channel_id AS channel_id,
   source_account.chain_key AS source,
   destination_account.chain_key AS destination,
+  EXISTS (
+    SELECT 1 FROM announcement WHERE announcement.account_id = channel.source
+  ) AS source_announced,
   ordered.published_block,
   ordered.ticket_index - ordered.previous_ticket_index AS tickets,
   ordered.previous_balance AS balance_before,
@@ -49,7 +61,10 @@ JOIN account AS destination_account ON destination_account.id = channel.destinat
 WHERE ordered.previous_ticket_index IS NOT NULL
   AND ordered.epoch = ordered.previous_epoch
   AND ordered.ticket_index > ordered.previous_ticket_index
-  AND NOT EXISTS (
-    SELECT 1 FROM announcement WHERE announcement.account_id = channel.source
+  -- Traffic is only paid for hop by hop, and every hop that gets paid terminates
+  -- at an announced node. A channel to an unannounced account carries no relayed
+  -- traffic, so it is not a hop anyone is being paid for.
+  AND EXISTS (
+    SELECT 1 FROM announcement WHERE announcement.account_id = channel.destination
   )
 ORDER BY ordered.published_block ASC;

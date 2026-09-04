@@ -171,6 +171,17 @@ function volume(input: number | null) {
   return `${DECIMAL.format(value)} ${unit}`;
 }
 
+/** Adds two figures either of which may be unknown, rather than reading null as 0. */
+function plus(a: number | null, b: number | null) {
+  if (a === null && b === null) return null;
+  return (a ?? 0) + (b ?? 0);
+}
+
+/** A multiple, as in "8.4× upstream". */
+function multiple(value: number | null) {
+  return value === null ? '—' : `${DECIMAL.format(value)}×`;
+}
+
 /** The ranking tables quote usage in megabytes, matching the published tables. */
 function megabytes(gigabytes: number) {
   return FIXED_2.format(gigabytes * 1000);
@@ -858,6 +869,7 @@ export default function Dashboard({
   dashboard: DashboardPayload;
 }) {
   const [scope, setScope] = useState<'weekly' | 'all'>('weekly');
+  const [flow, setFlow] = useState<'upstream' | 'downstream'>('upstream');
   const [clientPage, setClientPage] = useState(0);
   const [deploymentPage, setDeploymentPage] = useState(0);
   const [feedPage, setFeedPage] = useState(0);
@@ -920,7 +932,8 @@ export default function Dashboard({
     { color: PLUM, label: 'New clients (30d)', dashed: true },
   ];
   const volumeLegend: LegendEntry[] = [
-    { color: YELLOW, label: 'Weekly' },
+    { color: YELLOW, label: 'Upstream' },
+    { color: PLUM, label: 'Downstream (inferred)' },
     { color: INK, label: 'Cumulative' },
   ];
   const dailyUsersLegend: LegendEntry[] = [
@@ -931,6 +944,9 @@ export default function Dashboard({
     color: relayer.fill,
     label: shortAddress(relayer.address),
   }));
+
+  const relayerFlow =
+    flow === 'upstream' ? data.relayerDaily : data.relayerDownstreamDaily;
 
   const rankOf = new Map(
     rankedClients.map((client, index) => [client.key, index + 1]),
@@ -1164,8 +1180,10 @@ export default function Dashboard({
           status={panels.usage}
           span={3}
           label="DATA RELAYED · 7 DAYS"
-          figure={volume(data.totals.gigabytes7d)}
-          note={`${volume(data.totals.gigabytesTotal)} cumulative`}
+          figure={volume(
+            plus(data.totals.gigabytes7d, data.totals.gigabytesDownstream7d),
+          )}
+          note={`${volume(data.totals.gigabytes7d)} up · ${volume(data.totals.gigabytesDownstream7d)} down`}
           expanded={enlarged}
           onExpand={setEnlarged}
         />
@@ -1189,9 +1207,10 @@ export default function Dashboard({
           </div>
           <p>
             A user is a VPN client — an account that bound a key but never
-            announced an address, so it is not relay infrastructure. Volume is
-            derived from the redemptions on client channels, priced at the
-            winning probability in force at each block.
+            announced an address, so it is not relay infrastructure. Upstream
+            volume is derived from the redemptions on client channels, priced at
+            the winning probability in force at each block; downstream is
+            inferred network-wide, because the exit pays for the return path.
           </p>
         </div>
         <div className="tile-grid">
@@ -1296,6 +1315,13 @@ export default function Dashboard({
                 <Empty when={!data.weeks.length}>
                   No client redemptions have been indexed yet.
                 </Empty>
+                <p className="chart-note">
+                  Upstream is paid for by the client and attributable to it.
+                  Downstream is paid for by the exit, so it is network-wide only
+                  — inferred from relays paid by announced nodes that never
+                  relay for a client, less the probe traffic relays pay each
+                  other.
+                </p>
               </>
             }
             expanded={enlarged}
@@ -1335,8 +1361,16 @@ export default function Dashboard({
                   <Bar
                     yAxisId="left"
                     dataKey="gigabytes"
-                    name="Volume this week"
+                    name="Upstream"
+                    stackId="volume"
                     fill={YELLOW}
+                  />
+                  <Bar
+                    yAxisId="left"
+                    dataKey="downstreamGigabytes"
+                    name="Downstream"
+                    stackId="volume"
+                    fill={PLUM}
                     radius={[2, 2, 0, 0]}
                   />
                   <Line
@@ -1357,7 +1391,7 @@ export default function Dashboard({
           <Metric
             id="total-redemptions"
             status={panels.usage}
-            span={4}
+            span={3}
             label="TOTAL REDEMPTIONS"
             figure={count(data.totals.redemptionsTotal)}
             note={`An estimated ${packets(data.totals.ticketsTotal)} packets paid for`}
@@ -1367,17 +1401,32 @@ export default function Dashboard({
           <Metric
             id="total-data-relayed"
             status={panels.usage}
-            span={4}
+            span={3}
             label="TOTAL DATA RELAYED"
-            figure={volume(data.totals.gigabytesTotal)}
-            note="Client traffic since indexing began"
+            figure={volume(
+              plus(
+                data.totals.gigabytesTotal,
+                data.totals.gigabytesDownstreamTotal,
+              ),
+            )}
+            note={`${volume(data.totals.gigabytesTotal)} upstream · ${volume(data.totals.gigabytesDownstreamTotal)} downstream`}
+            expanded={enlarged}
+            onExpand={setEnlarged}
+          />
+          <Metric
+            id="downstream"
+            status={panels.usage}
+            span={3}
+            label="DOWNSTREAM · 7 DAYS"
+            figure={volume(data.totals.gigabytesDownstream7d)}
+            note={`${multiple(data.totals.downstreamRatio)} upstream · inferred, probe traffic removed`}
             expanded={enlarged}
             onExpand={setEnlarged}
           />
           <Metric
             id="active-channels"
             status={panels.balances}
-            span={4}
+            span={3}
             label="ACTIVE CHANNELS"
             figure={count(data.openChannels)}
             note={`${compactToken(data.channelBalance)} allocated`}
@@ -1487,7 +1536,7 @@ export default function Dashboard({
             id="hourly"
             status={panels.usage}
             className="service-chart span-4"
-            eyebrow="ALL INDEXED HISTORY"
+            eyebrow="ALL INDEXED HISTORY · UPSTREAM"
             title="When traffic is relayed"
             note={
               <>
@@ -1495,7 +1544,7 @@ export default function Dashboard({
                   No volume has been indexed yet.
                 </Empty>
                 <p className="chart-note">
-                  Share of relayed volume by weekday and hour, UTC. Block
+                  Share of upstream volume by weekday and hour, UTC. Block
                   timestamps are{' '}
                   {data.timebase === 'rpc'
                     ? 'RPC resolved'
@@ -1575,13 +1624,36 @@ export default function Dashboard({
             title="Estimated daily volume per relayer"
             legend={relayerLegend}
             showLegend={false}
+            badge={
+              <fieldset className="tab-switch">
+                <legend className="sr-only">Traffic direction</legend>
+                <button
+                  type="button"
+                  aria-pressed={flow === 'upstream'}
+                  className={flow === 'upstream' ? 'active' : ''}
+                  onClick={() => setFlow('upstream')}
+                >
+                  Upstream
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={flow === 'downstream'}
+                  className={flow === 'downstream' ? 'active' : ''}
+                  onClick={() => setFlow('downstream')}
+                >
+                  Downstream
+                </button>
+              </fieldset>
+            }
             note={
               <>
-                <Empty when={!data.relayerDaily.length}>
+                <Empty when={!relayerFlow.length}>
                   No client redemptions were indexed in the last 30 days.
                 </Empty>
                 <p className="chart-note">
-                  Volume is an estimate derived from redemptions seen on chain.
+                  {flow === 'upstream'
+                    ? 'Client traffic, split by the relay each client paid.'
+                    : 'The return path, split by the relay each exit paid. Inferred rather than attributed — no client appears in these channels — and the probe floor is spread across relays in proportion to the probe traffic they already receive.'}
                 </p>
               </>
             }
@@ -1590,7 +1662,7 @@ export default function Dashboard({
             chart={
               <ResponsiveContainer width="100%" height={250}>
                 <BarChart
-                  data={data.relayerDaily}
+                  data={relayerFlow}
                   margin={{ top: 20, right: 10, left: -18, bottom: 0 }}
                 >
                   <CartesianGrid vertical={false} stroke={GRID} />
@@ -1686,7 +1758,8 @@ export default function Dashboard({
           </div>
           <p>
             Who used the network and when each client first appeared. Volume is
-            only an estimation based on the redemptions seen on chain.
+            upstream only — the traffic the client itself paid for — and is
+            estimated from the redemptions seen on chain.
           </p>
         </div>
         <div className="tile-grid">
@@ -2009,8 +2082,11 @@ export default function Dashboard({
             <p>
               Each redemption accounts for 650 / (2<sup>30</sup> &times; p) GB,
               where p is the winning probability from the oracle&rsquo;s update
-              history at that block. Redemptions predating the first update are
-              excluded.
+              history at that block. Direction follows the payer: a client
+              paying a relay is upstream. An announced payer that never relays
+              for a client is an exit paying the return path — downstream, less
+              the probe traffic relays pay each other, and never attributable to
+              a client.
             </p>
           </div>
         </div>

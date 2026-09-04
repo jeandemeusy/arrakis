@@ -69,6 +69,8 @@ type RedemptionRow = QueryResultRow & {
   channel_id: string;
   source: Buffer;
   destination: Buffer;
+  /** Whether the payer announced: an announced payer is a relay or an exit. */
+  source_announced: boolean;
   published_block: string;
   tickets: string;
 };
@@ -389,6 +391,7 @@ async function queryNetwork(network: NetworkConfig): Promise<NetworkDataset> {
       timestamp,
       tickets: Number(row.tickets),
       gigabytes: redemptionVolume(probabilityAt(block)),
+      sourceAnnounced: row.source_announced,
     };
   });
 
