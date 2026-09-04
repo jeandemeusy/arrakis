@@ -280,13 +280,23 @@ export type AnalyticsSnapshot = {
     allTimeUsers: number | null;
     redemptions7d: number | null;
     redemptionsTotal: number | null;
+    /**
+     * Both trailing windows, for every subject the headline row carries.
+     *
+     * The row states one window and each tile notes the shorter one, so the
+     * figures have to exist in both. `30d` spans MONTH_DAYS entries, matching
+     * how the active-user series counts a month.
+     */
+    redemptions30d: number | null;
     gigabytes7d: number | null;
+    gigabytes30d: number | null;
     gigabytesTotal: number | null;
     /**
      * Downstream is inferred, not attributed: the exit pays for the return path
      * and its channel names no client, so these are network-wide only.
      */
     gigabytesDownstream7d: number | null;
+    gigabytesDownstream30d: number | null;
     gigabytesDownstreamTotal: number | null;
     /** Downstream per unit of upstream. The check on the whole inference. */
     downstreamRatio: number | null;
@@ -778,13 +788,11 @@ function relayerBreakdown(
   const daily = stack(byDay);
   const downstreamDaily = stack(downstream);
 
-  // The share breakdown answers "who is carrying traffic now", so it reads the
-  // trailing week rather than the whole stack window.
-  const recent = window.filter(
-    (redemption) => redemption.day > lastDay - WEEK_DAYS,
-  );
+  // The share breakdown reads the same window as the stack beside it. They share
+  // one legend and one colour per relayer, so a relayer weighted over a week in
+  // one panel and a month in the other would make that legend a lie.
   const totals = new Map<string, { redemptions: number; gigabytes: number }>();
-  for (const redemption of recent) {
+  for (const redemption of window) {
     const key = identity(redemption.network, redemption.destination);
     const bucket = totals.get(key) ?? { redemptions: 0, gigabytes: 0 };
     bucket.redemptions += 1;
@@ -798,7 +806,7 @@ function relayerBreakdown(
       network: named.get(key)?.network ?? '',
       redemptions: bucket.redemptions,
       gigabytes: bucket.gigabytes,
-      share: bucket.redemptions / recent.length,
+      share: bucket.redemptions / window.length,
       colorIndex: colorIndexOf.get(key) ?? 0,
     }))
     .sort((a, b) => b.redemptions - a.redemptions);
@@ -1231,6 +1239,9 @@ export function buildSnapshot(datasets: NetworkDataset[]): AnalyticsSnapshot {
   const recent = redemptions.filter(
     (redemption) => redemption.day > lastDay - WEEK_DAYS,
   );
+  const month = redemptions.filter(
+    (redemption) => redemption.day > lastDay - MONTH_DAYS,
+  );
 
   const deployments = [...deployed]
     .sort((a, b) => a.timestamp - b.timestamp)
@@ -1334,12 +1345,15 @@ export function buildSnapshot(datasets: NetworkDataset[]): AnalyticsSnapshot {
       monthlyActiveUsers: latest?.monthly ?? null,
       allTimeUsers: hasUsage ? allClients.length : null,
       redemptions7d: hasUsage ? recent.length : null,
+      redemptions30d: hasUsage ? month.length : null,
       redemptionsTotal: hasUsage ? redemptions.length : null,
       gigabytes7d: hasUsage ? sum(recent, (row) => row.gigabytes) : null,
+      gigabytes30d: hasUsage ? sum(month, (row) => row.gigabytes) : null,
       gigabytesTotal: hasUsage
         ? sum(redemptions, (row) => row.gigabytes)
         : null,
       gigabytesDownstream7d: hasUsage ? downstreamOver(WEEK_DAYS) : null,
+      gigabytesDownstream30d: hasUsage ? downstreamOver(MONTH_DAYS) : null,
       gigabytesDownstreamTotal: hasUsage ? downstreamTotal : null,
       downstreamRatio:
         hasUsage && upstreamTotal > 0 ? downstreamTotal / upstreamTotal : null,
@@ -1377,9 +1391,12 @@ export const EMPTY_TOTALS: AnalyticsSnapshot['totals'] = {
   allTimeUsers: null,
   redemptions7d: null,
   redemptionsTotal: null,
+  redemptions30d: null,
   gigabytes7d: null,
+  gigabytes30d: null,
   gigabytesTotal: null,
   gigabytesDownstream7d: null,
+  gigabytesDownstream30d: null,
   gigabytesDownstreamTotal: null,
   downstreamRatio: null,
   gigabytesDownstreamRaw: null,

@@ -1187,9 +1187,9 @@ export default function Dashboard({
           id="redemptions-7-days"
           status={panels.usage}
           span={3}
-          label="REDEMPTIONS · LAST 7 DAYS"
-          figure={count(data.totals.redemptions7d)}
-          note={`${count(data.totals.redemptionsTotal)} all time`}
+          label="REDEMPTIONS · LAST 30 DAYS"
+          figure={count(data.totals.redemptions30d)}
+          note={`${count(data.totals.redemptions7d)} in the last 7 days`}
           expanded={enlarged}
           onExpand={setEnlarged}
         />
@@ -1197,11 +1197,11 @@ export default function Dashboard({
           id="data-relayed-7-days"
           status={panels.usage}
           span={3}
-          label="DATA RELAYED · LAST 7 DAYS"
+          label="DATA RELAYED · LAST 30 DAYS"
           figure={volume(
-            plus(data.totals.gigabytes7d, data.totals.gigabytesDownstream7d),
+            plus(data.totals.gigabytes30d, data.totals.gigabytesDownstream30d),
           )}
-          note={`${volume(data.totals.gigabytes7d)} upstream · ${volume(data.totals.gigabytesDownstream7d)} downstream`}
+          note={`${volume(plus(data.totals.gigabytes7d, data.totals.gigabytesDownstream7d))} in the last 7 days`}
           expanded={enlarged}
           onExpand={setEnlarged}
         />
@@ -1336,9 +1336,10 @@ export default function Dashboard({
                 <p className="chart-note">
                   Upstream is paid for by the client and attributable to it.
                   Downstream is paid for by the exit, whose channels name no
-                  client, so it is never attributable to one.{' '}
+                  client, so it is never attributable to one. All time it runs{' '}
+                  {multiple(data.totals.downstreamRatio)} upstream.{' '}
                   {namedExits
-                    ? 'The exits are named in configuration, so it is measured rather than inferred.'
+                    ? `Measured rather than inferred: the exits are named in configuration, and ${count(data.totals.exitsSeen)} of ${count(data.totals.exitsNamed)} of them were seen paying a relay.`
                     : 'No exits are configured, so they are inferred from relays paid by announced nodes that never relay for a client, less the probe traffic relays pay each other.'}
                 </p>
               </>
@@ -1586,14 +1587,14 @@ export default function Dashboard({
             id="share"
             status={panels.usage}
             className="service-chart span-4"
-            eyebrow="LAST 7 DAYS · UPSTREAM"
+            eyebrow="LAST 30 DAYS · UPSTREAM"
             title="Share of redemptions"
             legend={relayerLegend}
             showLegend={false}
             note={
               <>
                 <Empty when={!data.relayers.length}>
-                  No client redemptions were indexed in the last 7 days.
+                  No client redemptions were indexed in the last 30 days.
                 </Empty>
               </>
             }
