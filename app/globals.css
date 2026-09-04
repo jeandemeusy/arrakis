@@ -1333,33 +1333,14 @@ footer a {
     font-size: 46px;
   }
 
-  /* The tooltip is placed from the cursor, so the frame is its containing block. */
-.chart-hover {
-  position: relative;
-}
-
-.chart-tip {
-  position: absolute;
-  z-index: 2;
-  transform: translate(14px, -50%);
-  max-width: 260px;
-  padding: 7px 10px;
-  background: #fffdf8;
-  border: 1px solid #d9d5cb;
-  font-size: 11px;
-  line-height: 1.4;
-  color: var(--ink);
-  pointer-events: none;
-}
-
-.empty-overlay {
+  .empty-overlay {
     inset: 96px 16px 32px;
   }
 
   .legend {
     display: none;
   }
-  
+
   .methodology {
     padding: 40px var(--gutter) 32px;
   }
