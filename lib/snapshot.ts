@@ -1349,9 +1349,12 @@ export function buildSnapshot(datasets: NetworkDataset[]): AnalyticsSnapshot {
       probeFloorGigabytes: hasUsage
         ? [...probeFloor.values()].reduce((total, value) => total + value, 0)
         : null,
-      probeGigabytesTotal: hasUsage
-        ? sum(probes, (row) => row.gigabytes)
-        : null,
+      // Not fetched at all once the exits are named, and reporting zero would
+      // read as "nobody probes" rather than "nobody asked".
+      probeGigabytesTotal:
+        hasUsage && knownExits.size === 0
+          ? sum(probes, (row) => row.gigabytes)
+          : null,
       exitsNamed: hasUsage ? knownExits.size : null,
       exitsSeen: hasUsage ? exits.size : null,
       ticketsTotal: hasUsage ? sum(redemptions, (row) => row.tickets) : null,

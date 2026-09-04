@@ -125,6 +125,27 @@ function hex(bytes: Buffer): string {
   return `0x${bytes.toString('hex')}`;
 }
 
+/**
+ * Addresses, shared rather than copied.
+ *
+ * A network has a few dozen participants and hundreds of thousands of
+ * redemptions, so `hex` otherwise allocates the same forty-two characters over
+ * and over, and every one of them is retained for as long as the snapshot lives.
+ * Interning collapses that to one string per participant.
+ */
+function interner() {
+  const seen = new Map<string, string>();
+  return (bytes: Buffer): string => {
+    const key = bytes.toString('hex');
+    let value = seen.get(key);
+    if (value === undefined) {
+      value = `0x${key}`;
+      seen.set(key, value);
+    }
+    return value;
+  };
+}
+
 function sumBalances(rows: Array<{ balance: Buffer }>): bigint {
   return rows.reduce((total, row) => total + fromBigEndian(row.balance), 0n);
 }
@@ -256,6 +277,11 @@ function estimatedClock(latestBlock: number): BlockClock {
 /** Reads one index database into the shape the snapshot builder consumes. */
 async function queryNetwork(network: NetworkConfig): Promise<NetworkDataset> {
   const db = database(network);
+  // Handed to the redemption query so it can leave the probe traffic in the
+  // database. Empty means the exits are unknown and everything has to come back.
+  const exitBytes = network.exits.map((exit) =>
+    Buffer.from(exit.slice(2), 'hex'),
+  );
   const warnings: string[] = [];
   const panels = healthyPanels();
 
@@ -288,7 +314,7 @@ async function queryNetwork(network: NetworkConfig): Promise<NetworkDataset> {
   ] = await Promise.allSettled([
     db.query<{ balance: Buffer }>(await sql('channel-balances')),
     db.query<{ balance: Buffer }>(await sql('safe-balances')),
-    db.query<RedemptionRow>(await sql('redemptions')),
+    db.query<RedemptionRow>(await sql('redemptions'), [exitBytes]),
     db.query<DeploymentRow>(await sql('client-deployments')),
     db.query<WinProbRow>(await sql('win-prob-updates')),
     db.query<TicketPriceRow>(await sql('ticket-price-updates')),
@@ -379,14 +405,18 @@ async function queryNetwork(network: NetworkConfig): Promise<NetworkDataset> {
     }
   }
 
+  const participant = interner();
   const redemptions: Redemption[] = rawRedemptions.map((row) => {
     const block = Number(row.published_block);
     const timestamp = clock(block);
     return {
       network: network.id,
-      channelId: row.channel_id,
-      source: hex(row.source),
-      destination: hex(row.destination),
+      // Only the redemption feed shows a channel, and the feed only lists client
+      // traffic. Carrying a 64-character id on every downstream row would retain
+      // megabytes to render nothing.
+      channelId: row.source_announced ? '' : row.channel_id,
+      source: participant(row.source),
+      destination: participant(row.destination),
       day: dayIndex(timestamp),
       timestamp,
       tickets: Number(row.tickets),
@@ -399,7 +429,7 @@ async function queryNetwork(network: NetworkConfig): Promise<NetworkDataset> {
     const timestamp = clock(Number(row.published_block));
     return {
       network: network.id,
-      address: hex(row.account),
+      address: participant(row.account),
       day: dayIndex(timestamp),
       timestamp,
     };

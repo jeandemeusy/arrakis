@@ -12,9 +12,9 @@
 -- redemptions should track the winning probability. One ticket is redeemed per
 -- redemption.
 --
--- Every redemption paid TO an announced node is returned, tagged with whether its
--- payer announced. The caller classifies from there, because the classification
--- needs the whole set at once:
+-- Redemptions paid TO an announced node, tagged with whether the payer announced.
+-- The caller classifies from there, because the classification needs the whole
+-- set at once:
 --
 --   unannounced -> announced   a client paying a relay: upstream VPN traffic.
 --   announced   -> announced   either an exit paying a relay on the return path,
@@ -25,6 +25,15 @@
 --
 -- A relay announces itself; an account that never announced is not infrastructure,
 -- so it is a VPN client paying for its own sessions.
+--
+-- $1 is the configured exit addresses. Given any, only the two directions that
+-- carry VPN traffic are returned — clients paying relays, and those exits paying
+-- relays. Everything else on this table is nodes probing each other, which on a
+-- real network outnumbers client traffic by an order of magnitude and is used for
+-- nothing once the exits are known. Fetching it costs hundreds of megabytes of
+-- heap to build rows nobody reads. Given none, the caller falls back to guessing
+-- the exits by elimination, and that needs the probe traffic to calibrate with,
+-- so the whole set is returned.
 WITH ordered AS (
   SELECT
     cs.channel_id,
@@ -66,5 +75,14 @@ WHERE ordered.previous_ticket_index IS NOT NULL
   -- traffic, so it is not a hop anyone is being paid for.
   AND EXISTS (
     SELECT 1 FROM announcement WHERE announcement.account_id = channel.destination
+  )
+  AND (
+    CARDINALITY($1::bytea[]) = 0
+    -- Upstream: the payer never announced, so it is a client.
+    OR NOT EXISTS (
+      SELECT 1 FROM announcement WHERE announcement.account_id = channel.source
+    )
+    -- Downstream: the payer is a known exit.
+    OR source_account.chain_key = ANY ($1::bytea[])
   )
 ORDER BY ordered.published_block ASC;
