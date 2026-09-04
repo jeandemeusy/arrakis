@@ -51,6 +51,18 @@ const YELLOW = '#ffd84d';
 const INK = '#17191c';
 const PLUM = '#8d4f68';
 const EXPLORER = 'https://gnosisscan.io/address/';
+
+/*
+ * Two vocabularies, used the same way everywhere on the page.
+ *
+ * Direction is always `upstream` (client to exit, paid by the client) or
+ * `downstream` (exit back to client, paid by the exit) — never "up"/"down",
+ * "pushed" or "sent". A figure with no direction on it covers both.
+ *
+ * Windows are always `LAST 7 DAYS`, `LAST 30 DAYS` or `ALL TIME` — never
+ * "weekly", "total", "trailing" or "since indexing began". A figure with no
+ * window on it is the current state, like a balance or an oracle value.
+ */
 const PAGE_SIZE = 50;
 
 // Constructing an Intl formatter is expensive and these run per tick and per row.
@@ -704,7 +716,7 @@ function ClientDialog({
 
           <dl className="client-stats">
             <div>
-              <dt>Pushed</dt>
+              <dt>Upstream</dt>
               <dd>{volume(detail.gigabytes)}</dd>
             </div>
             <div>
@@ -731,7 +743,7 @@ function ClientDialog({
             ))}
           </ol>
 
-          <h3>Volume pushed · last 30 days</h3>
+          <h3>Upstream volume · last 30 days</h3>
           {peak > 0 ? (
             <ResponsiveContainer width="100%" height={170}>
               <BarChart
@@ -756,14 +768,16 @@ function ClientDialog({
                 />
                 <Bar
                   dataKey="gigabytes"
-                  name="Pushed"
+                  name="Upstream"
                   fill={YELLOW}
                   isAnimationActive={false}
                 />
               </BarChart>
             </ResponsiveContainer>
           ) : (
-            <p className="client-quiet">Nothing pushed in the last 30 days.</p>
+            <p className="client-quiet">
+              No upstream traffic in the last 30 days.
+            </p>
           )}
 
           <h3>Relays paid</h3>
@@ -786,7 +800,7 @@ function ClientDialog({
                       share
                     </th>
                     <th scope="col" className="numeric">
-                      pushed (MB)
+                      upstream (MB)
                     </th>
                   </tr>
                 </thead>
@@ -930,9 +944,9 @@ export default function Dashboard({
   // Defined as data once: the card header renders it, the dialog renders it, and
   // the PNG export paints it. Three surfaces, one source.
   const activeUsersLegend: LegendEntry[] = [
-    { color: YELLOW, label: '30-day active' },
-    { color: '#9b978d', label: '7-day active' },
-    { color: PLUM, label: 'New clients (30d)', dashed: true },
+    { color: YELLOW, label: 'Active, last 30 days' },
+    { color: '#9b978d', label: 'Active, last 7 days' },
+    { color: PLUM, label: 'New clients, last 30 days', dashed: true },
   ];
   const volumeLegend: LegendEntry[] = [
     { color: YELLOW, label: 'Upstream' },
@@ -980,7 +994,7 @@ export default function Dashboard({
   );
 
   const clientRows = () => [
-    ['rank', 'client', 'network', 'redemptions', 'usage_mb'],
+    ['rank', 'client', 'network', 'redemptions', 'upstream_mb'],
     ...visibleClients.map((client) => [
       String(rankOf.get(client.key) ?? 0),
       client.address,
@@ -1159,11 +1173,13 @@ export default function Dashboard({
           figure={count(data.totals.monthlyActiveUsers)}
           note={
             <div className="mau-footer">
-              <span>{count(data.totals.weeklyActiveUsers)} weekly active</span>
-              <small>Trailing 30 and 7 days</small>
+              <span>
+                {count(data.totals.weeklyActiveUsers)} in the last 7 days
+              </span>
+              <small>Distinct clients, last 30 days</small>
             </div>
           }
-          noteText={`${count(data.totals.weeklyActiveUsers)} weekly active · trailing 30 and 7 days`}
+          noteText={`${count(data.totals.weeklyActiveUsers)} in the last 7 days · distinct clients, last 30 days`}
           expanded={enlarged}
           onExpand={setEnlarged}
         />
@@ -1171,9 +1187,9 @@ export default function Dashboard({
           id="redemptions-7-days"
           status={panels.usage}
           span={3}
-          label="REDEMPTIONS · 7 DAYS"
+          label="REDEMPTIONS · LAST 7 DAYS"
           figure={count(data.totals.redemptions7d)}
-          note={`${count(data.totals.redemptionsTotal)} since indexing began`}
+          note={`${count(data.totals.redemptionsTotal)} all time`}
           expanded={enlarged}
           onExpand={setEnlarged}
         />
@@ -1181,11 +1197,11 @@ export default function Dashboard({
           id="data-relayed-7-days"
           status={panels.usage}
           span={3}
-          label="DATA RELAYED · 7 DAYS"
+          label="DATA RELAYED · LAST 7 DAYS"
           figure={volume(
             plus(data.totals.gigabytes7d, data.totals.gigabytesDownstream7d),
           )}
-          note={`${volume(data.totals.gigabytes7d)} up · ${volume(data.totals.gigabytesDownstream7d)} down`}
+          note={`${volume(data.totals.gigabytes7d)} upstream · ${volume(data.totals.gigabytesDownstream7d)} downstream`}
           expanded={enlarged}
           onExpand={setEnlarged}
         />
@@ -1193,7 +1209,7 @@ export default function Dashboard({
           id="new-clients-30-days"
           status={panels.deployments}
           span={3}
-          label="NEW CLIENTS · 30 DAYS"
+          label="NEW CLIENTS · LAST 30 DAYS"
           figure={count(data.totals.deployments30d)}
           note={`${count(data.totals.deployments7d)} in the last 7 days`}
           expanded={enlarged}
@@ -1230,7 +1246,7 @@ export default function Dashboard({
                   redemptions.
                 </Empty>
                 <p className="chart-note">
-                  Each point counts distinct clients over the preceding 30 and 7
+                  Each point counts distinct clients over the last 30 and last 7
                   days.
                 </p>
               </>
@@ -1278,7 +1294,7 @@ export default function Dashboard({
                   <Area
                     type="monotone"
                     dataKey="monthly"
-                    name="30-day active"
+                    name="Active, last 30 days"
                     stroke={YELLOW}
                     fill="url(#fillMonthly)"
                     strokeWidth={3}
@@ -1287,7 +1303,7 @@ export default function Dashboard({
                   <Line
                     type="monotone"
                     dataKey="weekly"
-                    name="7-day active"
+                    name="Active, last 7 days"
                     stroke="#9b978d"
                     strokeWidth={1.5}
                     dot={false}
@@ -1295,7 +1311,7 @@ export default function Dashboard({
                   <Line
                     type="monotone"
                     dataKey="deployments"
-                    name="New clients (30d)"
+                    name="New clients, last 30 days"
                     stroke={PLUM}
                     strokeWidth={1.5}
                     strokeDasharray="4 4"
@@ -1394,8 +1410,8 @@ export default function Dashboard({
           <Metric
             id="total-redemptions"
             status={panels.usage}
-            span={3}
-            label="TOTAL REDEMPTIONS"
+            span={4}
+            label="REDEMPTIONS · ALL TIME"
             figure={count(data.totals.redemptionsTotal)}
             note={`An estimated ${packets(data.totals.ticketsTotal)} packets paid for`}
             expanded={enlarged}
@@ -1404,8 +1420,8 @@ export default function Dashboard({
           <Metric
             id="total-data-relayed"
             status={panels.usage}
-            span={3}
-            label="TOTAL DATA RELAYED"
+            span={4}
+            label="DATA RELAYED · ALL TIME"
             figure={volume(
               plus(
                 data.totals.gigabytesTotal,
@@ -1417,23 +1433,9 @@ export default function Dashboard({
             onExpand={setEnlarged}
           />
           <Metric
-            id="downstream"
-            status={panels.usage}
-            span={3}
-            label="DOWNSTREAM · 7 DAYS"
-            figure={volume(data.totals.gigabytesDownstream7d)}
-            note={
-              namedExits
-                ? `${multiple(data.totals.downstreamRatio)} upstream · paid by ${count(data.totals.exitsSeen)} of ${count(data.totals.exitsNamed)} known exits`
-                : `${multiple(data.totals.downstreamRatio)} upstream · exits inferred, probe traffic removed`
-            }
-            expanded={enlarged}
-            onExpand={setEnlarged}
-          />
-          <Metric
             id="active-channels"
             status={panels.balances}
-            span={3}
+            span={4}
             label="ACTIVE CHANNELS"
             figure={count(data.openChannels)}
             note={`${compactToken(data.channelBalance)} allocated`}
@@ -1543,8 +1545,8 @@ export default function Dashboard({
             id="hourly"
             status={panels.usage}
             className="service-chart span-4"
-            eyebrow="ALL INDEXED HISTORY · UPSTREAM"
-            title="When traffic is relayed"
+            eyebrow="ALL TIME · UPSTREAM"
+            title="When VPN is used"
             note={
               <>
                 <Empty when={!data.heatmap.length}>
@@ -1584,7 +1586,7 @@ export default function Dashboard({
             id="share"
             status={panels.usage}
             className="service-chart span-4"
-            eyebrow="LAST 7 DAYS"
+            eyebrow="LAST 7 DAYS · UPSTREAM"
             title="Share of redemptions"
             legend={relayerLegend}
             showLegend={false}
@@ -1783,12 +1785,8 @@ export default function Dashboard({
               onChange: setClientQuery,
               placeholder: 'Search...',
             }}
-            eyebrow="USAGE PER CLIENT"
-            title={
-              scope === 'weekly'
-                ? 'Weekly most active users'
-                : 'Most active users'
-            }
+            eyebrow="UPSTREAM VOLUME PER CLIENT"
+            title="Most active users"
             badge={
               <fieldset className="tab-switch">
                 <legend className="sr-only">Ranking window</legend>
@@ -1798,7 +1796,7 @@ export default function Dashboard({
                   className={scope === 'weekly' ? 'active' : ''}
                   onClick={() => setScope('weekly')}
                 >
-                  Weekly
+                  Last 7 days
                 </button>
                 <button
                   type="button"
@@ -1836,8 +1834,8 @@ export default function Dashboard({
               <table className="rank-table">
                 <caption className="sr-only">
                   {scope === 'weekly'
-                    ? 'Most active clients over the last seven days'
-                    : 'Most active clients since indexing began'}
+                    ? 'Most active clients over the last 7 days'
+                    : 'Most active clients, all time'}
                 </caption>
                 <colgroup>
                   <col className="rank" />
@@ -1853,7 +1851,7 @@ export default function Dashboard({
                       redemptions
                     </th>
                     <th scope="col" className="numeric">
-                      usage (MB)
+                      upstream (MB)
                     </th>
                   </tr>
                 </thead>

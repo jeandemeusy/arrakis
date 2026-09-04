@@ -99,6 +99,13 @@ function fixturePanels(network: string) {
     state: 'failed',
     reason: 'Channel and safe balances could not be read.',
   };
+  // Usage too, because that is the shape production actually degrades into: a
+  // whole network unreachable marks every panel, and it is the only way to see a
+  // tile carrying both a flag and a control in its header.
+  panels.usage = {
+    state: 'failed',
+    reason: 'Redemption history could not be read; usage panels are empty.',
+  };
   return panels;
 }
 

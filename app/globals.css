@@ -1202,8 +1202,15 @@ main {
   color: #7d6420;
 }
 
+/* The header row is ordered, not sourced: the title block is `order: 1` and the
+   badges are `order: 2`, pinned right by an auto margin. An unordered child
+   defaults to `order: 0`, which is why the flag was landing ahead of the title
+   and shoving it across. It belongs with the title it qualifies, and it must not
+   take an auto margin of its own — two auto margins split the free space between
+   them and the flag drifts into the middle of the row. */
 .chart-title .tile-flag {
-  margin-left: auto;
+  order: 1;
+  margin-top: 1px;
 }
 
 .metric span .tile-flag {
