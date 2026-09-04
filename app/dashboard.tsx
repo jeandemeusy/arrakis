@@ -730,48 +730,55 @@ function ClientDialog({
           )}
 
           <h3>Relays paid</h3>
-          <div className="table-scroll client-relays">
-            <table className="rank-table">
-              <caption className="sr-only">
-                Relays this client paid, by volume
-              </caption>
-              <thead>
-                <tr>
-                  <th scope="col">relay</th>
-                  <th scope="col" className="numeric">
-                    settlements
-                  </th>
-                  <th scope="col" className="numeric">
-                    share
-                  </th>
-                  <th scope="col" className="numeric">
-                    pushed (MB)
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {detail.relayers.map((relayer) => (
-                  <tr key={relayer.key}>
-                    <td>
-                      <span
-                        className="swatch"
-                        style={{
-                          background:
-                            relayer.colorIndex >= 0
-                              ? relayerColor(relayer.colorIndex, relayerCount)
-                              : '#b8b4aa',
-                        }}
-                      />
-                      <AddressLink address={relayer.address} />
-                    </td>
-                    <td className="numeric">{count(relayer.settlements)}</td>
-                    <td className="numeric">{percent(relayer.share)}</td>
-                    <td className="numeric">{megabytes(relayer.gigabytes)}</td>
+          {detail.relayers.length === 0 && (
+            <p className="client-quiet">No relays paid yet.</p>
+          )}
+          {detail.relayers.length > 0 && (
+            <div className="table-scroll client-relays">
+              <table className="rank-table">
+                <caption className="sr-only">
+                  Relays this client paid, by volume
+                </caption>
+                <thead>
+                  <tr>
+                    <th scope="col">relay</th>
+                    <th scope="col" className="numeric">
+                      settlements
+                    </th>
+                    <th scope="col" className="numeric">
+                      share
+                    </th>
+                    <th scope="col" className="numeric">
+                      pushed (MB)
+                    </th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {detail.relayers.map((relayer) => (
+                    <tr key={relayer.key}>
+                      <td>
+                        <span
+                          className="swatch"
+                          style={{
+                            background:
+                              relayer.colorIndex >= 0
+                                ? relayerColor(relayer.colorIndex, relayerCount)
+                                : '#b8b4aa',
+                          }}
+                        />
+                        <AddressLink address={relayer.address} />
+                      </td>
+                      <td className="numeric">{count(relayer.settlements)}</td>
+                      <td className="numeric">{percent(relayer.share)}</td>
+                      <td className="numeric">
+                        {megabytes(relayer.gigabytes)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
     </dialog>

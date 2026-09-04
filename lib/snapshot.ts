@@ -681,11 +681,17 @@ function clientUsage(
  */
 function clientDetails(
   redemptions: Redemption[],
-  deployedAtOf: Map<string, number>,
+  deployed: DeployedClient[],
   colorIndexOf: Map<string, number>,
   lastDay: number,
 ): Record<string, ClientDetail> {
   const firstRecentDay = lastDay - RECENT_DAYS + 1;
+  const deployedAtOf = new Map(
+    deployed.map((client) => [
+      identity(client.network, client.address),
+      client.timestamp,
+    ]),
+  );
 
   type Draft = {
     address: string;
@@ -693,8 +699,9 @@ function clientDetails(
     settlements: number;
     tickets: number;
     gigabytes: number;
-    first: number;
-    last: number;
+    /** Null until the client settles anything; a deployed client may never. */
+    first: number | null;
+    last: number | null;
     days: Set<number>;
     byDay: Map<number, number>;
     byRelayer: Map<
@@ -703,30 +710,47 @@ function clientDetails(
     >;
   };
 
+  const blank = (network: string, address: string): Draft => ({
+    address,
+    network,
+    settlements: 0,
+    tickets: 0,
+    gigabytes: 0,
+    first: null,
+    last: null,
+    days: new Set<number>(),
+    byDay: new Map<number, number>(),
+    byRelayer: new Map(),
+  });
+
   const drafts = new Map<string, Draft>();
+  // Seeded from the deployments, so a client that has never settled anything
+  // still has a record. Its row opens like any other, and "nothing yet" is an
+  // answer — a row that quietly behaves differently is not.
+  for (const client of deployed) {
+    const key = identity(client.network, client.address);
+    if (!drafts.has(key))
+      drafts.set(key, blank(client.network, client.address));
+  }
+
   for (const redemption of redemptions) {
     const key = identity(redemption.network, redemption.source);
     let draft = drafts.get(key);
     if (!draft) {
-      draft = {
-        address: redemption.source,
-        network: redemption.network,
-        settlements: 0,
-        tickets: 0,
-        gigabytes: 0,
-        first: redemption.timestamp,
-        last: redemption.timestamp,
-        days: new Set<number>(),
-        byDay: new Map<number, number>(),
-        byRelayer: new Map(),
-      };
+      draft = blank(redemption.network, redemption.source);
       drafts.set(key, draft);
     }
     draft.settlements += 1;
     draft.tickets += redemption.tickets;
     draft.gigabytes += redemption.gigabytes;
-    draft.first = Math.min(draft.first, redemption.timestamp);
-    draft.last = Math.max(draft.last, redemption.timestamp);
+    draft.first =
+      draft.first === null
+        ? redemption.timestamp
+        : Math.min(draft.first, redemption.timestamp);
+    draft.last =
+      draft.last === null
+        ? redemption.timestamp
+        : Math.max(draft.last, redemption.timestamp);
     draft.days.add(redemption.day);
     if (redemption.day >= firstRecentDay) {
       draft.byDay.set(
@@ -761,8 +785,12 @@ function clientDetails(
         deployedAt === undefined
           ? null
           : new Date(deployedAt * 1000).toISOString(),
-      firstSettlement: new Date(draft.first * 1000).toISOString(),
-      lastSettlement: new Date(draft.last * 1000).toISOString(),
+      firstSettlement:
+        draft.first === null
+          ? null
+          : new Date(draft.first * 1000).toISOString(),
+      lastSettlement:
+        draft.last === null ? null : new Date(draft.last * 1000).toISOString(),
       settlements: draft.settlements,
       tickets: draft.tickets,
       gigabytes: draft.gigabytes,
@@ -774,7 +802,9 @@ function clientDetails(
           address: relayer.address,
           settlements: relayer.settlements,
           gigabytes: relayer.gigabytes,
-          share: relayer.settlements / draft.settlements,
+          share: draft.settlements
+            ? relayer.settlements / draft.settlements
+            : 0,
           colorIndex: colorIndexOf.get(relayerKey) ?? -1,
         }))
         .sort((a, b) => b.gigabytes - a.gigabytes),
@@ -860,7 +890,6 @@ export function buildSnapshot(datasets: NetworkDataset[]): AnalyticsSnapshot {
 
   const deploymentsByDay = new Map<number, number>();
   const deploymentDayOf = new Map<string, number>();
-  const deployedAtOf = new Map<string, number>();
   for (const client of deployed) {
     const key = identity(client.network, client.address);
     deploymentsByDay.set(
@@ -868,7 +897,6 @@ export function buildSnapshot(datasets: NetworkDataset[]): AnalyticsSnapshot {
       (deploymentsByDay.get(client.day) ?? 0) + 1,
     );
     deploymentDayOf.set(key, client.day);
-    deployedAtOf.set(key, client.timestamp);
     addActor(client.day, key);
   }
 
@@ -948,12 +976,7 @@ export function buildSnapshot(datasets: NetworkDataset[]): AnalyticsSnapshot {
     relayerSeries,
     clients: allClients,
     clientCount: allClients.length,
-    clientDetails: clientDetails(
-      redemptions,
-      deployedAtOf,
-      colorIndexOf,
-      lastDay,
-    ),
+    clientDetails: clientDetails(redemptions, deployed, colorIndexOf, lastDay),
     deployments,
     dailyUsers: dailyUserSeries(actorsByDay, deploymentDayOf, lastDay),
     heatmap: heatmapDistribution(redemptions),

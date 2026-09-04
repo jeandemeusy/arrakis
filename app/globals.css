@@ -881,10 +881,14 @@ main {
  * disclosure rather than a list: it is reference material, wanted occasionally
  * and in the way the rest of the time. On the accent ground the palette's muted
  * grey has too little contrast, so labels take the darker ochre used for warnings.
+ *
+ * It is a band, not a heading: the rule opens it and the space below closes it,
+ * so the summary sits between equal gaps rather than resting on whatever rule
+ * the next block happens to draw.
  */
 .contracts {
   margin-top: 32px;
-  padding-top: 24px;
+  padding: 24px 0;
   border-top: 1px solid rgb(0, 0, 0, 0.18);
 }
 
@@ -1018,7 +1022,7 @@ main {
   color: #5f4700;
   font-size: 10px;
   line-height: 1.5;
-  margin: 4px 0 0;
+  margin: 0 0 24px;
 }
 
 /* Sits in the card's bottom-right, out of the way of the title row's badges.

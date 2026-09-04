@@ -110,13 +110,18 @@ function dataset(
     );
   });
 
+  // One client is deployed and never settles anything. It is a real shape — a
+  // node that was set up and never used — and the only one that exercises the
+  // empty client record.
+  const idle = clients.at(-1);
+
   const perRedemption = redemptionVolume(config.winProbability);
   const redemptions: Redemption[] = [];
   for (let day = startDay; day <= lastDay; day += 1) {
     const ramp = Math.min(1, (day - startDay) / (days * 0.4));
     const wobble = 0.55 + 0.45 * Math.sin((day - startDay) / 9);
     const active = clients.filter(
-      (client) => (deployedOn.get(client) ?? 0) <= day,
+      (client) => client !== idle && (deployedOn.get(client) ?? 0) <= day,
     );
     const count = Math.round(
       active.length * 0.35 * ramp * wobble * (0.6 + next()),
