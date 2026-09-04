@@ -1123,6 +1123,40 @@ main {
   border-color: var(--ink);
 }
 
+/* The tooltip is placed from the cursor, so the frame is its containing block. */
+.chart-hover {
+  position: relative;
+}
+
+/* Matches the recharts tooltip the other charts use: same ground, same border,
+   same size, so a hover reads the same wherever it happens. */
+.chart-tip {
+  position: absolute;
+  z-index: 2;
+  transform: translate(14px, -50%);
+  padding: 10px;
+  background: #fffdf8;
+  border: 1px solid #d9d5cb;
+  border-radius: 2px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.chart-tip p {
+  margin: 0;
+}
+
+.chart-tip-label {
+  margin-bottom: 3px;
+}
+
+.chart-tip-note {
+  color: var(--muted);
+}
+
 .empty-overlay {
   position: absolute;
   inset: 120px 32px 42px;
@@ -1299,7 +1333,26 @@ footer a {
     font-size: 46px;
   }
 
-  .empty-overlay {
+  /* The tooltip is placed from the cursor, so the frame is its containing block. */
+.chart-hover {
+  position: relative;
+}
+
+.chart-tip {
+  position: absolute;
+  z-index: 2;
+  transform: translate(14px, -50%);
+  max-width: 260px;
+  padding: 7px 10px;
+  background: #fffdf8;
+  border: 1px solid #d9d5cb;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--ink);
+  pointer-events: none;
+}
+
+.empty-overlay {
     inset: 96px 16px 32px;
   }
 

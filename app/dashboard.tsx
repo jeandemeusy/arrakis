@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import {
   Area,
   Bar,
@@ -211,7 +211,9 @@ function formatTimestamp(value: string) {
 function pageList(page: number, pages: number): Array<number | null> {
   if (pages <= 7) return Array.from({ length: pages }, (_, index) => index);
   const wanted = new Set([0, pages - 1, page - 1, page, page + 1]);
-  const shown = [...wanted].filter((n) => n >= 0 && n < pages).sort((a, b) => a - b);
+  const shown = [...wanted]
+    .filter((n) => n >= 0 && n < pages)
+    .sort((a, b) => a - b);
   return shown.flatMap((n, index) =>
     index > 0 && n - shown[index - 1] > 1 ? [null, n] : [n],
   );
@@ -288,6 +290,261 @@ function AddressLink({ address }: { address: string }) {
     >
       <code>{address}</code>
     </a>
+  );
+}
+
+const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+/**
+ * Blends the paper ground towards plum by share, so an empty hour is the card's
+ * own background and a busy one is solid.
+ */
+function heatColor(intensity: number) {
+  const from = [244, 241, 232];
+  const to = [141, 79, 104];
+  const at = (i: number) => Math.round(from[i] + (to[i] - from[i]) * intensity);
+  return `rgb(${at(0)} ${at(1)} ${at(2)})`;
+}
+
+/**
+ * Volume by weekday and hour, drawn as SVG rather than with a chart library.
+ *
+ * Recharts has no heatmap, and hand-drawing it keeps the tile's PNG export
+ * working: that export looks for an `<svg>` inside the tile, so a grid of divs
+ * would render on the page but produce an empty image.
+ */
+function Heatmap({
+  grid,
+  total,
+  height = 250,
+}: {
+  grid: number[][];
+  total: number | null;
+  height?: number;
+}) {
+  const frame = useRef<HTMLDivElement>(null);
+  const [hover, setHover] = useState<{
+    x: number;
+    y: number;
+    label: string;
+    share: number;
+  } | null>(null);
+
+  if (!grid.length) return <div style={{ height }} />;
+  const peak = Math.max(...grid.flat());
+  const left = 34;
+  const top = 16;
+  const cell = 26;
+  const gap = 2;
+  const width = left + 24 * cell;
+  const full = top + 7 * cell + 20;
+
+  const show = (
+    event: { clientX: number; clientY: number },
+    label: string,
+    share: number,
+  ) => {
+    const box = frame.current?.getBoundingClientRect();
+    if (!box) return;
+    setHover({
+      x: event.clientX - box.left,
+      y: event.clientY - box.top,
+      label,
+      share,
+    });
+  };
+
+  return (
+    <div
+      className="chart-hover"
+      ref={frame}
+      onMouseLeave={() => setHover(null)}
+    >
+      <svg
+        viewBox={`0 0 ${width} ${full}`}
+        width="100%"
+        height={height}
+        preserveAspectRatio="xMidYMid meet"
+        // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- an <svg> cannot be an <img>
+        role="img"
+        aria-label="Share of relayed volume by weekday and hour, UTC"
+      >
+        {grid.map((row, weekday) =>
+          row.map((share, hour) => (
+            <rect
+              key={`${weekday}-${hour}`}
+              x={left + hour * cell}
+              y={top + weekday * cell}
+              width={cell - gap}
+              height={cell - gap}
+              fill={heatColor(peak > 0 ? share / peak : 0)}
+              onMouseMove={(event) =>
+                show(
+                  event,
+                  `${WEEKDAYS[weekday]} ${String(hour).padStart(2, '0')}:00 UTC`,
+                  share,
+                )
+              }
+            />
+          )),
+        )}
+        {WEEKDAYS.map((day, index) => (
+          <text
+            key={day}
+            x={left - 10}
+            y={top + index * cell + (cell - gap) / 2}
+            textAnchor="end"
+            dominantBaseline="middle"
+            fontSize="10"
+            fill="#8a877f"
+          >
+            {day}
+          </text>
+        ))}
+        {[0, 6, 12, 18].map((hour) => (
+          <text
+            key={hour}
+            x={left + hour * cell}
+            y={full - 6}
+            fontSize="10"
+            fill="#8a877f"
+          >
+            {String(hour).padStart(2, '0')}:00
+          </text>
+        ))}
+      </svg>
+      {hover && (
+        <div className="chart-tip" style={{ left: hover.x, top: hover.y }}>
+          <p className="chart-tip-label">{hover.label}</p>
+          <p style={{ color: PLUM }}>Share : {percent(hover.share)}</p>
+          {total !== null && (
+            <p className="chart-tip-note">
+              {volume(hover.share * total)} relayed
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Cohort retention as a shaded triangle.
+ *
+ * A table of percentages needed a full-width section to say what a grid says in
+ * a quarter of the space: the shape is the point. The exact figure is a hover
+ * away — a real tooltip rather than the SVG `<title>` the browser shows after a
+ * second's delay and cannot style.
+ */
+function CohortGrid({
+  cohorts,
+  height = 250,
+}: {
+  cohorts: DashboardPayload['snapshots'][string]['retention'];
+  height?: number;
+}) {
+  const frame = useRef<HTMLDivElement>(null);
+  const [hover, setHover] = useState<{
+    x: number;
+    y: number;
+    label: string;
+    share: number;
+    active: number;
+    size: number;
+  } | null>(null);
+
+  if (!cohorts.length) return <div style={{ height }} />;
+  const months = Math.max(...cohorts.map((cohort) => cohort.retention.length));
+  const left = 74;
+  const top = 18;
+  const cell = 22;
+  const gap = 2;
+  const width = left + months * cell;
+  const full = top + cohorts.length * cell + 4;
+
+  const show = (
+    event: { clientX: number; clientY: number },
+    cell: { label: string; share: number; active: number; size: number },
+  ) => {
+    const box = frame.current?.getBoundingClientRect();
+    if (!box) return;
+    setHover({
+      x: event.clientX - box.left,
+      y: event.clientY - box.top,
+      ...cell,
+    });
+  };
+
+  return (
+    <div
+      className="chart-hover"
+      ref={frame}
+      onMouseLeave={() => setHover(null)}
+    >
+      <svg
+        viewBox={`0 0 ${width} ${full}`}
+        width="100%"
+        height={height}
+        preserveAspectRatio="xMidYMid meet"
+        // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- an <svg> cannot be an <img>
+        role="img"
+        aria-label="Share of each deployment cohort still relaying traffic, by month"
+      >
+        {Array.from({ length: months }, (_, offset) => (
+          <text
+            key={offset}
+            x={left + offset * cell + (cell - gap) / 2}
+            y={top - 6}
+            textAnchor="middle"
+            fontSize="9"
+            fill="#8a877f"
+          >
+            {offset}
+          </text>
+        ))}
+        {cohorts.map((cohort, row) => (
+          <g key={cohort.month}>
+            <text
+              x={left - 10}
+              y={top + row * cell + (cell - gap) / 2}
+              textAnchor="end"
+              dominantBaseline="middle"
+              fontSize="10"
+              fill="#8a877f"
+            >
+              {`${cohort.label.replace(' 20', " '")} · ${cohort.size}`}
+            </text>
+            {cohort.retention.map((share, offset) => (
+              <rect
+                key={offset}
+                x={left + offset * cell}
+                y={top + row * cell}
+                width={cell - gap}
+                height={cell - gap}
+                fill={heatColor(share)}
+                onMouseMove={(event) =>
+                  show(event, {
+                    label: `${cohort.label} · month ${offset}`,
+                    share,
+                    active: Math.round(share * cohort.size),
+                    size: cohort.size,
+                  })
+                }
+              />
+            ))}
+          </g>
+        ))}
+      </svg>
+      {hover && (
+        <div className="chart-tip" style={{ left: hover.x, top: hover.y }}>
+          <p className="chart-tip-label">{hover.label}</p>
+          <p style={{ color: PLUM }}>Retention : {percent(hover.share)}</p>
+          <p className="chart-tip-note">
+            {count(hover.active)} of {count(hover.size)} clients
+          </p>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -402,12 +659,19 @@ export default function Dashboard({
     label: shortAddress(relayer.address),
   }));
 
-  const rankOf = new Map(rankedClients.map((client, index) => [client.key, index + 1]));
+  const rankOf = new Map(
+    rankedClients.map((client, index) => [client.key, index + 1]),
+  );
   const visibleClients = rankedClients.filter((client) =>
     matches(clientQuery, client.address, client.network),
   );
   const visibleDeployments = data.deployments.filter((row) =>
-    matches(deploymentQuery, row.address, row.network, formatTimestamp(row.timestamp)),
+    matches(
+      deploymentQuery,
+      row.address,
+      row.network,
+      formatTimestamp(row.timestamp),
+    ),
   );
   const visibleRedemptions = data.recentRedemptions.filter((row) =>
     matches(
@@ -436,7 +700,11 @@ export default function Dashboard({
   ];
   const deploymentRows = () => [
     ['timestamp', 'client', 'network'],
-    ...visibleDeployments.map((row) => [row.timestamp, row.address, row.network]),
+    ...visibleDeployments.map((row) => [
+      row.timestamp,
+      row.address,
+      row.network,
+    ]),
   ];
   const feedRows = () => [
     ['timestamp', 'client', 'relayer', 'channel', 'network'],
@@ -451,8 +719,32 @@ export default function Dashboard({
 
   // One row per contract, one column per network: the same role deployed twice is
   // a comparison, not two unrelated rows.
-  const contractNetworks = [...new Set(data.contracts.map((row) => row.network))];
-  const contractRoles = [...new Set(data.contracts.map((row) => row.role))].sort();
+  const contractNetworks = [
+    ...new Set(data.contracts.map((row) => row.network)),
+  ];
+  const contractRoles = [
+    ...new Set(data.contracts.map((row) => row.role)),
+  ].sort();
+
+  // The oldest cohort has the most months behind it and so sets the export width.
+  const cohortWidth = Math.max(
+    0,
+    ...data.retention.map((c) => c.retention.length),
+  );
+  const retentionRows = () => [
+    [
+      'cohort',
+      'clients',
+      ...Array.from({ length: cohortWidth }, (_, i) => `month_${i}`),
+    ],
+    ...data.retention.map((cohort) => [
+      cohort.month,
+      String(cohort.size),
+      ...Array.from({ length: cohortWidth }, (_, i) =>
+        cohort.retention[i] === undefined ? '' : cohort.retention[i].toFixed(4),
+      ),
+    ]),
+  ];
 
   const pagesOf = (total: number) => Math.max(1, Math.ceil(total / PAGE_SIZE));
   const clip = (page: number, total: number) =>
@@ -558,7 +850,10 @@ export default function Dashboard({
         </div>
       </section>
 
-      <section className="headline-grid tile-grid" aria-label="Headline metrics">
+      <section
+        className="headline-grid tile-grid"
+        aria-label="Headline metrics"
+      >
         <Tile
           id="monthly-active-users"
           className="metric mau-card span-3"
@@ -818,7 +1113,7 @@ export default function Dashboard({
         <div className="tile-grid">
           <Tile
             id="daily-users"
-            className="service-chart span-6"
+            className="service-chart span-4"
             eyebrow="LAST 30 DAYS"
             title="Daily users"
             legend={dailyUsersLegend}
@@ -874,17 +1169,43 @@ export default function Dashboard({
             }
           />
           <Tile
-            id="hourly"
-            className="service-chart span-6"
-            eyebrow="ALL INDEXED HISTORY"
-            title="Usage distribution over the day"
+            id="retention"
+            className="service-chart span-4"
+            eyebrow="BY DEPLOYMENT MONTH"
+            title="Cohort retention"
+            rows={retentionRows}
             note={
               <>
-                <Empty when={!data.hourly.length}>
+                <Empty when={!data.retention.length}>
+                  No client deployments have been indexed.
+                </Empty>
+                <p className="chart-note">
+                  Read a row left to right: it follows the clients deployed that
+                  month, and each square is the share of them relaying traffic
+                  that many months later. Month 0 is the month they were
+                  deployed, so it is an activation rate; darker is a higher
+                  share. A row is short because those months have not happened
+                  yet, not because the clients left.
+                </p>
+              </>
+            }
+            expanded={enlarged}
+            onExpand={setEnlarged}
+            chart={<CohortGrid cohorts={data.retention} />}
+          />
+          <Tile
+            id="hourly"
+            className="service-chart span-4"
+            eyebrow="ALL INDEXED HISTORY"
+            title="When traffic is relayed"
+            note={
+              <>
+                <Empty when={!data.heatmap.length}>
                   No volume has been indexed yet.
                 </Empty>
                 <p className="chart-note">
-                  Share of relayed volume by hour, UTC. Block timestamps are{' '}
+                  Share of relayed volume by weekday and hour, UTC. Block
+                  timestamps are{' '}
                   {data.timebase === 'rpc'
                     ? 'RPC resolved'
                     : 'estimated from block height'}
@@ -895,38 +1216,7 @@ export default function Dashboard({
             expanded={enlarged}
             onExpand={setEnlarged}
             chart={
-              <ResponsiveContainer width="100%" height={250}>
-                <BarChart
-                  data={data.hourly}
-                  margin={{ top: 20, right: 10, left: -18, bottom: 0 }}
-                >
-                  <CartesianGrid vertical={false} stroke={GRID} />
-                  <XAxis
-                    dataKey="hour"
-                    axisLine={false}
-                    tickLine={false}
-                    tick={AXIS}
-                    minTickGap={24}
-                  />
-                  <YAxis
-                    axisLine={false}
-                    tickLine={false}
-                    tick={AXIS}
-                    tickFormatter={(input: unknown) => percent(Number(input))}
-                  />
-                  <Tooltip
-                    cursor={CURSOR}
-                    contentStyle={TOOLTIP}
-                    formatter={(input: unknown) => percent(Number(input))}
-                  />
-                  <Bar
-                    dataKey="share"
-                    name="Share of volume"
-                    fill={PLUM}
-                    radius={[2, 2, 0, 0]}
-                  />
-                </BarChart>
-              </ResponsiveContainer>
+              <Heatmap grid={data.heatmap} total={data.totals.gigabytesTotal} />
             }
           />
         </div>
@@ -1270,16 +1560,18 @@ export default function Dashboard({
                   </tr>
                 </thead>
                 <tbody>
-                  {pageOf(visibleDeployments, deploymentAt).map((deployment) => (
-                    <tr key={deployment.key}>
-                      <td className="timestamp">
-                        {formatTimestamp(deployment.timestamp)}
-                      </td>
-                      <td>
-                        <AddressLink address={deployment.address} />
-                      </td>
-                    </tr>
-                  ))}
+                  {pageOf(visibleDeployments, deploymentAt).map(
+                    (deployment) => (
+                      <tr key={deployment.key}>
+                        <td className="timestamp">
+                          {formatTimestamp(deployment.timestamp)}
+                        </td>
+                        <td>
+                          <AddressLink address={deployment.address} />
+                        </td>
+                      </tr>
+                    ),
+                  )}
                 </tbody>
               </table>
             </div>
@@ -1404,9 +1696,7 @@ export default function Dashboard({
         </div>
         {data.contracts.length > 0 && (
           <details className="contracts">
-            <summary>
-              {count(contractRoles.length)} contracts indexed
-            </summary>
+            <summary>{count(contractRoles.length)} contracts indexed</summary>
             <table>
               <thead>
                 <tr>
