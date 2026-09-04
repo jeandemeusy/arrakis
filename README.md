@@ -144,6 +144,10 @@ and a styling change is the only thing that moves between two screenshots. It
 deliberately produces a long relayer tail, a wide client spread and uneven daily
 activity, since those are the shapes that break layouts.
 
+`DASHBOARD_FIXTURES=degraded` serves the same data with the second network
+reporting failed queries, which is the only way to see the unavailable and partial
+tile states without breaking a real database.
+
 The fixture fabricates the finished snapshot rather than exercising the aggregation
 in `lib/analytics.ts`. It validates rendering only — never read agreement there as
 evidence that the real derivations are correct.

@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Area,
   Bar,
@@ -21,9 +21,11 @@ import {
   Database,
   ExternalLink,
   ShieldCheck,
+  X,
 } from 'lucide-react';
 
 import type { Dashboard as DashboardPayload } from '@/lib/analytics';
+import type { ClientDetail, PanelStatus } from '@/lib/snapshot';
 import { COMBINED } from '@/lib/constants';
 import { Tile, type LegendEntry } from './tile';
 
@@ -84,6 +86,16 @@ const OBSERVED = new Intl.DateTimeFormat('en-GB', {
   hour12: false,
   timeZone: 'UTC',
   timeZoneName: 'short',
+});
+// The client timeline is read as a shape, not a log, so it drops the seconds.
+const MOMENT = new Intl.DateTimeFormat('en-GB', {
+  day: '2-digit',
+  month: 'short',
+  year: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+  timeZone: 'UTC',
+  hour12: false,
 });
 const TIMESTAMP = new Intl.DateTimeFormat('en-GB', {
   year: 'numeric',
@@ -195,6 +207,33 @@ function formatTimestamp(value: string) {
   return TIMESTAMP.format(new Date(value)).replace(',', '');
 }
 
+function formatMoment(value: string) {
+  return MOMENT.format(new Date(value)).replace(',', '');
+}
+
+function plural(value: number, unit: string) {
+  return `${value} ${unit}${value === 1 ? '' : 's'}`;
+}
+
+/**
+ * The distance between two instants, in whichever unit keeps it a small number.
+ *
+ * A timeline that only prints dates leaves the reader doing arithmetic. The
+ * spans are what carry the meaning — how long a client waited before it paid
+ * anything, and how long it kept going — so they are stated outright.
+ */
+function elapsed(from: string, to: string) {
+  const ms = new Date(to).getTime() - new Date(from).getTime();
+  if (ms < 3_600_000) return 'under an hour';
+  const hours = ms / 3_600_000;
+  if (hours < 48) return plural(Math.round(hours), 'hour');
+  const days = hours / 24;
+  if (days < 60) return plural(Math.round(days), 'day');
+  const months = days / 30.44;
+  if (months < 24) return plural(Math.round(months), 'month');
+  return plural(Math.round(days / 365.25), 'year');
+}
+
 /**
  * Page controls for a table.
  *
@@ -290,6 +329,43 @@ function AddressLink({ address }: { address: string }) {
     >
       <code>{address}</code>
     </a>
+  );
+}
+
+/** Mirrors `identity` in the snapshot builder: a client is only unique per network. */
+function clientKey(network: string, address: string) {
+  return `${network} ${address}`;
+}
+
+/**
+ * A client address, opening its drill-down.
+ *
+ * A relayer or a contract address goes straight to the block explorer, because
+ * that is the only thing there is to say about it. A client has a record on this
+ * page — what it relayed, when, and through whom — so its address opens that
+ * instead, and the explorer link moves inside the dialog rather than away.
+ */
+function ClientCell({
+  address,
+  network,
+  known,
+  onOpen,
+}: {
+  address: string;
+  network: string;
+  known: boolean;
+  onOpen: (key: string) => void;
+}) {
+  if (!known) return <AddressLink address={address} />;
+  return (
+    <button
+      type="button"
+      className="address address-button"
+      onClick={() => onOpen(clientKey(network, address))}
+      aria-label={`Open the record for client ${address}`}
+    >
+      <code>{address}</code>
+    </button>
   );
 }
 
@@ -548,6 +624,183 @@ function CohortGrid({
   );
 }
 
+/**
+ * One client's whole record, opened from any table that lists it.
+ *
+ * The ranking tables answer "who used the most". They cannot answer "what did
+ * this one actually do", which is the question anyone investigating a client has
+ * next: when it arrived, whether it kept going, and which relays it paid. All of
+ * it is already in the snapshot, so the dialog costs a click and no query.
+ */
+function ClientDialog({
+  detail,
+  networkLabel,
+  relayerCount,
+  onClose,
+}: {
+  detail: ClientDetail | null;
+  networkLabel: string | null;
+  relayerCount: number;
+  onClose: () => void;
+}) {
+  const dialog = useRef<HTMLDialogElement>(null);
+
+  useEffect(() => {
+    const node = dialog.current;
+    if (!node) return;
+    if (detail && !node.open) node.showModal();
+    if (!detail && node.open) node.close();
+  }, [detail]);
+
+  const peak = detail
+    ? Math.max(...detail.daily.map((point) => point.gigabytes))
+    : 0;
+
+  return (
+    <dialog
+      ref={dialog}
+      className="modal client-modal"
+      aria-label="Client record"
+      onClose={onClose}
+    >
+      <div className="modal-head">
+        <h2>Client record</h2>
+        <button type="button" onClick={onClose} aria-label="Close">
+          <X size={16} aria-hidden="true" />
+        </button>
+      </div>
+
+      {/* Mounted only while open, so the page carries one dialog and not one per row. */}
+      {detail && (
+        <div className="modal-body client-body">
+          <div className="client-id">
+            <code>{detail.address}</code>
+            {networkLabel && (
+              <span className="client-network">{networkLabel}</span>
+            )}
+            <a
+              href={`${EXPLORER}${detail.address}`}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Gnosisscan <ExternalLink size={12} aria-hidden="true" />
+              <span className="sr-only">(opens in a new tab)</span>
+            </a>
+          </div>
+
+          <dl className="client-stats">
+            <div>
+              <dt>Pushed</dt>
+              <dd>{volume(detail.gigabytes)}</dd>
+            </div>
+            <div>
+              <dt>Active days</dt>
+              <dd>{count(detail.activeDays)}</dd>
+            </div>
+          </dl>
+
+          <ol className="client-timeline">
+            {[
+              { label: 'Deployed', at: detail.deployedAt },
+              { label: 'First seen', at: detail.firstSettlement },
+              { label: 'Last seen', at: detail.lastSettlement },
+            ].map((step) => (
+              <li key={step.label}>
+                <span className="timeline-mark" aria-hidden="true" />
+                <span className="timeline-label">{step.label}</span>
+                {step.at ? (
+                  <time dateTime={step.at}>{formatMoment(step.at)}</time>
+                ) : (
+                  <span className="absent">not indexed</span>
+                )}
+              </li>
+            ))}
+          </ol>
+
+          <h3>Volume pushed · last 30 days</h3>
+          {peak > 0 ? (
+            <ResponsiveContainer width="100%" height={170}>
+              <BarChart
+                data={detail.daily}
+                margin={{ top: 8, right: 8, left: -22, bottom: 0 }}
+              >
+                <CartesianGrid vertical={false} stroke={GRID} />
+                <XAxis
+                  dataKey="date"
+                  axisLine={false}
+                  tickLine={false}
+                  tick={AXIS}
+                  minTickGap={40}
+                  tickFormatter={formatDay}
+                />
+                <YAxis axisLine={false} tickLine={false} tick={AXIS} />
+                <Tooltip
+                  cursor={CURSOR}
+                  labelFormatter={formatDay}
+                  contentStyle={TOOLTIP}
+                  formatter={(input: unknown) => volume(Number(input))}
+                />
+                <Bar
+                  dataKey="gigabytes"
+                  name="Pushed"
+                  fill={YELLOW}
+                  isAnimationActive={false}
+                />
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <p className="client-quiet">Nothing pushed in the last 30 days.</p>
+          )}
+
+          <h3>Relays paid</h3>
+          <div className="table-scroll client-relays">
+            <table className="rank-table">
+              <caption className="sr-only">
+                Relays this client paid, by volume
+              </caption>
+              <thead>
+                <tr>
+                  <th scope="col">relay</th>
+                  <th scope="col" className="numeric">
+                    settlements
+                  </th>
+                  <th scope="col" className="numeric">
+                    share
+                  </th>
+                  <th scope="col" className="numeric">
+                    pushed (MB)
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {detail.relayers.map((relayer) => (
+                  <tr key={relayer.key}>
+                    <td>
+                      <span
+                        className="swatch"
+                        style={{
+                          background:
+                            relayer.colorIndex >= 0
+                              ? relayerColor(relayer.colorIndex, relayerCount)
+                              : '#b8b4aa',
+                        }}
+                      />
+                      <AddressLink address={relayer.address} />
+                    </td>
+                    <td className="numeric">{count(relayer.settlements)}</td>
+                    <td className="numeric">{percent(relayer.share)}</td>
+                    <td className="numeric">{megabytes(relayer.gigabytes)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </dialog>
+  );
+}
+
 /** Overlay shown in place of a chart or table that has nothing to render. */
 function Empty({ when, children }: { when: boolean; children: string }) {
   if (!when) return null;
@@ -561,6 +814,7 @@ function Metric({
   figure,
   note,
   span,
+  status,
   expanded,
   onExpand,
 }: {
@@ -569,6 +823,7 @@ function Metric({
   figure: string;
   note: string;
   span: 3 | 4;
+  status?: PanelStatus;
   expanded: string | null;
   onExpand: (id: string | null) => void;
 }) {
@@ -577,6 +832,7 @@ function Metric({
       id={id}
       className={`metric span-${span}`}
       title={label}
+      status={status}
       figure={figure}
       note={<p>{note}</p>}
       noteText={note}
@@ -600,6 +856,7 @@ export default function Dashboard({
   const [deploymentQuery, setDeploymentQuery] = useState('');
   const [feedQuery, setFeedQuery] = useState('');
   const [network, setNetwork] = useState(dashboard.defaultNetwork);
+  const [inspected, setInspected] = useState<string | null>(null);
 
   // Every network's snapshot is already on the page, so switching is instant.
   const data =
@@ -609,6 +866,12 @@ export default function Dashboard({
   const labelOf = (id: string) =>
     dashboard.networks.find((entry) => entry.id === id)?.label ?? id;
   const live = data.source !== 'unavailable';
+  const panels = data.panels;
+
+  // Switching network drops the drill-down: the client keys are per network, so
+  // the open record would either vanish or, worse, name a different participant.
+  const inspecting =
+    inspected === null ? null : (data.clientDetails[inspected] ?? null);
 
   // Recharts colours pie slices from a `fill` on each datum, avoiding <Cell>.
   const relayerSlices = useMemo(
@@ -813,7 +1076,10 @@ export default function Dashboard({
                 type="button"
                 aria-pressed={combined}
                 className={combined ? 'active' : ''}
-                onClick={() => setNetwork(COMBINED)}
+                onClick={() => {
+                  setNetwork(COMBINED);
+                  setInspected(null);
+                }}
               >
                 All networks
               </button>
@@ -823,7 +1089,10 @@ export default function Dashboard({
                   type="button"
                   aria-pressed={network === entry.id}
                   className={network === entry.id ? 'active' : ''}
-                  onClick={() => setNetwork(entry.id)}
+                  onClick={() => {
+                    setNetwork(entry.id);
+                    setInspected(null);
+                  }}
                 >
                   {entry.label}
                 </button>
@@ -856,6 +1125,7 @@ export default function Dashboard({
       >
         <Tile
           id="monthly-active-users"
+          status={panels.usage}
           className="metric mau-card span-3"
           title="MONTHLY ACTIVE USERS"
           figure={count(data.totals.monthlyActiveUsers)}
@@ -871,6 +1141,7 @@ export default function Dashboard({
         />
         <Metric
           id="redemptions-7-days"
+          status={panels.usage}
           span={3}
           label="REDEMPTIONS · 7 DAYS"
           figure={count(data.totals.redemptions7d)}
@@ -880,6 +1151,7 @@ export default function Dashboard({
         />
         <Metric
           id="data-relayed-7-days"
+          status={panels.usage}
           span={3}
           label="DATA RELAYED · 7 DAYS"
           figure={volume(data.totals.gigabytes7d)}
@@ -889,6 +1161,7 @@ export default function Dashboard({
         />
         <Metric
           id="new-clients-30-days"
+          status={panels.deployments}
           span={3}
           label="NEW CLIENTS · 30 DAYS"
           figure={count(data.totals.deployments30d)}
@@ -914,6 +1187,7 @@ export default function Dashboard({
         <div className="tile-grid">
           <Tile
             id="active-users"
+            status={panels.usage}
             className="main-chart span-6"
             eyebrow="SINCE 01 JAN 2026"
             title="Monthly and weekly active users"
@@ -1002,6 +1276,7 @@ export default function Dashboard({
           />
           <Tile
             id="volume"
+            status={panels.usage}
             className="service-chart span-6"
             eyebrow="PER WEEK AND CUMULATIVE"
             title="Data volume"
@@ -1071,6 +1346,7 @@ export default function Dashboard({
         <div className="tile-grid">
           <Metric
             id="total-redemptions"
+            status={panels.usage}
             span={4}
             label="TOTAL REDEMPTIONS"
             figure={count(data.totals.redemptionsTotal)}
@@ -1080,6 +1356,7 @@ export default function Dashboard({
           />
           <Metric
             id="total-data-relayed"
+            status={panels.usage}
             span={4}
             label="TOTAL DATA RELAYED"
             figure={volume(data.totals.gigabytesTotal)}
@@ -1089,6 +1366,7 @@ export default function Dashboard({
           />
           <Metric
             id="active-channels"
+            status={panels.balances}
             span={4}
             label="ACTIVE CHANNELS"
             figure={count(data.openChannels)}
@@ -1113,6 +1391,7 @@ export default function Dashboard({
         <div className="tile-grid">
           <Tile
             id="daily-users"
+            status={panels.usage}
             className="service-chart span-4"
             eyebrow="LAST 30 DAYS"
             title="Daily users"
@@ -1170,6 +1449,7 @@ export default function Dashboard({
           />
           <Tile
             id="retention"
+            status={panels.deployments}
             className="service-chart span-4"
             eyebrow="BY DEPLOYMENT MONTH"
             title="Cohort retention"
@@ -1195,6 +1475,7 @@ export default function Dashboard({
           />
           <Tile
             id="hourly"
+            status={panels.usage}
             className="service-chart span-4"
             eyebrow="ALL INDEXED HISTORY"
             title="When traffic is relayed"
@@ -1235,6 +1516,7 @@ export default function Dashboard({
         <div className="tile-grid">
           <Tile
             id="share"
+            status={panels.usage}
             className="service-chart span-4"
             eyebrow="LAST 7 DAYS"
             title="Share of redemptions"
@@ -1277,6 +1559,7 @@ export default function Dashboard({
           />
           <Tile
             id="relayer-volume"
+            status={panels.usage}
             className="service-chart span-8"
             eyebrow="LAST 30 DAYS"
             title="Estimated daily volume per relayer"
@@ -1354,6 +1637,7 @@ export default function Dashboard({
         <div className="tile-grid">
           <Metric
             id="winning-probability"
+            status={panels.ticket}
             span={4}
             label="WINNING PROBABILITY"
             figure={probability(data.ticket.winProbability)}
@@ -1363,6 +1647,7 @@ export default function Dashboard({
           />
           <Metric
             id="ticket-price"
+            status={panels.ticket}
             span={4}
             label="TICKET PRICE"
             figure={token(data.ticket.priceWei)}
@@ -1372,6 +1657,7 @@ export default function Dashboard({
           />
           <Metric
             id="ticket-value"
+            status={panels.ticket}
             span={4}
             label="TICKET VALUE"
             figure={token(data.ticket.valueWei, 4)}
@@ -1396,6 +1682,7 @@ export default function Dashboard({
         <div className="tile-grid">
           <Tile
             id="clients-table"
+            status={panels.usage}
             className="table-card span-6"
             rows={clientRows}
             rowCount={visibleClients.length}
@@ -1491,7 +1778,12 @@ export default function Dashboard({
                           {rank}
                         </td>
                         <td>
-                          <AddressLink address={client.address} />
+                          <ClientCell
+                            address={client.address}
+                            network={client.network}
+                            known={client.key in data.clientDetails}
+                            onOpen={setInspected}
+                          />
                         </td>
                         <td className="numeric">
                           {count(
@@ -1516,6 +1808,7 @@ export default function Dashboard({
           </Tile>
           <Tile
             id="deployments-table"
+            status={panels.deployments}
             className="table-card span-6"
             rows={deploymentRows}
             rowCount={visibleDeployments.length}
@@ -1567,7 +1860,12 @@ export default function Dashboard({
                           {formatTimestamp(deployment.timestamp)}
                         </td>
                         <td>
-                          <AddressLink address={deployment.address} />
+                          <ClientCell
+                            address={deployment.address}
+                            network={deployment.network}
+                            known={deployment.key in data.clientDetails}
+                            onOpen={setInspected}
+                          />
                         </td>
                       </tr>
                     ),
@@ -1589,6 +1887,7 @@ export default function Dashboard({
         </div>
         <Tile
           id="feed-table"
+          status={panels.usage}
           className="table-card span-12"
           rows={feedRows}
           rowCount={visibleRedemptions.length}
@@ -1642,7 +1941,15 @@ export default function Dashboard({
                       {formatTimestamp(redemption.timestamp)}
                     </td>
                     <td>
-                      <AddressLink address={redemption.client} />
+                      <ClientCell
+                        address={redemption.client}
+                        network={redemption.network}
+                        known={
+                          clientKey(redemption.network, redemption.client) in
+                          data.clientDetails
+                        }
+                        onOpen={setInspected}
+                      />
                     </td>
                     <td>
                       <AddressLink address={redemption.relayer} />
@@ -1749,6 +2056,17 @@ export default function Dashboard({
           <code>Schema {data.schemaVersion ?? 'unavailable'}</code>
         </div>
       </section>
+
+      <ClientDialog
+        detail={inspecting}
+        networkLabel={
+          dashboard.networks.length > 1 && inspecting
+            ? labelOf(inspecting.network)
+            : null
+        }
+        relayerCount={data.relayerSeries.length}
+        onClose={() => setInspected(null)}
+      />
 
       <footer>
         <span>GNOSIS VPN × HOPR</span>

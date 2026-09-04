@@ -7,7 +7,9 @@ import {
   type ReactElement,
   type ReactNode,
 } from 'react';
-import { Download, Maximize, Search, X } from 'lucide-react';
+import { AlertTriangle, Download, Maximize, Search, X } from 'lucide-react';
+
+import type { PanelStatus } from '@/lib/snapshot';
 
 const PAPER = '#fffdf8';
 const INK = '#17191c';
@@ -67,7 +69,8 @@ function svgText(
   node.setAttribute('y', String(y));
   node.setAttribute('font-family', font);
   node.setAttribute('fill', fill);
-  for (const [key, value] of Object.entries(extra)) node.setAttribute(key, value);
+  for (const [key, value] of Object.entries(extra))
+    node.setAttribute(key, value);
   node.textContent = text;
   return node;
 }
@@ -91,8 +94,16 @@ function svgRect(x: number, y: number, w: number, h: number, fill: string) {
  * result is soft. Declaring the full pixel size makes the browser re-render the
  * vector at that size, which is what makes the export sharp.
  */
-async function rasterise(svg: SVGSVGElement, width: number, height: number, name: string) {
-  const scale = Math.min(4, Math.max(2, Math.ceil(globalThis.devicePixelRatio || 1) * 2));
+async function rasterise(
+  svg: SVGSVGElement,
+  width: number,
+  height: number,
+  name: string,
+) {
+  const scale = Math.min(
+    4,
+    Math.max(2, Math.ceil(globalThis.devicePixelRatio || 1) * 2),
+  );
   svg.setAttribute('width', String(width * scale));
   svg.setAttribute('height', String(height * scale));
 
@@ -195,7 +206,9 @@ async function exportFigure(title: string, figure: string, note: string) {
     }),
   );
   out.append(
-    svgText(figure, pad, pad + 92, 'Georgia, serif', INK, { 'font-size': '68' }),
+    svgText(figure, pad, pad + 92, 'Georgia, serif', INK, {
+      'font-size': '68',
+    }),
   );
   if (note) {
     out.append(
@@ -236,6 +249,14 @@ export type TileProps = {
     onChange: (value: string) => void;
     placeholder?: string;
   };
+  /**
+   * Whether the data behind this tile arrived.
+   *
+   * A tile with nothing in it says nothing about why. `failed` replaces the body
+   * with the reason so an outage is never mistaken for a quiet week; `partial`
+   * leaves the figures up — they are real — and flags what is missing from them.
+   */
+  status?: PanelStatus;
   legend?: LegendEntry[];
   /**
    * Whether the legend belongs in the card header. Off for the relayer charts,
@@ -276,6 +297,7 @@ export function Tile({
   badge,
   rowCount,
   search,
+  status,
   legend,
   showLegend = true,
   note,
@@ -302,16 +324,35 @@ export function Tile({
 
   // Read the ref inside the handler, never while rendering.
   const isNumber = figure !== undefined;
-  const canDownload = Boolean(chart || rows || isNumber);
+  const broken = status?.state === 'failed';
+  // Nothing to export from a tile whose query never returned.
+  const canDownload = Boolean(chart || rows || isNumber) && !broken;
   const download = () => {
     if (chart) void exportChart(frame.current, title, legend);
     else if (isNumber) void exportFigure(title, figure, noteText ?? '');
     else if (rows) exportCsv(rows(), title);
   };
 
+  const unavailable = (
+    <div className="tile-unavailable">
+      <AlertTriangle size={18} aria-hidden="true" />
+      <p>{status?.reason ?? 'This panel could not be loaded.'}</p>
+    </div>
+  );
+
+  const flag = status && status.state !== 'ok' && (
+    <span
+      className={`tile-flag ${status.state}`}
+      title={status.reason ?? undefined}
+    >
+      <AlertTriangle size={11} aria-hidden="true" />
+      {status.state === 'failed' ? 'unavailable' : 'partial'}
+    </span>
+  );
+
   const body = (
     <div className="chart-frame" ref={frame}>
-      {chart ?? children}
+      {broken ? unavailable : (chart ?? children)}
     </div>
   );
 
@@ -345,9 +386,16 @@ export function Tile({
     <div className={`chart-card ${className ?? ''}`}>
       {isNumber ? (
         <>
-          <span>{title}</span>
+          <span>
+            {title}
+            {flag}
+          </span>
           <strong>{figure}</strong>
-          {note}
+          {broken ? (
+            <p className="metric-unavailable">{status?.reason}</p>
+          ) : (
+            note
+          )}
         </>
       ) : (
         <>
@@ -356,6 +404,7 @@ export function Tile({
               {eyebrow && <span>{eyebrow}</span>}
               <h3>{title}</h3>
             </div>
+            {flag}
             {badge}
           </div>
           {body}
@@ -389,7 +438,7 @@ export function Tile({
               </div>
             </div>
           )}
-          {note}
+          {!broken && note}
         </>
       )}
 
@@ -415,7 +464,9 @@ export function Tile({
             copy of every chart and table. */}
         {open && (
           <div className="modal-body">
-            {isNumber ? (
+            {broken ? (
+              unavailable
+            ) : isNumber ? (
               <div className="modal-number">
                 <strong>{figure}</strong>
               </div>
@@ -424,7 +475,7 @@ export function Tile({
             ) : (
               children
             )}
-            {note}
+            {!broken && note}
             {legend && legend.length > 0 && (
               <div className="modal-legend">
                 <ChartLegend items={legend} />

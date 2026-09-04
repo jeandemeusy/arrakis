@@ -33,7 +33,7 @@
   top: 12px;
 }
 
-  :root {
+:root {
   --ink: #111315;
   --paper: #f2efe7;
   --yellow: #ffd84d;
@@ -110,7 +110,7 @@ main {
 .brand-mark::before,
 .brand-mark::after,
 .brand-mark span {
-  content: "";
+  content: '';
   position: absolute;
   background: var(--ink);
   height: 2px;
@@ -297,7 +297,7 @@ main {
 
 .intro h1 {
   margin: 0;
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: Georgia, 'Times New Roman', serif;
   font-size: clamp(28px, 5.6vw, 84px);
   font-weight: 400;
   line-height: 0.83;
@@ -475,13 +475,34 @@ main {
 .relayer-legend + .tile-grid {
   margin-top: var(--grid-gap);
 }
-.span-1 { grid-column: span 1; }
-.span-2 { grid-column: span 2; }
-.span-3 { grid-column: span 3; }
-.span-4 { grid-column: span 4; }
-.span-6 { grid-column: span 6; }
-.span-8 { grid-column: span 8; }
-.span-12 { grid-column: span 12; }
+
+.span-1 {
+  grid-column: span 1;
+}
+
+.span-2 {
+  grid-column: span 2;
+}
+
+.span-3 {
+  grid-column: span 3;
+}
+
+.span-4 {
+  grid-column: span 4;
+}
+
+.span-6 {
+  grid-column: span 6;
+}
+
+.span-8 {
+  grid-column: span 8;
+}
+
+.span-12 {
+  grid-column: span 12;
+}
 
 @media (width <= 900px) {
   /* Halves become full width; thirds and quarters pair up. */
@@ -1058,8 +1079,15 @@ main {
   margin: 0;
 }
 
+/* Fixed and centred in the viewport, not placed in the document flow.
+   `showModal` puts the dialog in the top layer, but a positioned dialog still
+   takes its static position from the page — with `position: relative` it opened
+   level with the top of the document, so anyone who had scrolled down had to
+   scroll back up to find it. */
 .modal {
-  position: relative;
+  position: fixed;
+  inset: 0;
+  margin: auto;
   width: min(1180px, 92vw);
   max-height: 88vh;
   border: 1px solid var(--line);
@@ -1081,8 +1109,6 @@ main {
   padding-right: 44px;
   margin-bottom: 16px;
 }
-
-
 
 /* A chart can have twenty series, so the key sits under the plot it explains and
    scrolls rather than pushing the plot out of the dialog. */
@@ -1126,6 +1152,249 @@ main {
 /* The tooltip is placed from the cursor, so the frame is its containing block. */
 .chart-hover {
   position: relative;
+}
+
+/* A panel that could not load says so where the figure would have been, rather
+   than leaving an empty frame that reads as a quiet week. */
+.tile-unavailable {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 180px;
+  padding: 24px 32px;
+  text-align: center;
+  color: #7a4a5e;
+}
+
+.tile-unavailable p {
+  margin: 0;
+  max-width: 42ch;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+/* Small enough to sit in a header without competing with the title, loud enough
+   that the tile is not read as fact. */
+.tile-flag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border: 1px solid currentcolor;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.tile-flag.failed {
+  color: #7a4a5e;
+}
+
+.tile-flag.partial {
+  color: #7d6420;
+}
+
+.chart-title .tile-flag {
+  margin-left: auto;
+}
+
+.metric span .tile-flag {
+  margin-left: 8px;
+}
+
+.metric-unavailable {
+  color: #7a4a5e;
+  font-size: 11px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+/* Reads exactly like the linked addresses beside it; only the target differs. */
+.address-button {
+  padding: 0;
+  background: none;
+  border: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.address-button:hover code {
+  color: var(--ink);
+  border-bottom: 1px solid var(--line);
+}
+
+/* The drill-down is narrower than an enlarged chart: it is a record to read, and
+   a full-width column of prose and figures is harder to scan, not easier. */
+.client-modal {
+  width: min(820px, 92vw);
+}
+
+/* Addresses are quoted whole here. `.rank-table` is fixed-layout, which
+   apportions columns by percentage and clips a 42-character hash to nothing, so
+   this one table sizes to its content and scrolls inside the dialog instead. */
+.client-relays > .rank-table {
+  table-layout: auto;
+  min-width: max-content;
+}
+
+.client-relays td:first-child,
+.client-relays th:first-child {
+  white-space: nowrap;
+}
+
+.client-body h3 {
+  font-family: Georgia, serif;
+  font-weight: 400;
+  font-size: 14px;
+  margin: 22px 0 8px;
+}
+
+.client-id {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 14px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.client-id code {
+  font-size: 12px;
+  color: var(--ink);
+}
+
+.client-id a {
+  display: inline-flex;
+  margin-left: auto;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: #55534e;
+}
+
+.client-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 18px;
+  margin: 18px 0 0;
+}
+
+.client-stats dt {
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.client-stats dd {
+  font-family: Georgia, serif;
+  font-size: 24px;
+  line-height: 1.2;
+  margin: 4px 0 0;
+  color: var(--ink);
+}
+
+/* The three dates are one lifecycle, not three facts, so they are drawn as one:
+   a rule with a mark per event and the spans between them stated underneath. */
+.client-timeline {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  margin: 24px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.client-timeline li {
+  position: relative;
+  padding: 20px 14px 0 0;
+}
+
+/* The rule runs from each mark to the next, so it stops at the last one. */
+.client-timeline li:not(:last-child)::before {
+  content: '';
+  position: absolute;
+  top: 5px;
+  left: 4px;
+  right: 0;
+  height: 1px;
+  background: var(--line);
+}
+
+.timeline-mark {
+  position: absolute;
+  top: 1px;
+  left: 0;
+  width: 9px;
+  height: 9px;
+  background: var(--yellow);
+  border: 1px solid var(--ink);
+}
+
+/* The last event is where the client stands now, so it reads as filled. */
+.client-timeline li:last-child .timeline-mark {
+  background: var(--ink);
+}
+
+.timeline-label {
+  display: block;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.client-timeline time,
+.client-timeline .absent {
+  display: block;
+  margin-top: 5px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: #35332f;
+}
+
+.client-span {
+  margin: 14px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* Identity, not history: the network belongs beside the address it qualifies. */
+.client-network {
+  padding: 2px 7px;
+  border: 1px solid var(--line);
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #55534e;
+}
+
+.client-quiet {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 0;
+}
+
+.client-relays {
+  max-height: 220px;
+}
+
+/* Carries the relayer's colour from the charts into the table, so a relay is
+   recognisable across panels without reading the address. */
+.swatch {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 7px;
+  vertical-align: middle;
 }
 
 /* Matches the recharts tooltip the other charts use: same ground, same border,
