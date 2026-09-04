@@ -10,8 +10,8 @@
     "dev:fixtures": "DASHBOARD_FIXTURES=1 next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "oxlint app lib",
-    "format": "oxfmt"
+    "lint": "oxlint app lib && stylelint 'app/**/*.css'",
+    "format": "oxfmt && stylelint --fix 'app/**/*.css'"
   },
   "dependencies": {
     "lucide-react": "1.31.0",
@@ -29,6 +29,8 @@
     "oxfmt": "0.61.0",
     "oxlint": "1.76.0",
     "oxlint-tsgolint": "7.0.2001",
+    "stylelint": "^17.14.1",
+    "stylelint-config-standard": "^40.0.0",
     "typescript": "5.9.3"
   },
   "type": "module"

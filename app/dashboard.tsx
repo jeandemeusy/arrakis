@@ -49,7 +49,6 @@ const YELLOW = '#ffd84d';
 const INK = '#17191c';
 const PLUM = '#8d4f68';
 const EXPLORER = 'https://gnosisscan.io/address/';
-const LEGEND_PREVIEW = 5;
 const PAGE_SIZE = 50;
 
 // Constructing an Intl formatter is expensive and these run per tick and per row.
@@ -336,7 +335,6 @@ export default function Dashboard({
   dashboard: DashboardPayload;
 }) {
   const [scope, setScope] = useState<'weekly' | 'all'>('weekly');
-  const [allRelayers, setAllRelayers] = useState(false);
   const [clientPage, setClientPage] = useState(0);
   const [deploymentPage, setDeploymentPage] = useState(0);
   const [feedPage, setFeedPage] = useState(0);
@@ -1049,32 +1047,6 @@ export default function Dashboard({
               </ResponsiveContainer>
             }
           />
-        </div>
-        <div className="relayer-legend span-12">
-          <ol className="relayer-key">
-            {(allRelayers
-              ? relayerSlices
-              : relayerSlices.slice(0, LEGEND_PREVIEW)
-            ).map((relayer) => (
-              <li key={relayer.key}>
-                <i style={{ background: relayer.fill }} />
-                <code>{shortAddress(relayer.address)}</code>
-                <strong>{percent(relayer.share)}</strong>
-              </li>
-            ))}
-          </ol>
-          {relayerSlices.length > LEGEND_PREVIEW && (
-            <button
-              type="button"
-              className="legend-toggle"
-              aria-expanded={allRelayers}
-              onClick={() => setAllRelayers((open) => !open)}
-            >
-              {allRelayers
-                ? 'Show fewer'
-                : `Show all ${relayerSlices.length} relayers`}
-            </button>
-          )}
         </div>
       </section>
 

@@ -28,6 +28,7 @@
   letter-spacing: 0.08em;
   transition: top 120ms ease;
 }
+
 .skip-link:focus {
   top: 12px;
 }
@@ -38,33 +39,42 @@
   --yellow: #ffd84d;
   --muted: #6a6760;
   --line: #d7d2c7;
+
   /* One horizontal inset for every full-width band, so nothing drifts out of line. */
   --gutter: clamp(24px, 5vw, 76px);
+
   /* Hairline between adjacent panels, drawn by a grid gap over --line. */
   --seam: 1px;
+
   /* One gap between tiles, horizontally and vertically, everywhere. */
   --grid-gap: 4px;
 }
+
 * {
   box-sizing: border-box;
 }
+
 html {
   scroll-behavior: smooth;
 }
+
 body {
   margin: 0;
   background: var(--paper);
   color: var(--ink);
   font-family: Arial, Helvetica, sans-serif;
 }
+
 a {
   color: inherit;
   text-decoration: none;
 }
+
 main {
   min-height: 100vh;
   overflow: hidden;
 }
+
 .topbar {
   height: 72px;
   padding: 0 var(--gutter);
@@ -75,6 +85,7 @@ main {
   font-size: 12px;
   letter-spacing: 0.08em;
 }
+
 .brand {
   display: flex;
   align-items: center;
@@ -82,9 +93,11 @@ main {
   font-weight: 800;
   letter-spacing: 0.04em;
 }
+
 .brand-light {
   font-weight: 400;
 }
+
 .brand-mark {
   position: relative;
   display: block;
@@ -93,8 +106,9 @@ main {
   border: 2px solid var(--ink);
   border-radius: 50%;
 }
-.brand-mark:before,
-.brand-mark:after,
+
+.brand-mark::before,
+.brand-mark::after,
 .brand-mark span {
   content: "";
   position: absolute;
@@ -104,25 +118,31 @@ main {
   left: 3px;
   transform-origin: left;
 }
-.brand-mark:before {
+
+.brand-mark::before {
   top: 7px;
   transform: rotate(35deg);
 }
-.brand-mark:after {
+
+.brand-mark::after {
   top: 14px;
   transform: rotate(-35deg);
 }
+
 .brand-mark span {
   top: 11px;
 }
+
 .topbar nav {
   display: flex;
   gap: 32px;
   color: #54544f;
 }
+
 .topbar nav a:hover {
   color: #000;
 }
+
 .source-link {
   display: flex;
   align-items: center;
@@ -130,6 +150,7 @@ main {
   border-bottom: 1px solid var(--ink);
   padding-bottom: 4px;
 }
+
 .intro {
   padding: 56px var(--gutter) 40px;
   display: grid;
@@ -137,6 +158,7 @@ main {
   align-items: end;
   gap: 56px;
 }
+
 /*
  * The strip under a table: how many rows, a filter, then the pager and the tile's
  * own controls. The controls live in this row rather than floating over the card,
@@ -149,28 +171,33 @@ main {
   margin-top: auto;
   padding: 14px 26px 0;
 }
+
 /* Counting and filtering on the left; moving and exporting on the right. */
 .tile-foot .pager {
   margin: 0;
   padding: 0;
 }
+
 .tile-foot-end {
   display: flex;
   align-items: center;
   gap: 10px;
   margin-left: auto;
 }
+
 .tile-foot .chart-actions {
   position: static;
   opacity: 1;
   gap: 6px;
 }
+
 .tile-rows {
   font-size: 11px;
   color: var(--muted);
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
+
 .tile-search {
   display: flex;
   align-items: center;
@@ -180,9 +207,11 @@ main {
   padding: 6px 11px;
   color: var(--muted);
 }
+
 .tile-search:focus-within {
   border-color: var(--ink);
 }
+
 .tile-search input {
   border: 0;
   outline: none;
@@ -190,6 +219,7 @@ main {
   font: inherit;
   font-size: 12px;
   color: var(--ink);
+
   /* Grows with what is typed, between a comfortable resting width and a cap, so
      a pasted address is readable without the box swallowing the footer row.
      `width` is the fallback where field-sizing is unsupported. */
@@ -198,9 +228,11 @@ main {
   max-width: 430px;
   field-sizing: content;
 }
+
 .tile-search input::placeholder {
   color: var(--muted);
 }
+
 .tab-switch {
   display: flex;
   gap: 18px;
@@ -209,6 +241,7 @@ main {
   padding: 0;
   min-inline-size: 0;
 }
+
 /* A fieldset for the grouping semantics, without the browser's box. */
 .network-switch {
   display: flex;
@@ -219,6 +252,7 @@ main {
   padding: 0;
   min-inline-size: 0;
 }
+
 .network-switch button {
   background: none;
   border: 1px solid var(--line);
@@ -230,11 +264,13 @@ main {
   color: var(--muted);
   cursor: pointer;
 }
+
 .network-switch button.active {
   background: var(--ink);
   border-color: var(--ink);
   color: #f6f3ea;
 }
+
 .status-line {
   display: flex;
   align-items: center;
@@ -244,18 +280,21 @@ main {
   color: #555650;
   margin-bottom: 28px;
 }
+
 .live-dot,
 .unavailable-dot {
   width: 7px;
   height: 7px;
   border-radius: 50%;
   background: #35ba75;
-  box-shadow: 0 0 0 5px rgba(53, 186, 117, 0.12);
+  box-shadow: 0 0 0 5px rgb(53, 186, 117, 0.12);
 }
+
 .unavailable-dot {
   background: #d8a916;
-  box-shadow: 0 0 0 5px rgba(216, 169, 22, 0.12);
+  box-shadow: 0 0 0 5px rgb(216, 169, 22, 0.12);
 }
+
 .intro h1 {
   margin: 0;
   font-family: Georgia, "Times New Roman", serif;
@@ -264,6 +303,7 @@ main {
   line-height: 0.83;
   letter-spacing: -0.07em;
 }
+
 .intro-copy > p {
   font-family: Georgia, serif;
   font-size: clamp(18px, 1.7vw, 24px);
@@ -271,6 +311,7 @@ main {
   margin: 0 0 38px;
   max-width: 500px;
 }
+
 .asof {
   display: grid;
   grid-template-columns: max-content 1fr;
@@ -280,19 +321,23 @@ main {
   border-top: 1px solid var(--line);
   font-size: 11px;
 }
+
 .asof dt {
   color: var(--muted);
   letter-spacing: 0.12em;
   text-transform: uppercase;
   white-space: nowrap;
 }
+
 .asof dd {
   margin: 0;
   font-weight: 600;
 }
+
 .headline-grid {
   margin: 0 var(--gutter) 56px;
 }
+
 .metric {
   background: #fffdf8;
   min-height: 206px;
@@ -301,6 +346,7 @@ main {
   flex-direction: column;
   justify-content: space-between;
 }
+
 /* The number tile renders the same shape as every other: label, body, note. */
 .metric > strong {
   font-family: Georgia, serif;
@@ -309,9 +355,11 @@ main {
   letter-spacing: -0.04em;
   overflow-wrap: anywhere;
 }
+
 .metric > span {
   order: -1;
 }
+
 .metric-kicker,
 .metric > span {
   color: var(--muted);
@@ -321,16 +369,19 @@ main {
   gap: 8px;
   align-items: center;
 }
+
 /* The headline tile earns its emphasis from scale and an accent rule, not from
    inverting the colours of the tiles beside it. */
 .mau-card {
   border-top: 3px solid var(--yellow);
 }
+
 .mau-card > strong {
   font-size: clamp(52px, 5vw, 76px);
   line-height: 0.9;
   letter-spacing: -0.05em;
 }
+
 .mau-footer {
   display: flex;
   justify-content: space-between;
@@ -338,45 +389,52 @@ main {
   font-size: 11px;
   gap: 12px;
 }
+
 .mau-footer span {
   color: #8a6d00;
   display: flex;
   align-items: center;
   gap: 5px;
 }
+
 .mau-footer small {
   color: var(--muted);
 }
-.metric strong {
-  color: var(--ink);
-}
+
 .metric strong {
   font-family: Georgia, serif;
   font-size: clamp(30px, 3vw, 44px);
   font-weight: 400;
   letter-spacing: -0.04em;
+  color: var(--ink);
   overflow-wrap: anywhere;
 }
+
 .metric p {
   color: var(--muted);
   font-size: 11px;
   margin: 0;
 }
+
 .section {
   padding: 18px var(--gutter);
 }
+
 .section-heading {
   margin-bottom: 20px;
 }
+
 .section-heading > div {
   display: flex;
   align-items: baseline;
   gap: 20px;
 }
+
 .section-index {
   color: #6a6760;
   font-size: 11px;
 }
+
 .section h2,
 .methodology > h2 {
   font-family: Georgia, serif;
@@ -385,12 +443,14 @@ main {
   font-size: clamp(14px, 2.6vw, 24px);
   margin: 0;
 }
+
 .section-heading > p {
   color: #686864;
   line-height: 1.5;
   font-size: 12px;
   margin: 6px 0 0;
 }
+
 .chart-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 290px;
@@ -398,6 +458,7 @@ main {
   background: var(--line);
   border: 1px solid var(--line);
 }
+
 /*
  * Every tile is placed on the same twelve-column grid, so a row is any
  * combination of spans that adds to twelve and the gap between two tiles is the
@@ -408,6 +469,7 @@ main {
   grid-template-columns: repeat(12, minmax(0, 1fr));
   gap: var(--grid-gap);
 }
+
 .tile-grid + .tile-grid,
 .tile-grid + .relayer-legend,
 .relayer-legend + .tile-grid {
@@ -421,18 +483,20 @@ main {
 .span-8 { grid-column: span 8; }
 .span-12 { grid-column: span 12; }
 
-@media (max-width: 900px) {
+@media (width <= 900px) {
   /* Halves become full width; thirds and quarters pair up. */
   .span-6,
   .span-12 {
     grid-column: span 12;
   }
+
   .span-3,
   .span-4 {
     grid-column: span 6;
   }
 }
-@media (max-width: 560px) {
+
+@media (width <= 560px) {
   .span-1,
   .span-2,
   .span-3,
@@ -448,6 +512,7 @@ main {
   display: flex;
   flex-direction: column;
 }
+
 /*
  * With the legend moved below the plot, every chart header is a title and a badge
  * and nothing else, so they are the same height and the plots start at the same
@@ -458,13 +523,16 @@ main {
 .service-chart > .chart-frame {
   margin-bottom: auto;
 }
+
 .chart-card > .chart-note {
   margin-top: 10px;
 }
+
 .main-chart {
   background: #fffdf8;
   padding: 30px 26px 34px;
 }
+
 /*
  * Two rows, always: the title and its badge, then the legend beneath.
  *
@@ -481,9 +549,11 @@ main {
   min-height: 56px;
   margin-bottom: 14px;
 }
+
 .chart-title > div:first-child {
   order: 1;
 }
+
 /* Anything the tile puts beside the title — a badge, a switch — sits at the far
    end of the header row, after it. */
 .chart-title .axis-badge,
@@ -491,22 +561,26 @@ main {
   order: 2;
   margin-left: auto;
 }
+
 /* The key sits under the plot it explains, clear of the tile's controls. */
 .tile-legend {
   padding: 12px 74px 0 0;
 }
+
 .chart-title span,
 .aside-label {
   color: #6a6760;
   font-size: 10px;
   letter-spacing: 0.14em;
 }
+
 .chart-title h3 {
   font-family: Georgia, serif;
   font-size: 24px;
   font-weight: 400;
   margin: 8px 0 0;
 }
+
 .legend {
   color: var(--muted);
   font-size: 12px;
@@ -515,11 +589,13 @@ main {
   align-items: center;
   gap: 6px 18px;
 }
+
 .legend span {
   display: inline-flex;
   align-items: center;
   gap: 8px;
 }
+
 .legend i {
   display: block;
   box-sizing: border-box;
@@ -527,12 +603,15 @@ main {
   height: 2px;
   flex: none;
 }
+
 .legend .actual {
   background: var(--yellow);
 }
+
 .legend .target {
   border-top: 1px dashed var(--muted);
 }
+
 .chart-note {
   color: #777d84;
   font-size: 10px;
@@ -540,82 +619,98 @@ main {
   margin: 8px 10px 0;
   max-width: 690px;
 }
+
 .legend i.deployments {
   background: #4c8f7b;
 }
+
 .legend i.new-client {
   background: #8d4f68;
 }
+
 .legend i.cumulative {
   background: var(--ink);
   height: 2px;
 }
+
 /* Title, legend and badge share the row, so let them wrap rather than collide. */
-.relayer-legend {
-  margin-top: 1px;
-  padding: 18px 26px;
-  background: #fbf9f3;
-}
+
+/*
+ * The relayer key, beside the chart it explains rather than beneath both. Every
+ * relayer is listed and the column scrolls, which is steadier than a control that
+ * changes the height of the row when pressed.
+ */
 .relayer-key {
+  background: #fffdf8;
+  padding: 20px 18px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.relayer-key ol {
   list-style: none;
   margin: 0;
   padding: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
-  gap: 9px 28px;
+  gap: 9px;
+  max-height: 335px;
+  overflow-y: auto;
 }
+
+/* Three columns at this width: swatch, address, share on one line. */
 .relayer-key li {
   display: grid;
   grid-template-columns: 12px 1fr auto;
   align-items: center;
   gap: 10px;
-  font-size: 12px;
+  font-size: 11px;
 }
+
+.relayer-key strong {
+  font-weight: 400;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
 .relayer-key i {
   width: 12px;
   height: 12px;
   border-radius: 2px;
 }
+
 .relayer-key code {
   color: #55534e;
 }
-.legend-toggle {
-  margin-top: 14px;
-  padding: 0;
-  background: none;
-  border: none;
-  font: inherit;
-  font-size: 11px;
-  color: #55534e;
-  cursor: pointer;
-  border-bottom: 1px solid var(--yellow);
-}
-.legend-toggle:hover {
-  color: #17191c;
-}
+
 .table-card {
   display: flex;
   flex-direction: column;
+  min-width: 0;
   padding-bottom: 18px;
 }
+
 /* Table cards get no padding from .main-chart/.service-chart, so the chrome
    carries its own, aligned with the first and last table cells. */
 .table-card .chart-title {
   padding: 30px 26px 0;
   margin-bottom: 18px;
 }
+
 .table-card .chart-note {
   padding: 10px 26px 0;
   margin: 0;
 }
+
 .rank-table th:first-child,
 .rank-table td:first-child {
   padding-left: 26px;
 }
+
 .rank-table th:last-child,
 .rank-table td:last-child {
   padding-right: 26px;
 }
+
 .pager {
   display: flex;
   align-items: center;
@@ -623,10 +718,12 @@ main {
   font-size: 11px;
   color: var(--muted);
 }
+
 .pager-gap {
   padding: 0 2px;
   color: var(--muted);
 }
+
 .pager-page,
 .pager-step {
   display: flex;
@@ -643,11 +740,13 @@ main {
   cursor: pointer;
   font-variant-numeric: tabular-nums;
 }
+
 .pager-page:hover:not(.active),
 .pager-step:hover:not(:disabled) {
   border-color: var(--line);
   color: var(--ink);
 }
+
 .pager-page.active {
   border-color: var(--line);
   background: #f4f1e8;
@@ -658,36 +757,40 @@ main {
   color: #c3bfb4;
   cursor: default;
 }
+
 .table-scroll {
   max-height: 460px;
   overflow-y: auto;
+
   /* Fixed columns with min-widths overflow a narrow card; scroll them here rather
      than letting the page itself scroll sideways. */
   overflow-x: auto;
 }
+
 .table-scroll > .rank-table {
   min-width: 440px;
 }
+
 /* The feed shows identifiers in full, so it sizes to its content and scrolls
    inside its card rather than truncating them. */
 .rank-table.feed-table {
   table-layout: auto;
   min-width: max-content;
 }
+
 .rank-table.feed-table td,
 .rank-table.feed-table th {
   overflow: visible;
   text-overflow: clip;
 }
-.table-card {
-  min-width: 0;
-}
+
 .rank-table {
   width: 100%;
   table-layout: fixed;
   border-collapse: collapse;
   font-size: 12px;
 }
+
 /* Fixed row height rather than padding, so every table lines up with every other
    one regardless of what a cell contains — a medal emoji is taller than digits. */
 .rank-table th,
@@ -699,6 +802,7 @@ main {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
 .rank-table th {
   text-align: left;
   font-weight: 400;
@@ -710,38 +814,47 @@ main {
   position: sticky;
   top: 0;
 }
+
 .rank-table td {
   border-bottom: 1px solid #ece8de;
 }
+
 .rank-table .rank-number {
   font-family: Georgia, serif;
   font-size: 14px;
   color: var(--ink);
 }
+
 /* Emphasis follows the rank, not the row position: on a later page the first
    three rows are 51-53, which are not the top three of anything. */
 .rank-table .rank-number.leading {
   font-weight: 700;
 }
+
 /* Holds one or two digits, but the header word sets the floor: 26px of gutter
    padding plus 14px plus the width of "RANK" itself. A percentage shrank below
    that on a half-width card and truncated the header. */
 .rank-table col.rank {
   width: 84px;
 }
+
 .rank-table col.count {
   width: 16%;
 }
+
 .rank-table col.usage {
   width: 18%;
 }
+
 .rank-table col.timestamp {
   width: 22%;
   min-width: 170px;
 }
+
 .rank-table tbody tr:last-child td {
   border-bottom: none;
 }
+
 /*
  * The contracts behind the figures, folded away in the provenance block. A
  * disclosure rather than a list: it is reference material, wanted occasionally
@@ -751,8 +864,9 @@ main {
 .contracts {
   margin-top: 32px;
   padding-top: 24px;
-  border-top: 1px solid rgba(0, 0, 0, 0.18);
+  border-top: 1px solid rgb(0, 0, 0, 0.18);
 }
+
 .contracts summary {
   cursor: pointer;
   width: fit-content;
@@ -761,14 +875,17 @@ main {
   text-transform: uppercase;
   color: #5f4700;
 }
+
 .contracts summary:hover {
   color: var(--ink);
 }
+
 .contracts table {
   border-collapse: collapse;
   margin-top: 16px;
   font-size: 12px;
 }
+
 .contracts th {
   text-align: left;
   font-weight: 400;
@@ -778,12 +895,14 @@ main {
   color: #5f4700;
   padding: 0 28px 8px 0;
 }
+
 .contracts td,
 .contracts tbody th {
   padding: 5px 28px 5px 0;
-  border-top: 1px solid rgba(0, 0, 0, 0.12);
+  border-top: 1px solid rgb(0, 0, 0, 0.12);
   white-space: nowrap;
 }
+
 .contracts tbody th {
   text-align: left;
   font-weight: 400;
@@ -792,16 +911,19 @@ main {
   letter-spacing: 0;
   color: var(--ink);
 }
+
 /* A contract one network deploys and another does not. */
 .contracts .absent {
-  color: rgba(0, 0, 0, 0.35);
+  color: rgb(0, 0, 0, 0.35);
 }
+
 .contracts code {
   font-size: 11px;
   color: var(--ink);
 }
+
 .contracts .address:hover code {
-  border-bottom-color: rgba(0, 0, 0, 0.4);
+  border-bottom-color: rgb(0, 0, 0, 0.4);
 }
 
 /* Reads as the text around it; the affordance is the cursor and the hover. */
@@ -809,23 +931,28 @@ main {
   color: inherit;
   text-decoration: none;
 }
+
 .address:hover code {
   color: var(--ink);
   border-bottom: 1px solid var(--line);
 }
+
 .rank-table code {
   font-size: 11px;
   color: #35332f;
 }
+
 .rank-table .numeric {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
+
 .rank-table .timestamp {
   font-variant-numeric: tabular-nums;
   color: #55534e;
   white-space: nowrap;
 }
+
 .tab-switch button {
   background: none;
   border: none;
@@ -836,20 +963,25 @@ main {
   cursor: pointer;
   border-bottom: 2px solid transparent;
 }
+
 .tab-switch button.active {
   color: #17191c;
   border-bottom-color: var(--yellow);
 }
+
 .service-chart {
   padding: 28px 28px 34px;
   min-height: 375px;
 }
+
 .service-chart .chart-title span {
   color: #75726b;
 }
+
 .service-chart .chart-title h3 {
   color: var(--ink);
 }
+
 .axis-badge {
   border: 1px solid var(--line);
   color: #696862;
@@ -858,6 +990,7 @@ main {
   padding: 7px 9px;
   white-space: nowrap;
 }
+
 .data-warning {
   list-style: none;
   padding: 0;
@@ -866,6 +999,7 @@ main {
   line-height: 1.5;
   margin: 4px 0 0;
 }
+
 /* Sits in the card's bottom-right, out of the way of the title row's badges.
    Quiet until the card is hovered or the button itself takes focus. */
 .chart-actions {
@@ -877,10 +1011,12 @@ main {
   opacity: 0;
   transition: opacity 120ms ease;
 }
+
 .chart-card:hover .chart-actions,
 .chart-actions:focus-within {
   opacity: 1;
 }
+
 .chart-actions button {
   display: flex;
   align-items: center;
@@ -893,6 +1029,7 @@ main {
   color: var(--muted);
   cursor: pointer;
 }
+
 .chart-actions button:hover {
   color: var(--ink);
   border-color: var(--ink);
@@ -901,6 +1038,7 @@ main {
 .modal-body {
   overflow: auto;
 }
+
 /* Enlarged, a number keeps the tile's face and colour and only grows. */
 .modal-number strong {
   display: block;
@@ -912,12 +1050,14 @@ main {
   color: var(--ink);
   padding: 20px 0 14px;
 }
+
 .modal-number + p,
 .modal-body > p {
   color: var(--muted);
   font-size: 13px;
   margin: 0;
 }
+
 .modal {
   position: relative;
   width: min(1180px, 92vw);
@@ -927,20 +1067,23 @@ main {
   color: var(--ink);
   padding: 24px 26px 28px;
 }
+
 .modal::backdrop {
-  background: rgba(17, 19, 21, 0.5);
+  background: rgb(17, 19, 21, 0.5);
 }
+
 .modal-head {
   display: flex;
   align-items: center;
   gap: 20px;
+
   /* Clear of the close button, which is pinned to the corner. */
   padding-right: 44px;
   margin-bottom: 16px;
 }
-.modal-head h2 {
-  margin-right: auto;
-}
+
+
+
 /* A chart can have twenty series, so the key sits under the plot it explains and
    scrolls rather than pushing the plot out of the dialog. */
 .modal-legend {
@@ -950,12 +1093,14 @@ main {
   margin-top: 14px;
   border-top: 1px solid var(--line);
 }
+
 .modal-head h2 {
   font-family: Georgia, serif;
   font-weight: 400;
   font-size: 22px;
-  margin: 0;
+  margin: 0 auto 0 0;
 }
+
 /* Anchored to the dialog, not to the flow of the heading: a long title or a
    wrapped legend would otherwise drag it out of the corner. */
 .modal-head button {
@@ -973,6 +1118,7 @@ main {
   color: var(--ink);
   cursor: pointer;
 }
+
 .modal-head button:hover {
   border-color: var(--ink);
 }
@@ -988,12 +1134,14 @@ main {
   font:
     12px Georgia,
     serif;
-  background: rgba(255, 253, 248, 0.85);
+  background: rgb(255, 253, 248, 0.85);
 }
+
 .methodology {
   background: var(--yellow);
   padding: 56px var(--gutter) 44px;
 }
+
 .method-title {
   display: flex;
   align-items: center;
@@ -1002,37 +1150,44 @@ main {
   letter-spacing: 0.15em;
   margin-bottom: 24px;
 }
+
 .method-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  border-top: 1px solid rgba(0, 0, 0, 0.3);
+  border-top: 1px solid rgb(0, 0, 0, 0.3);
   margin-top: 50px;
 }
+
 .method-grid > div {
   padding: 28px 38px 30px 0;
-  border-right: 1px solid rgba(0, 0, 0, 0.25);
+  border-right: 1px solid rgb(0, 0, 0, 0.25);
   margin-right: 38px;
 }
+
 .method-grid > div:last-child {
   border-right: 0;
 }
+
 .method-grid span {
   font-size: 10px;
 }
+
 .method-grid h3 {
   font:
     23px Georgia,
     serif;
   margin: 26px 0 9px;
 }
+
 .method-grid p {
   font-size: 12px;
   line-height: 1.5;
   margin: 0;
   max-width: 300px;
 }
+
 .integrity {
-  border-top: 1px solid rgba(0, 0, 0, 0.3);
+  border-top: 1px solid rgb(0, 0, 0, 0.3);
   padding-top: 22px;
   display: flex;
   align-items: center;
@@ -1040,11 +1195,13 @@ main {
   font-size: 9px;
   letter-spacing: 0.12em;
 }
+
 .integrity code {
   margin-left: auto;
   font-size: 10px;
   letter-spacing: 0;
 }
+
 footer {
   padding: 34px var(--gutter);
   display: flex;
@@ -1055,77 +1212,97 @@ footer {
   font-size: 10px;
   letter-spacing: 0.1em;
 }
+
 footer p {
   color: #7f858b;
   letter-spacing: 0;
   font-size: 11px;
 }
+
 footer a {
   margin-left: auto;
   color: var(--yellow);
 }
-@media (max-width: 900px) {
+
+@media (width <= 900px) {
   .topbar nav {
     display: none;
   }
+
   .intro {
     grid-template-columns: 1fr;
     gap: 42px;
     padding-top: 60px;
   }
+
   .headline-grid {
     grid-template-columns: 1fr 1fr;
   }
+
   .chart-layout {
     grid-template-columns: 1fr;
   }
+
   .method-grid {
     grid-template-columns: 1fr;
   }
+
   .method-grid > div {
     border-right: 0;
-    border-bottom: 1px solid rgba(0, 0, 0, 0.25);
+    border-bottom: 1px solid rgb(0, 0, 0, 0.25);
     margin-right: 0;
   }
+
   .integrity code {
     display: none;
   }
 }
-@media (max-width: 560px) {
+
+@media (width <= 560px) {
   :root {
     --gutter: 18px;
   }
+
   .source-link {
     font-size: 0;
   }
+
   .source-link svg {
     width: 16px;
     height: 16px;
   }
+
   .intro {
     padding: 40px var(--gutter) 28px;
   }
+
   .intro h1 {
     font-size: 34px;
   }
+
   .headline-grid {
     margin: 0 var(--gutter) 32px;
     grid-template-columns: 1fr;
   }
+
   .mau-card,
   .metric {
     min-height: 150px;
     padding: 22px;
   }
+
   .section-heading > div {
     gap: 12px;
   }
+
   .mau-number {
     font-size: 46px;
   }
+
   .empty-overlay {
     inset: 96px 16px 32px;
   }
+
   .legend {
     display: none;
   }
@@ -1133,11 +1310,13 @@ footer a {
   .methodology {
     padding: 40px var(--gutter) 32px;
   }
+
   footer {
     align-items: flex-start;
     gap: 18px;
     flex-direction: column;
   }
+
   footer a {
     margin-left: 0;
   }
