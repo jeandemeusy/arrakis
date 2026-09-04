@@ -119,6 +119,16 @@ function dataset(
     safeBalance: BigInt(config.clients) * 1_500n * 10n ** 18n,
     redemptions,
     deployed,
+    contracts: [
+      { role: "Channels" },
+      { role: "Announcements" },
+      { role: "Ticket price oracle" },
+      { role: "Winning probability oracle" },
+      { role: "Node safe registry" },
+    ].map(({ role }) => {
+      const addr = address(next);
+      return { key: `${config.id} ${addr}`, address: addr, network: config.id, role };
+    }),
     ticket: {
       winProbability: config.winProbability,
       priceWei: priceWei.toString(),

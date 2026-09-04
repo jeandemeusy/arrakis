@@ -43,7 +43,7 @@
   /* Hairline between adjacent panels, drawn by a grid gap over --line. */
   --seam: 1px;
   /* One gap between tiles, horizontally and vertically, everywhere. */
-  --grid-gap: 8px;
+  --grid-gap: 4px;
 }
 * {
   box-sizing: border-box;
@@ -418,6 +418,7 @@ main {
 .span-3 { grid-column: span 3; }
 .span-4 { grid-column: span 4; }
 .span-6 { grid-column: span 6; }
+.span-8 { grid-column: span 8; }
 .span-12 { grid-column: span 12; }
 
 @media (max-width: 900px) {
@@ -740,6 +741,77 @@ main {
 }
 .rank-table tbody tr:last-child td {
   border-bottom: none;
+}
+/*
+ * The contracts behind the figures, folded away in the provenance block. A
+ * disclosure rather than a list: it is reference material, wanted occasionally
+ * and in the way the rest of the time. On the accent ground the palette's muted
+ * grey has too little contrast, so labels take the darker ochre used for warnings.
+ */
+.contracts {
+  margin-top: 32px;
+  padding-top: 24px;
+  border-top: 1px solid rgba(0, 0, 0, 0.18);
+}
+.contracts summary {
+  cursor: pointer;
+  width: fit-content;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #5f4700;
+}
+.contracts summary:hover {
+  color: var(--ink);
+}
+.contracts table {
+  border-collapse: collapse;
+  margin-top: 16px;
+  font-size: 12px;
+}
+.contracts th {
+  text-align: left;
+  font-weight: 400;
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #5f4700;
+  padding: 0 28px 8px 0;
+}
+.contracts td,
+.contracts tbody th {
+  padding: 5px 28px 5px 0;
+  border-top: 1px solid rgba(0, 0, 0, 0.12);
+  white-space: nowrap;
+}
+.contracts tbody th {
+  text-align: left;
+  font-weight: 400;
+  font-size: 12px;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--ink);
+}
+/* A contract one network deploys and another does not. */
+.contracts .absent {
+  color: rgba(0, 0, 0, 0.35);
+}
+.contracts code {
+  font-size: 11px;
+  color: var(--ink);
+}
+.contracts .address:hover code {
+  border-bottom-color: rgba(0, 0, 0, 0.4);
+}
+
+/* Reads as the text around it; the affordance is the cursor and the hover. */
+.address {
+  color: inherit;
+  text-decoration: none;
+}
+.address:hover code {
+  color: var(--ink);
+  border-bottom: 1px solid var(--line);
 }
 .rank-table code {
   font-size: 11px;

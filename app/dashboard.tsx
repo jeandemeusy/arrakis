@@ -48,6 +48,7 @@ const ADDRESS_TOOLTIP = {
 const YELLOW = '#ffd84d';
 const INK = '#17191c';
 const PLUM = '#8d4f68';
+const EXPLORER = 'https://gnosisscan.io/address/';
 const LEGEND_PREVIEW = 5;
 const PAGE_SIZE = 50;
 
@@ -270,6 +271,27 @@ function Pager({
   );
 }
 
+/**
+ * An address, linked to its page on the block explorer.
+ *
+ * Styled as the surrounding text rather than as a link: in a table of addresses,
+ * two hundred underlined blue strings would read as noise. The cursor and a
+ * darkening on hover carry the affordance instead.
+ */
+function AddressLink({ address }: { address: string }) {
+  return (
+    <a
+      className="address"
+      href={`${EXPLORER}${address}`}
+      target="_blank"
+      rel="noreferrer"
+      aria-label={`${address} on Gnosisscan, opens in a new tab`}
+    >
+      <code>{address}</code>
+    </a>
+  );
+}
+
 /** Overlay shown in place of a chart or table that has nothing to render. */
 function Empty({ when, children }: { when: boolean; children: string }) {
   if (!when) return null;
@@ -329,6 +351,8 @@ export default function Dashboard({
     dashboard.snapshots[network] ??
     dashboard.snapshots[dashboard.defaultNetwork];
   const combined = network === COMBINED;
+  const labelOf = (id: string) =>
+    dashboard.networks.find((entry) => entry.id === id)?.label ?? id;
   const live = data.source !== 'unavailable';
 
   // Recharts colours pie slices from a `fill` on each datum, avoiding <Cell>.
@@ -426,6 +450,11 @@ export default function Dashboard({
       row.network,
     ]),
   ];
+
+  // One row per contract, one column per network: the same role deployed twice is
+  // a comparison, not two unrelated rows.
+  const contractNetworks = [...new Set(data.contracts.map((row) => row.network))];
+  const contractRoles = [...new Set(data.contracts.map((row) => row.role))].sort();
 
   const pagesOf = (total: number) => Math.max(1, Math.ceil(total / PAGE_SIZE));
   const clip = (page: number, total: number) =>
@@ -611,7 +640,7 @@ export default function Dashboard({
             expanded={enlarged}
             onExpand={setEnlarged}
             chart={
-              <ResponsiveContainer width="100%" height={330}>
+              <ResponsiveContainer width="100%" height={250}>
                 <ComposedChart
                   data={data.activeUsers}
                   margin={{ top: 24, right: 18, left: -18, bottom: 0 }}
@@ -694,7 +723,7 @@ export default function Dashboard({
             expanded={enlarged}
             onExpand={setEnlarged}
             chart={
-              <ResponsiveContainer width="100%" height={330}>
+              <ResponsiveContainer width="100%" height={250}>
                 <ComposedChart
                   data={data.weeks}
                   margin={{ top: 20, right: 6, left: -20, bottom: 0 }}
@@ -918,7 +947,7 @@ export default function Dashboard({
         <div className="tile-grid">
           <Tile
             id="share"
-            className="service-chart span-6"
+            className="service-chart span-4"
             eyebrow="LAST 7 DAYS"
             title="Share of redemptions"
             legend={relayerLegend}
@@ -933,7 +962,7 @@ export default function Dashboard({
             expanded={enlarged}
             onExpand={setEnlarged}
             chart={
-              <ResponsiveContainer width="100%" height={300}>
+              <ResponsiveContainer width="100%" height={250}>
                 <PieChart>
                   <Pie
                     data={relayerSlices}
@@ -960,7 +989,7 @@ export default function Dashboard({
           />
           <Tile
             id="relayer-volume"
-            className="service-chart span-6"
+            className="service-chart span-8"
             eyebrow="LAST 30 DAYS"
             title="Estimated daily volume per relayer"
             legend={relayerLegend}
@@ -978,7 +1007,7 @@ export default function Dashboard({
             expanded={enlarged}
             onExpand={setEnlarged}
             chart={
-              <ResponsiveContainer width="100%" height={300}>
+              <ResponsiveContainer width="100%" height={250}>
                 <BarChart
                   data={data.relayerDaily}
                   margin={{ top: 20, right: 10, left: -18, bottom: 0 }}
@@ -1200,7 +1229,7 @@ export default function Dashboard({
                           {rank}
                         </td>
                         <td>
-                          <code>{client.address}</code>
+                          <AddressLink address={client.address} />
                         </td>
                         <td className="numeric">
                           {count(
@@ -1275,7 +1304,7 @@ export default function Dashboard({
                         {formatTimestamp(deployment.timestamp)}
                       </td>
                       <td>
-                        <code>{deployment.address}</code>
+                        <AddressLink address={deployment.address} />
                       </td>
                     </tr>
                   ))}
@@ -1349,10 +1378,10 @@ export default function Dashboard({
                       {formatTimestamp(redemption.timestamp)}
                     </td>
                     <td>
-                      <code>{redemption.client}</code>
+                      <AddressLink address={redemption.client} />
                     </td>
                     <td>
-                      <code>{redemption.relayer}</code>
+                      <AddressLink address={redemption.relayer} />
                     </td>
                     <td>
                       <code>{`0x${redemption.channelId}`}</code>
@@ -1401,6 +1430,46 @@ export default function Dashboard({
             </p>
           </div>
         </div>
+        {data.contracts.length > 0 && (
+          <details className="contracts">
+            <summary>
+              {count(contractRoles.length)} contracts indexed
+            </summary>
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">contract</th>
+                  {contractNetworks.map((id) => (
+                    <th key={id} scope="col">
+                      {contractNetworks.length > 1 ? labelOf(id) : 'address'}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {contractRoles.map((role) => (
+                  <tr key={role}>
+                    <th scope="row">{role}</th>
+                    {contractNetworks.map((id) => {
+                      const match = data.contracts.find(
+                        (row) => row.role === role && row.network === id,
+                      );
+                      return (
+                        <td key={id}>
+                          {match ? (
+                            <AddressLink address={match.address} />
+                          ) : (
+                            <span className="absent">—</span>
+                          )}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </details>
+        )}
         {data.warnings.length > 0 && (
           <ul className="data-warning">
             {data.warnings.map((warning) => (

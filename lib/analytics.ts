@@ -71,6 +71,7 @@ type DeploymentRow = QueryResultRow & {
   published_block: string;
 };
 
+type ContractRow = QueryResultRow & { address: Buffer; topics: string[] };
 type WinProbRow = QueryResultRow & { block_number: string; win_prob: Buffer };
 type TicketPriceRow = QueryResultRow & { block_number: string; ticket_price: Buffer };
 
@@ -161,6 +162,32 @@ function winProbabilityAt(
   };
 }
 
+/**
+ * Event signature hashes to the role of the contract that emits them.
+ *
+ * Blokli registers each contract against the topics it watches, so the topics a
+ * row carries name the contract without needing a deployment manifest.
+ */
+const CONTRACT_ROLES = new Map([
+  ["ed22f34d154d253a7f6fd477439be59080a1554aa0d0642686d64223ab544c8a", "Channels"],
+  ["004c0177ad15bb302b4419e9ac96065d6f436e0f61972f97bbe272834c40f934", "Channels"],
+  ["197bba684a6afb7ba24f1d265605414b1d0051a6e295d6ff7b6e78e870d7a7f0", "Channels"],
+  ["c4df5ba16814838ab2618829d68f8623bb897302f24dbdba2279dbe45adb3d14", "Announcements"],
+  ["11d94653de52fc143887956fe4b5e4120a850b1300ece0533dee6bd8ff91f732", "Announcements"],
+  ["a4de30a528becadf82649d1395c0e30dd18ae35b5a96ce71e9295bb14bc9f3bc", "Announcements"],
+  ["776da40cbf2c223552661bd48502ceb72409b3362bb0c66d8989bd7e20e4497d", "Node safe registry"],
+  ["1eb3e9b31552ebe06015df6569e31abbec0e73a88c3ccdd9fead65c4378b4e50", "Node safe registry"],
+  ["2c906e9f9056ce9dab322be95fe710c2ecfa369bf6bf530bc81ced25caee90e1", "Service registry"],
+  ["38a84f1ca3cac973fcc30eeaccfd5a063993a9bd564530c4790ef60291c6b161", "Service registry"],
+  ["d4c5e06b1ae097ba02372652a7adaa6e4a8e00be527497a3ad0ebc3f761ef3fb", "Ticket price oracle"],
+  ["02728c4a80373f4765559dc3a046edea88186424827238bb46245668315d3800", "Winning probability oracle"],
+  ["06b541ddaa720db2b10a4d0cdac39b8d360425fc073085fac19bc82614677987", "wxHOPR token"],
+  ["f4caeb2d6ca8932a215a353d0703c326ec2d81fc68170f320eb2ab49e9df61f9", "wxHOPR token"],
+  ["83a5c31bfee49d254d95e3946d8e8434e5975382fa8b849182db9e251aaaaa26", "Node stake factory"],
+  ["141df868a6331af528e38c83b7aa03edc19be66e37ae67f9285bf4f8e3c6a1a8", "Safe"],
+  ["442e715f626346e8c54381002da614f62bee8d27386535b2521ec8540898556e", "Safe"],
+]);
+
 function estimatedClock(latestBlock: number): BlockClock {
   const now = Math.floor(Date.now() / 1000);
   return (block) => now - (latestBlock - block) * BLOCK_SECONDS;
@@ -177,14 +204,22 @@ async function queryNetwork(network: NetworkConfig): Promise<NetworkDataset> {
   const summary = summaryResult.rows[0];
   if (!summary) throw new Error("Blokli chain_info is not initialized");
 
-  const [channelBalances, safeBalances, redemptionRows, deploymentRows, winProbRows, priceRows] =
-    await Promise.allSettled([
+  const [
+    channelBalances,
+    safeBalances,
+    redemptionRows,
+    deploymentRows,
+    winProbRows,
+    priceRows,
+    contractRows,
+  ] = await Promise.allSettled([
       db.query<{ balance: Buffer }>(await sql("channel-balances")),
       db.query<{ balance: Buffer }>(await sql("safe-balances")),
       db.query<RedemptionRow>(await sql("redemptions")),
       db.query<DeploymentRow>(await sql("client-deployments")),
       db.query<WinProbRow>(await sql("win-prob-updates")),
       db.query<TicketPriceRow>(await sql("ticket-price-updates")),
+      db.query<ContractRow>(await sql("contracts")),
     ]);
 
   const rawRedemptions = redemptionRows.status === "fulfilled" ? redemptionRows.value.rows : [];
@@ -273,6 +308,20 @@ async function queryNetwork(network: NetworkConfig): Promise<NetworkDataset> {
     };
   });
 
+  const contracts =
+    contractRows.status === "fulfilled"
+      ? contractRows.value.rows.map((row) => {
+          const address = hex(row.address);
+          const role = row.topics.map((topic) => CONTRACT_ROLES.get(topic)).find(Boolean);
+          return {
+            key: `${network.id} ${address}`,
+            address,
+            network: network.id,
+            role: role ?? "Indexed contract",
+          };
+        })
+      : [];
+
   const currentProbability = timeline.at(-1)?.[1] ?? null;
   const currentPrice = priceTimeline.at(-1)?.[1] ?? null;
 
@@ -290,6 +339,7 @@ async function queryNetwork(network: NetworkConfig): Promise<NetworkDataset> {
     safeBalance: safeBalances.status === "fulfilled" ? sumBalances(safeBalances.value.rows) : null,
     redemptions,
     deployed,
+    contracts,
     ticket: {
       winProbability: currentProbability,
       priceWei: currentPrice?.toString() ?? null,
