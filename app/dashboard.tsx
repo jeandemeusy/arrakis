@@ -211,10 +211,6 @@ function formatMoment(value: string) {
   return MOMENT.format(new Date(value)).replace(',', '');
 }
 
-function plural(value: number, unit: string) {
-  return `${value} ${unit}${value === 1 ? '' : 's'}`;
-}
-
 /**
  * Page controls for a table.
  *
