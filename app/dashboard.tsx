@@ -216,25 +216,6 @@ function plural(value: number, unit: string) {
 }
 
 /**
- * The distance between two instants, in whichever unit keeps it a small number.
- *
- * A timeline that only prints dates leaves the reader doing arithmetic. The
- * spans are what carry the meaning — how long a client waited before it paid
- * anything, and how long it kept going — so they are stated outright.
- */
-function elapsed(from: string, to: string) {
-  const ms = new Date(to).getTime() - new Date(from).getTime();
-  if (ms < 3_600_000) return 'under an hour';
-  const hours = ms / 3_600_000;
-  if (hours < 48) return plural(Math.round(hours), 'hour');
-  const days = hours / 24;
-  if (days < 60) return plural(Math.round(days), 'day');
-  const months = days / 30.44;
-  if (months < 24) return plural(Math.round(months), 'month');
-  return plural(Math.round(days / 365.25), 'year');
-}
-
-/**
  * Page controls for a table.
  *
  * The page is clamped by the caller rather than reset, so switching network or
