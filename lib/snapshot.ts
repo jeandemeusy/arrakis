@@ -225,11 +225,15 @@ export type ClientDetail = {
 /**
  * One row of the feed: a client paying a relay, newest first.
  *
- * `timestamp` orders the feed across networks without being shown.
+ * Both when it happened and where: with no RPC configured a timestamp is
+ * extrapolated from block height, which is a guess dressed as a fact, so the
+ * block number travels alongside it and the table shows whichever one is
+ * actually known.
  */
 export type RecentRedemption = {
   key: string;
   timestamp: string;
+  block: number;
   source: string;
   destination: string;
   channelId: string;

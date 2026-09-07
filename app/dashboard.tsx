@@ -969,6 +969,9 @@ export default function Dashboard({
   }));
 
   const hourGrid = hours === 'upstream' ? data.heatmap : data.heatmapDownstream;
+  // With no RPC the clock is extrapolated from block height, so the feed shows
+  // the block it actually knows rather than a timestamp it inferred.
+  const timed = data.timebase === 'rpc';
 
   const relayerFlow =
     flow === 'upstream' ? data.relayerDaily : data.relayerDownstreamDaily;
@@ -994,6 +997,7 @@ export default function Dashboard({
       row.destination,
       `0x${row.channelId}`,
       row.network,
+      timed ? formatTimestamp(row.timestamp) : String(row.block),
     ),
   );
 
@@ -1020,8 +1024,10 @@ export default function Dashboard({
     ]),
   ];
   const feedRows = () => [
-    ['source', 'destination', 'channel', 'network'],
+    ['block', 'timestamp', 'source', 'destination', 'channel', 'network'],
     ...visibleRedemptions.map((row) => [
+      String(row.block),
+      row.timestamp,
       row.source,
       row.destination,
       `0x${row.channelId}`,
@@ -2056,6 +2062,7 @@ export default function Dashboard({
               </caption>
               <thead>
                 <tr>
+                  <th scope="col">{timed ? 'timestamp' : 'block'}</th>
                   <th scope="col">source</th>
                   <th scope="col">destination</th>
                   <th scope="col">channel</th>
@@ -2064,6 +2071,11 @@ export default function Dashboard({
               <tbody>
                 {pageOf(visibleRedemptions, feedAt).map((redemption) => (
                   <tr key={redemption.key}>
+                    <td className="timestamp">
+                      {timed
+                        ? formatTimestamp(redemption.timestamp)
+                        : `#${count(redemption.block)}`}
+                    </td>
                     <td>
                       <ClientCell
                         address={redemption.source}

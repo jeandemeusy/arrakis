@@ -84,6 +84,21 @@ function channelId(next: () => number): string {
   return out;
 }
 
+/**
+ * Whether a fixture network has a working RPC.
+ *
+ * Only the degraded fixture takes one away, and only from the second network.
+ * The plain fixture keeps every clock RPC-resolved, because that is the healthy
+ * deployment and `npm run dev:fixtures` should show the healthy page — a feed
+ * quoting block numbers because the fixture quietly withheld an RPC is a
+ * confusing default, however useful the branch is to have covered.
+ */
+function fixtureTimebase(network: string): 'rpc' | 'estimated' {
+  return process.env.DASHBOARD_FIXTURES === 'degraded' && network === 'dev'
+    ? 'estimated'
+    : 'rpc';
+}
+
 /** Panels the fixture pretends could not be read, for styling the failure states. */
 function fixturePanels(network: string) {
   const panels = healthyPanels();
@@ -240,6 +255,8 @@ function dataset(
     .map((redemption, index) => ({
       key: `${config.id}-${index}`,
       timestamp: new Date(redemption.timestamp * 1000).toISOString(),
+      // Gnosis makes a block roughly every five seconds, so a day is ~17,280.
+      block: LATEST_BLOCK - (lastDay - redemption.day) * 17_280,
       source: redemption.source,
       destination: redemption.destination,
       channelId: channelId(next),
@@ -289,7 +306,7 @@ function dataset(
         Math.round(Number(priceWei) / config.winProbability),
       ).toString(),
     },
-    timebase: 'rpc',
+    timebase: fixtureTimebase(config.id),
     winProbability: 'historical',
     // The fixture names its exits, as a real deployment should.
     exits,

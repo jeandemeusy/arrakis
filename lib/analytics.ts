@@ -438,6 +438,7 @@ async function queryNetwork(network: NetworkConfig): Promise<NetworkDataset> {
     timestamp: new Date(
       clock(Number(row.published_block)) * 1000,
     ).toISOString(),
+    block: Number(row.published_block),
     source: participant(row.source),
     destination: participant(row.destination),
     channelId: row.channel_id,
