@@ -404,10 +404,12 @@ function heatColor(intensity: number) {
 function Heatmap({
   grid,
   total,
+  direction,
   height = 250,
 }: {
   grid: number[][];
   total: number | null;
+  direction: string;
   height?: number;
 }) {
   const frame = useRef<HTMLDivElement>(null);
@@ -455,7 +457,7 @@ function Heatmap({
         preserveAspectRatio="xMidYMid meet"
         // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- an <svg> cannot be an <img>
         role="img"
-        aria-label="Share of relayed volume by weekday and hour, UTC"
+        aria-label={`Share of ${direction} volume by weekday and hour, UTC`}
       >
         {grid.map((row, weekday) =>
           row.map((share, hour) => (
@@ -884,6 +886,7 @@ export default function Dashboard({
 }) {
   const [scope, setScope] = useState<'weekly' | 'all'>('weekly');
   const [flow, setFlow] = useState<'upstream' | 'downstream'>('upstream');
+  const [hours, setHours] = useState<'upstream' | 'downstream'>('upstream');
   const [clientPage, setClientPage] = useState(0);
   const [deploymentPage, setDeploymentPage] = useState(0);
   const [feedPage, setFeedPage] = useState(0);
@@ -965,6 +968,8 @@ export default function Dashboard({
     label: shortAddress(relayer.address),
   }));
 
+  const hourGrid = hours === 'upstream' ? data.heatmap : data.heatmapDownstream;
+
   const relayerFlow =
     flow === 'upstream' ? data.relayerDaily : data.relayerDownstreamDaily;
 
@@ -985,11 +990,10 @@ export default function Dashboard({
   const visibleRedemptions = data.recentRedemptions.filter((row) =>
     matches(
       feedQuery,
-      row.client,
-      row.relayer,
+      row.source,
+      row.destination,
       `0x${row.channelId}`,
       row.network,
-      formatTimestamp(row.timestamp),
     ),
   );
 
@@ -1016,11 +1020,10 @@ export default function Dashboard({
     ]),
   ];
   const feedRows = () => [
-    ['timestamp', 'client', 'relayer', 'channel', 'network'],
+    ['source', 'destination', 'channel', 'network'],
     ...visibleRedemptions.map((row) => [
-      row.timestamp,
-      row.client,
-      row.relayer,
+      row.source,
+      row.destination,
       `0x${row.channelId}`,
       row.network,
     ]),
@@ -1546,27 +1549,58 @@ export default function Dashboard({
             id="hourly"
             status={panels.usage}
             className="service-chart span-4"
-            eyebrow="ALL TIME · UPSTREAM"
+            eyebrow="ALL TIME"
             title="When VPN is used"
+            badge={
+              <fieldset className="tab-switch">
+                <legend className="sr-only">Traffic direction</legend>
+                <button
+                  type="button"
+                  aria-pressed={hours === 'upstream'}
+                  className={hours === 'upstream' ? 'active' : ''}
+                  onClick={() => setHours('upstream')}
+                >
+                  Upstream
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={hours === 'downstream'}
+                  className={hours === 'downstream' ? 'active' : ''}
+                  onClick={() => setHours('downstream')}
+                >
+                  Downstream
+                </button>
+              </fieldset>
+            }
             note={
               <>
-                <Empty when={!data.heatmap.length}>
+                <Empty when={!hourGrid.length}>
                   No volume has been indexed yet.
                 </Empty>
                 <p className="chart-note">
-                  Share of upstream volume by weekday and hour, UTC. Block
+                  Share of {hours} volume by weekday and hour, UTC. Block
                   timestamps are{' '}
                   {data.timebase === 'rpc'
                     ? 'RPC resolved'
                     : 'estimated from block height'}
-                  .
+                  .{' '}
+                  {data.heatmapAgreement !== null &&
+                    `The two directions agree ${percent(data.heatmapAgreement)}: an answer follows its request within seconds, so one session should shade both grids the same way.`}
                 </p>
               </>
             }
             expanded={enlarged}
             onExpand={setEnlarged}
             chart={
-              <Heatmap grid={data.heatmap} total={data.totals.gigabytesTotal} />
+              <Heatmap
+                grid={hourGrid}
+                total={
+                  hours === 'upstream'
+                    ? data.totals.gigabytesTotal
+                    : data.totals.gigabytesDownstreamTotal
+                }
+                direction={hours}
+              />
             }
           />
         </div>
@@ -1974,7 +2008,11 @@ export default function Dashboard({
             <span className="section-index">06</span>
             <h2>Most recent redemptions</h2>
           </div>
-          <p>Latest redemptions per channel, newest first.</p>
+          <p>
+            The latest redemption on each client channel, newest first. Upstream
+            only — a downstream redemption is paid by an exit and names no
+            client, so it has no row here.
+          </p>
         </div>
         <Tile
           id="feed-table"
@@ -1987,7 +2025,7 @@ export default function Dashboard({
             onChange: setFeedQuery,
             placeholder: 'Search...',
           }}
-          eyebrow="LATEST REDEMPTIONS PER CHANNEL"
+          eyebrow="UPSTREAM REDEMPTIONS PER CHANNEL"
           title="Redemption feed"
           note={
             <>
@@ -1995,9 +2033,8 @@ export default function Dashboard({
                 No redemptions have been indexed.
               </Empty>
               <p className="chart-note">
-                The feed keeps the most recent{' '}
-                {count(data.recentRedemptions.length)} of{' '}
-                {count(data.totals.redemptionsTotal)} redemptions.
+                The most recent {count(data.recentRedemptions.length)} of{' '}
+                {count(data.totals.redemptionsTotal)} client redemptions.
               </p>
             </>
           }
@@ -2019,31 +2056,27 @@ export default function Dashboard({
               </caption>
               <thead>
                 <tr>
-                  <th scope="col">timestamp</th>
-                  <th scope="col">client</th>
-                  <th scope="col">relayer</th>
+                  <th scope="col">source</th>
+                  <th scope="col">destination</th>
                   <th scope="col">channel</th>
                 </tr>
               </thead>
               <tbody>
                 {pageOf(visibleRedemptions, feedAt).map((redemption) => (
                   <tr key={redemption.key}>
-                    <td className="timestamp">
-                      {formatTimestamp(redemption.timestamp)}
-                    </td>
                     <td>
                       <ClientCell
-                        address={redemption.client}
+                        address={redemption.source}
                         network={redemption.network}
                         known={
-                          clientKey(redemption.network, redemption.client) in
+                          clientKey(redemption.network, redemption.source) in
                           data.clientDetails
                         }
                         onOpen={setInspected}
                       />
                     </td>
                     <td>
-                      <AddressLink address={redemption.relayer} />
+                      <AddressLink address={redemption.destination} />
                     </td>
                     <td>
                       <code>{`0x${redemption.channelId}`}</code>

@@ -66,11 +66,18 @@ type SummaryRow = QueryResultRow & {
 };
 
 type RedemptionRow = QueryResultRow & {
-  channel_id: string;
   source: Buffer;
   destination: Buffer;
   /** Whether the payer announced: an announced payer is a relay or an exit. */
   source_announced: boolean;
+  published_block: string;
+  tickets: string;
+};
+
+type FeedRow = QueryResultRow & {
+  channel_id: string;
+  source: Buffer;
+  destination: Buffer;
   published_block: string;
   tickets: string;
 };
@@ -307,6 +314,7 @@ async function queryNetwork(network: NetworkConfig): Promise<NetworkDataset> {
     channelBalances,
     safeBalances,
     redemptionRows,
+    feedRows,
     deploymentRows,
     winProbRows,
     priceRows,
@@ -315,6 +323,7 @@ async function queryNetwork(network: NetworkConfig): Promise<NetworkDataset> {
     db.query<{ balance: Buffer }>(await sql('channel-balances')),
     db.query<{ balance: Buffer }>(await sql('safe-balances')),
     db.query<RedemptionRow>(await sql('redemptions'), [exitBytes]),
+    db.query<FeedRow>(await sql('recent-redemptions')),
     db.query<DeploymentRow>(await sql('client-deployments')),
     db.query<WinProbRow>(await sql('win-prob-updates')),
     db.query<TicketPriceRow>(await sql('ticket-price-updates')),
@@ -411,10 +420,6 @@ async function queryNetwork(network: NetworkConfig): Promise<NetworkDataset> {
     const timestamp = clock(block);
     return {
       network: network.id,
-      // Only the redemption feed shows a channel, and the feed only lists client
-      // traffic. Carrying a 64-character id on every downstream row would retain
-      // megabytes to render nothing.
-      channelId: row.source_announced ? '' : row.channel_id,
       source: participant(row.source),
       destination: participant(row.destination),
       day: dayIndex(timestamp),
@@ -425,6 +430,19 @@ async function queryNetwork(network: NetworkConfig): Promise<NetworkDataset> {
     };
   });
 
+  // Its own query only so the bulk rows need not carry a channel id; it selects
+  // the same client traffic the panels count.
+  const feed = feedRows.status === 'fulfilled' ? feedRows.value.rows : [];
+  const recentRedemptions = feed.map((row, index) => ({
+    key: `${network.id}-${index}`,
+    timestamp: new Date(
+      clock(Number(row.published_block)) * 1000,
+    ).toISOString(),
+    source: participant(row.source),
+    destination: participant(row.destination),
+    channelId: row.channel_id,
+    network: network.id,
+  }));
   const deployed: DeployedClient[] = rawDeployments.map((row) => {
     const timestamp = clock(Number(row.published_block));
     return {
@@ -472,6 +490,7 @@ async function queryNetwork(network: NetworkConfig): Promise<NetworkDataset> {
         ? sumBalances(safeBalances.value.rows)
         : null,
     redemptions,
+    recentRedemptions,
     deployed,
     contracts,
     ticket: {

@@ -26,10 +26,8 @@ const RECENT_DAYS = 30;
  */
 const SERIES_START_DAY = Math.floor(Date.UTC(2026, 0, 1) / 1000 / DAY_SECONDS);
 /**
- * The redemption feed is the one unbounded list — a busy network has tens of
- * thousands — so it keeps a cap while clients and deployments are sent whole.
- * Every snapshot carries its own copy and the combined view carries them all
- * again, so this number is multiplied by the number of configured networks.
+ * How many feed rows a snapshot keeps. Each network already returns at most this
+ * many, so the cap only matters when several are merged into the combined view.
  */
 const REDEMPTION_FEED_LIMIT = 500;
 
@@ -224,11 +222,16 @@ export type ClientDetail = {
   }>;
 };
 
+/**
+ * One row of the feed: a client paying a relay, newest first.
+ *
+ * `timestamp` orders the feed across networks without being shown.
+ */
 export type RecentRedemption = {
   key: string;
   timestamp: string;
-  client: string;
-  relayer: string;
+  source: string;
+  destination: string;
   channelId: string;
   network: string;
 };
@@ -260,6 +263,20 @@ export type AnalyticsSnapshot = {
   deployments: Deployment[];
   dailyUsers: DailyUserPoint[];
   heatmap: Heatmap;
+  /**
+   * The same grid for the return path, built from the exits' own redemptions
+   * rather than the per-day estimate, because a heatmap needs the hour.
+   */
+  heatmapDownstream: Heatmap;
+  /**
+   * How much the two grids agree, 0 to 1.
+   *
+   * If a session's answer follows its request within seconds, the two should be
+   * nearly the same picture and this should sit near 1. Worth stating as a
+   * number: two shaded grids look alike long before they are alike, and this is
+   * the closest thing on the page to a check that the exit set is right.
+   */
+  heatmapAgreement: number | null;
   retention: RetentionCohort[];
   recentRedemptions: RecentRedemption[];
   contracts: Contract[];
@@ -322,7 +339,6 @@ export type AnalyticsSnapshot = {
 /** A redemption, already timestamped and priced with its own network's oracle. */
 export type Redemption = {
   network: string;
-  channelId: string;
   source: string;
   destination: string;
   day: number;
@@ -553,6 +569,8 @@ export type NetworkDataset = {
   channelBalance: bigint | null;
   safeBalance: bigint | null;
   redemptions: Redemption[];
+  /** Client redemptions, already capped and newest first. */
+  recentRedemptions: RecentRedemption[];
   deployed: DeployedClient[];
   contracts: Contract[];
   ticket: {
@@ -860,6 +878,24 @@ function heatmapDistribution(redemptions: Redemption[]): Heatmap {
   const total = grid.flat().reduce((sofar, value) => sofar + value, 0);
   if (total === 0) return [];
   return grid.map((row) => row.map((value) => value / total));
+}
+
+/**
+ * Overlap between two distributions: one minus half their total variation.
+ *
+ * Both grids are normalised to sum to one, so what is left after taking out
+ * where they differ is the area they share. Identical grids give 1, grids with
+ * no hour in common give 0.
+ */
+function heatmapOverlap(a: Heatmap, b: Heatmap): number | null {
+  if (!a.length || !b.length) return null;
+  let difference = 0;
+  for (let weekday = 0; weekday < a.length; weekday += 1) {
+    for (let hour = 0; hour < a[weekday].length; hour += 1) {
+      difference += Math.abs(a[weekday][hour] - b[weekday][hour]);
+    }
+  }
+  return 1 - difference / 2;
 }
 
 /** Calendar month of a day index, as a count of months since year zero. */
@@ -1195,6 +1231,13 @@ export function buildSnapshot(datasets: NetworkDataset[]): AnalyticsSnapshot {
     }
   }
   const downstream = totalByDay(downstreamPerRelay);
+
+  // Built from the exits' own rows rather than the per-day estimate, because the
+  // estimate has no hour in it. With the exits named the two describe the same
+  // volume anyway, since no probe floor is taken off.
+  const upstreamHours = heatmapDistribution(redemptions);
+  const downstreamHours = heatmapDistribution(candidates);
+
   const deployed = datasets.flatMap((dataset) => dataset.deployed);
   const warnings = datasets.flatMap((dataset) =>
     combined
@@ -1253,18 +1296,12 @@ export function buildSnapshot(datasets: NetworkDataset[]): AnalyticsSnapshot {
       timestamp: new Date(client.timestamp * 1000).toISOString(),
     }));
 
-  const recentRedemptions = [...redemptions]
-    .sort((a, b) => a.timestamp - b.timestamp)
-    .slice(-REDEMPTION_FEED_LIMIT)
-    .reverse()
-    .map((redemption, index) => ({
-      key: `${redemption.network}-${index}`,
-      timestamp: new Date(redemption.timestamp * 1000).toISOString(),
-      client: redemption.source,
-      relayer: redemption.destination,
-      channelId: redemption.channelId,
-      network: redemption.network,
-    }));
+  // Queried rather than sliced off the arrays above, because the feed is the only
+  // consumer that needs a channel id. Same client traffic either way.
+  const recentRedemptions = datasets
+    .flatMap((dataset) => dataset.recentRedemptions)
+    .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
+    .slice(0, REDEMPTION_FEED_LIMIT);
 
   const latest = activeUsers.at(-1);
   const panels = mergePanels(datasets);
@@ -1322,7 +1359,9 @@ export function buildSnapshot(datasets: NetworkDataset[]): AnalyticsSnapshot {
     clientDetails: clientDetails(redemptions, deployed, colorIndexOf, lastDay),
     deployments,
     dailyUsers: dailyUserSeries(actorsByDay, deploymentDayOf, lastDay),
-    heatmap: heatmapDistribution(redemptions),
+    heatmap: upstreamHours,
+    heatmapDownstream: downstreamHours,
+    heatmapAgreement: heatmapOverlap(upstreamHours, downstreamHours),
     retention: retentionCohorts(redemptions, deployed, lastDay),
     recentRedemptions,
     contracts: datasets
@@ -1436,6 +1475,8 @@ export function unavailableSnapshot(message: string): AnalyticsSnapshot {
     deployments: [],
     dailyUsers: [],
     heatmap: [],
+    heatmapDownstream: [],
+    heatmapAgreement: null,
     retention: [],
     recentRedemptions: [],
     contracts: [],

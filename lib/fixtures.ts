@@ -158,7 +158,6 @@ function dataset(
         day * DAY_SECONDS + hour * 3600 + Math.floor(next() * 3600);
       redemptions.push({
         network: config.id,
-        channelId: channelId(next),
         source: active[Math.floor(next() * active.length)],
         // A skewed pick gives the long tail the donut and stack need to be tested.
         destination: relayPool[Math.floor(next() ** 2 * relayPool.length)],
@@ -178,7 +177,6 @@ function dataset(
       const hour = Math.floor(6 + next() * 14);
       redemptions.push({
         network: config.id,
-        channelId: channelId(next),
         source: exits[Math.floor(next() * exits.length)],
         destination: relayers[Math.floor(next() ** 2 * relayers.length)],
         day,
@@ -208,7 +206,6 @@ function dataset(
           if (peer === payer) break;
           redemptions.push({
             network: config.id,
-            channelId: channelId(next),
             source: payer,
             destination: peer,
             day,
@@ -234,6 +231,21 @@ function dataset(
         }))
       : [];
 
+  // The feed is its own query in production; here it is the tail of the client
+  // traffic, exactly as that query would return it.
+  const recentRedemptions = [...redemptions]
+    .filter((redemption) => !redemption.sourceAnnounced)
+    .sort((a, b) => b.timestamp - a.timestamp)
+    .slice(0, 500)
+    .map((redemption, index) => ({
+      key: `${config.id}-${index}`,
+      timestamp: new Date(redemption.timestamp * 1000).toISOString(),
+      source: redemption.source,
+      destination: redemption.destination,
+      channelId: channelId(next),
+      network: config.id,
+    }));
+
   const priceWei = 10_000_000_000_000n;
   return {
     network: config.id,
@@ -253,6 +265,7 @@ function dataset(
         ? BigInt(config.clients) * 1_500n * 10n ** 18n
         : null,
     redemptions,
+    recentRedemptions,
     deployed,
     contracts: [
       { role: 'Channels' },
