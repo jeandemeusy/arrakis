@@ -164,6 +164,18 @@ Kubernetes can use `/api/health/live` for liveness and `/api/health/ready` for
 readiness. Readiness checks the cached analytics snapshot and returns HTTP 503
 when the index database is unavailable.
 
+JSON responses are compressed (brotli, else gzip) when the caller accepts it,
+which takes the full payload from roughly 750 KiB to 80 KiB. Next does not
+compress route-handler responses itself, so this is done in `lib/http.ts` rather
+than left to whatever fronts the container.
+
+The page is rendered per request — it must not be prerendered at build time,
+where there is no index database to read and it would bake a "database
+connection pending" dashboard into the image. Because the snapshot behind it only
+changes once a minute, it is served with `s-maxage=60`, so a CDN or ingress cache
+can serve one render to every visitor inside that window. Without a shared cache
+in front, every request renders.
+
 ## Container publishing
 
 The image is built from the flake, so the container and the development shell

@@ -1,6 +1,5 @@
-import { NextResponse } from 'next/server';
-
 import { loadDashboard, publicDashboard } from '@/lib/analytics';
+import { json } from '@/lib/http';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,7 +18,8 @@ export async function GET(request: Request) {
 
   const body = requested ? dashboard.snapshots[requested] : dashboard;
   if (!body) {
-    return NextResponse.json(
+    return json(
+      request,
       { error: `Unknown network: ${requested}`, networks: dashboard.networks },
       { status: 404, headers: { 'cache-control': 'no-store' } },
     );
@@ -31,7 +31,7 @@ export async function GET(request: Request) {
         (snapshot) => snapshot.source === 'unavailable',
       );
 
-  return NextResponse.json(body, {
+  return json(request, body, {
     status: unavailable ? 503 : 200,
     headers: {
       'cache-control': 'public, max-age=30, stale-while-revalidate=120',

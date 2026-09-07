@@ -1,20 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import {
-  Area,
-  Bar,
-  BarChart,
-  CartesianGrid,
-  ComposedChart,
-  Line,
-  Pie,
-  PieChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts';
+import dynamicImport from 'next/dynamic';
 import {
   ChevronLeft,
   ChevronRight,
@@ -25,31 +12,68 @@ import {
 } from 'lucide-react';
 
 import type { PublicDashboard as DashboardPayload } from '@/lib/analytics';
+import {
+  DECIMAL,
+  INK,
+  INTEGER,
+  PLUM,
+  YELLOW,
+  relayerColor,
+  volume,
+} from './chart-theme';
+
+/**
+ * The charts, fetched only once the page is interactive.
+ *
+ * Recharts is 424KB of a roughly 1MB bundle and nothing above the fold needs it:
+ * the headline figures are numbers and the tables are HTML. Split out, it no
+ * longer sits on the critical path, at the cost of the charts appearing a moment
+ * after the rest. `ssr: false` because a chart has no layout to contribute
+ * server-side anyway — ResponsiveContainer measures its box in the browser — so
+ * server-rendering it only inflated the HTML with markup that was replaced on
+ * hydration.
+ *
+ * Each placeholder reserves the height its chart will take, so nothing below it
+ * moves when the bundle lands.
+ */
+const reserve = (height: number) => {
+  const Placeholder = () => <div style={{ height }} />;
+  return Placeholder;
+};
+
+const ActiveUsersChart = dynamicImport(
+  () => import('./charts').then((module) => module.ActiveUsersChart),
+  { ssr: false, loading: reserve(250) },
+);
+const VolumeChart = dynamicImport(
+  () => import('./charts').then((module) => module.VolumeChart),
+  { ssr: false, loading: reserve(250) },
+);
+const DailyUsersChart = dynamicImport(
+  () => import('./charts').then((module) => module.DailyUsersChart),
+  { ssr: false, loading: reserve(250) },
+);
+const RelayerShareChart = dynamicImport(
+  () => import('./charts').then((module) => module.RelayerShareChart),
+  { ssr: false, loading: reserve(250) },
+);
+const RelayerStackChart = dynamicImport(
+  () => import('./charts').then((module) => module.RelayerStackChart),
+  { ssr: false, loading: reserve(250) },
+);
+const ClientDailyChart = dynamicImport(
+  () => import('./charts').then((module) => module.ClientDailyChart),
+  { ssr: false, loading: reserve(170) },
+);
+
 import type { ClientDetail, PanelStatus } from '@/lib/snapshot';
 import { COMBINED } from '@/lib/constants';
 import { Tile, type LegendEntry } from './tile';
 
-const AXIS = { fill: '#8a877f', fontSize: 11 };
-const GRID = '#e6e2d8';
-const CURSOR = { fill: '#f2eee5' };
-const TOOLTIP = {
-  background: '#fffdf8',
-  border: '1px solid #d9d5cb',
-  borderRadius: 2,
-  fontSize: 12,
-};
 /**
  * Addresses are fixed-width, so listing them whole in a monospace tooltip puts
  * every volume at the same offset and the column reads as a column.
  */
-const ADDRESS_TOOLTIP = {
-  ...TOOLTIP,
-  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-  fontSize: 11,
-};
-const YELLOW = '#ffd84d';
-const INK = '#17191c';
-const PLUM = '#8d4f68';
 const EXPLORER = 'https://gnosisscan.io/address/';
 
 /*
@@ -66,12 +90,10 @@ const EXPLORER = 'https://gnosisscan.io/address/';
 const PAGE_SIZE = 50;
 
 // Constructing an Intl formatter is expensive and these run per tick and per row.
-const INTEGER = new Intl.NumberFormat('en-US');
 const PERCENT = new Intl.NumberFormat('en', {
   style: 'percent',
   maximumFractionDigits: 1,
 });
-const DECIMAL = new Intl.NumberFormat('en', { maximumFractionDigits: 2 });
 const FIXED_2 = new Intl.NumberFormat('en', {
   minimumFractionDigits: 2,
   maximumFractionDigits: 2,
@@ -82,11 +104,6 @@ const COMPACT = new Intl.NumberFormat('en', {
 });
 const SIGNIFICANT_2 = new Intl.NumberFormat('en', {
   maximumSignificantDigits: 2,
-});
-const DAY = new Intl.DateTimeFormat('en', {
-  day: '2-digit',
-  month: 'short',
-  timeZone: 'UTC',
 });
 // The snapshot is cached for a minute, so the time it was taken is worth showing.
 const OBSERVED = new Intl.DateTimeFormat('en-GB', {
@@ -128,29 +145,6 @@ const TIMESTAMP = new Intl.DateTimeFormat('en-GB', {
  * on the paper ground. Neighbouring ranks stay distinguishable while the chart
  * still reads as one object — which a hue-per-category rainbow does not.
  */
-const RELAYER_RAMP = [
-  [255, 216, 77], // brand yellow
-  [201, 139, 58], // ochre
-  [178, 90, 77], // terracotta
-  [141, 79, 104], // plum
-  [95, 107, 134], // slate
-  [122, 133, 138], // stone
-] as const;
-
-function relayerColor(index: number, total: number) {
-  const step = total > 1 ? Math.min(1, index / (total - 1)) : 0;
-  const scaled = step * (RELAYER_RAMP.length - 1);
-  const low = Math.floor(scaled);
-  const high = Math.min(RELAYER_RAMP.length - 1, low + 1);
-  const blend = scaled - low;
-  const channel = (i: number) =>
-    Math.round(
-      RELAYER_RAMP[low][i] +
-        (RELAYER_RAMP[high][i] - RELAYER_RAMP[low][i]) * blend,
-    );
-  return `rgb(${channel(0)} ${channel(1)} ${channel(2)})`;
-}
-
 function count(input: number | null) {
   return input === null ? '—' : INTEGER.format(input);
 }
@@ -172,17 +166,6 @@ function percent(share: number) {
 }
 
 /** Volume arrives in gigabytes; step down so small numbers stay readable. */
-function volume(input: number | null) {
-  if (input === null) return '—';
-  const [value, unit] =
-    input >= 1
-      ? [input, 'GB']
-      : input >= 0.001
-        ? [input * 1000, 'MB']
-        : [input * 1e6, 'KB'];
-  return `${DECIMAL.format(value)} ${unit}`;
-}
-
 /** Adds two figures either of which may be unknown, rather than reading null as 0. */
 function plus(a: number | null, b: number | null) {
   if (a === null && b === null) return null;
@@ -220,12 +203,6 @@ function probability(value: number | null) {
 
 function shortAddress(address: string) {
   return `${address.slice(0, 8)}…${address.slice(-6)}`;
-}
-
-// Recharts hands both tick and tooltip labels through as ReactNode.
-function formatDay(value: unknown) {
-  if (typeof value !== 'string') return '';
-  return DAY.format(new Date(`${value}T00:00:00Z`));
 }
 
 /**
@@ -775,35 +752,7 @@ function ClientDialog({
 
           <h3>Upstream volume · last 30 days</h3>
           {peak > 0 ? (
-            <ResponsiveContainer width="100%" height={170}>
-              <BarChart
-                data={detail.daily}
-                margin={{ top: 8, right: 8, left: -22, bottom: 0 }}
-              >
-                <CartesianGrid vertical={false} stroke={GRID} />
-                <XAxis
-                  dataKey="date"
-                  axisLine={false}
-                  tickLine={false}
-                  tick={AXIS}
-                  minTickGap={40}
-                  tickFormatter={formatDay}
-                />
-                <YAxis axisLine={false} tickLine={false} tick={AXIS} />
-                <Tooltip
-                  cursor={CURSOR}
-                  labelFormatter={formatDay}
-                  contentStyle={TOOLTIP}
-                  formatter={(input: unknown) => volume(Number(input))}
-                />
-                <Bar
-                  dataKey="gigabytes"
-                  name="Upstream"
-                  fill={YELLOW}
-                  isAnimationActive={false}
-                />
-              </BarChart>
-            </ResponsiveContainer>
+            <ClientDailyChart points={detail.daily} />
           ) : (
             <p className="client-quiet">
               No upstream traffic in the last 30 days.
@@ -1374,73 +1323,7 @@ export default function Dashboard({
             }
             expanded={enlarged}
             onExpand={setEnlarged}
-            chart={
-              <ResponsiveContainer width="100%" height={250}>
-                <ComposedChart
-                  data={data.activeUsers}
-                  margin={{ top: 24, right: 18, left: -18, bottom: 0 }}
-                >
-                  <defs>
-                    <linearGradient
-                      id="fillMonthly"
-                      x1="0"
-                      y1="0"
-                      x2="0"
-                      y2="1"
-                    >
-                      <stop offset="0%" stopColor={YELLOW} stopOpacity={0.45} />
-                      <stop offset="100%" stopColor={YELLOW} stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid
-                    vertical={false}
-                    stroke={GRID}
-                    strokeDasharray="2 5"
-                  />
-                  <XAxis
-                    dataKey="date"
-                    axisLine={false}
-                    tickLine={false}
-                    tick={AXIS}
-                    minTickGap={48}
-                    tickFormatter={formatDay}
-                  />
-                  <YAxis
-                    axisLine={false}
-                    tickLine={false}
-                    tick={AXIS}
-                    allowDecimals={false}
-                  />
-                  <Tooltip labelFormatter={formatDay} contentStyle={TOOLTIP} />
-                  <Area
-                    type="monotone"
-                    dataKey="monthly"
-                    name="Active, last 30 days"
-                    stroke={YELLOW}
-                    fill="url(#fillMonthly)"
-                    strokeWidth={3}
-                    dot={false}
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="weekly"
-                    name="Active, last 7 days"
-                    stroke="#9b978d"
-                    strokeWidth={1.5}
-                    dot={false}
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="deployments"
-                    name="New clients, last 30 days"
-                    stroke={PLUM}
-                    strokeWidth={1.5}
-                    strokeDasharray="4 4"
-                    dot={false}
-                  />
-                </ComposedChart>
-              </ResponsiveContainer>
-            }
+            chart={<ActiveUsersChart points={data.activeUsers} />}
           />
           <Tile
             id="volume"
@@ -1467,65 +1350,7 @@ export default function Dashboard({
             }
             expanded={enlarged}
             onExpand={setEnlarged}
-            chart={
-              <ResponsiveContainer width="100%" height={250}>
-                <ComposedChart
-                  data={data.weeks}
-                  margin={{ top: 20, right: 6, left: -20, bottom: 0 }}
-                >
-                  <CartesianGrid vertical={false} stroke={GRID} />
-                  <XAxis
-                    dataKey="label"
-                    axisLine={false}
-                    tickLine={false}
-                    tick={AXIS}
-                    minTickGap={24}
-                  />
-                  <YAxis
-                    yAxisId="left"
-                    axisLine={false}
-                    tickLine={false}
-                    tick={AXIS}
-                  />
-                  <YAxis
-                    yAxisId="right"
-                    orientation="right"
-                    axisLine={false}
-                    tickLine={false}
-                    tick={AXIS}
-                  />
-                  <Tooltip
-                    cursor={CURSOR}
-                    contentStyle={TOOLTIP}
-                    formatter={(input: unknown) => volume(Number(input))}
-                  />
-                  <Bar
-                    yAxisId="left"
-                    dataKey="gigabytes"
-                    name="Upstream"
-                    stackId="volume"
-                    fill={YELLOW}
-                  />
-                  <Bar
-                    yAxisId="left"
-                    dataKey="downstreamGigabytes"
-                    name="Downstream"
-                    stackId="volume"
-                    fill={PLUM}
-                    radius={[2, 2, 0, 0]}
-                  />
-                  <Line
-                    yAxisId="right"
-                    type="monotone"
-                    dataKey="cumulativeGigabytes"
-                    name="Cumulative volume"
-                    stroke={INK}
-                    strokeWidth={2}
-                    dot={false}
-                  />
-                </ComposedChart>
-              </ResponsiveContainer>
-            }
+            chart={<VolumeChart weeks={data.weeks} />}
           />
         </div>
         <div className="tile-grid">
@@ -1595,47 +1420,7 @@ export default function Dashboard({
             }
             expanded={enlarged}
             onExpand={setEnlarged}
-            chart={
-              <ResponsiveContainer width="100%" height={250}>
-                <BarChart
-                  data={data.dailyUsers}
-                  margin={{ top: 20, right: 10, left: -24, bottom: 0 }}
-                >
-                  <CartesianGrid vertical={false} stroke={GRID} />
-                  <XAxis
-                    dataKey="date"
-                    axisLine={false}
-                    tickLine={false}
-                    tick={AXIS}
-                    minTickGap={40}
-                    tickFormatter={formatDay}
-                  />
-                  <YAxis
-                    allowDecimals={false}
-                    axisLine={false}
-                    tickLine={false}
-                    tick={AXIS}
-                  />
-                  <Tooltip
-                    cursor={CURSOR}
-                    labelFormatter={formatDay}
-                    contentStyle={TOOLTIP}
-                  />
-                  <Bar
-                    dataKey="returning"
-                    name="Returning"
-                    stackId="users"
-                    fill={YELLOW}
-                  />
-                  <Bar
-                    dataKey="newClients"
-                    name="New"
-                    stackId="users"
-                    fill={PLUM}
-                  />
-                </BarChart>
-              </ResponsiveContainer>
-            }
+            chart={<DailyUsersChart points={data.dailyUsers} />}
           />
           <Tile
             id="retention"
@@ -1752,31 +1537,7 @@ export default function Dashboard({
             }
             expanded={enlarged}
             onExpand={setEnlarged}
-            chart={
-              <ResponsiveContainer width="100%" height={250}>
-                <PieChart>
-                  <Pie
-                    data={relayerSlices}
-                    dataKey="redemptions"
-                    nameKey="address"
-                    innerRadius="55%"
-                    outerRadius="82%"
-                    paddingAngle={1}
-                    stroke="none"
-                    isAnimationActive={false}
-                  />
-                  <Tooltip
-                    contentStyle={ADDRESS_TOOLTIP}
-                    formatter={(input: unknown, name: unknown) =>
-                      [
-                        `${INTEGER.format(Number(input))} redemptions`,
-                        typeof name === 'string' ? name : '',
-                      ] as [string, string]
-                    }
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-            }
+            chart={<RelayerShareChart slices={relayerSlices} />}
           />
           <Tile
             id="relayer-volume"
@@ -1824,46 +1585,11 @@ export default function Dashboard({
             expanded={enlarged}
             onExpand={setEnlarged}
             chart={
-              <ResponsiveContainer width="100%" height={250}>
-                <BarChart
-                  data={relayerFlow}
-                  margin={{ top: 20, right: 10, left: -18, bottom: 0 }}
-                >
-                  <CartesianGrid vertical={false} stroke={GRID} />
-                  <XAxis
-                    dataKey="date"
-                    axisLine={false}
-                    tickLine={false}
-                    tick={AXIS}
-                    minTickGap={40}
-                    tickFormatter={formatDay}
-                  />
-                  <YAxis axisLine={false} tickLine={false} tick={AXIS} />
-                  <Tooltip
-                    cursor={CURSOR}
-                    labelFormatter={formatDay}
-                    contentStyle={ADDRESS_TOOLTIP}
-                    itemSorter={(item) => -Number(item.value ?? 0)}
-                    formatter={(input: unknown, name: unknown) =>
-                      [
-                        volume(Number(input)),
-                        typeof name === 'string'
-                          ? (addressOfSeries.get(name) ?? name)
-                          : '',
-                      ] as [string, string]
-                    }
-                  />
-                  {data.relayerSeries.map((entry, index) => (
-                    <Bar
-                      key={entry.key}
-                      dataKey={entry.key}
-                      stackId="relayers"
-                      fill={relayerColor(index, data.relayerSeries.length)}
-                      isAnimationActive={false}
-                    />
-                  ))}
-                </BarChart>
-              </ResponsiveContainer>
+              <RelayerStackChart
+                points={relayerFlow}
+                series={data.relayerSeries}
+                addressOf={addressOfSeries}
+              />
             }
           />
         </div>

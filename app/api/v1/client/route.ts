@@ -1,6 +1,5 @@
-import { NextResponse } from 'next/server';
-
 import { loadClientDetail } from '@/lib/analytics';
+import { json } from '@/lib/http';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,7 +21,8 @@ export async function GET(request: Request) {
   const key = parameters.get('key');
 
   if (!network || !key) {
-    return NextResponse.json(
+    return json(
+      request,
       { error: 'Both `network` and `key` are required' },
       { status: 400, headers: { 'cache-control': 'no-store' } },
     );
@@ -30,13 +30,14 @@ export async function GET(request: Request) {
 
   const detail = await loadClientDetail(network, key);
   if (!detail) {
-    return NextResponse.json(
+    return json(
+      request,
       { error: `No record for ${key} on ${network}` },
       { status: 404, headers: { 'cache-control': 'no-store' } },
     );
   }
 
-  return NextResponse.json(detail, {
+  return json(request, detail, {
     headers: {
       'cache-control': 'public, max-age=30, stale-while-revalidate=120',
     },
