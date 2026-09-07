@@ -1,10 +1,12 @@
-import Dashboard from "./dashboard";
+import Dashboard from './dashboard';
 
-import { loadDashboard } from "@/lib/analytics";
+import { loadDashboard, publicDashboard } from '@/lib/analytics';
 
-export const dynamic = "force-dynamic";
+export const dynamic = 'force-dynamic';
 
 export default async function Home() {
   const dashboard = await loadDashboard();
-  return <Dashboard dashboard={dashboard} />;
+  // The drill-down stays on the server; the dialog fetches the one record a click
+  // needs from /api/v1/client. See `publicDashboard`.
+  return <Dashboard dashboard={publicDashboard(dashboard)} />;
 }

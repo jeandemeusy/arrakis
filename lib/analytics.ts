@@ -21,6 +21,7 @@ import {
   redemptionVolume,
   unavailableSnapshot,
   type AnalyticsSnapshot,
+  type ClientDetail,
   type DeployedClient,
   type NetworkDataset,
   type PanelKey,
@@ -56,6 +57,50 @@ export type Dashboard = {
   defaultNetwork: string;
 };
 
+/**
+ * A snapshot as the browser receives it: everything but the drill-down.
+ *
+ * `clientDetails` holds one record per client and the page reads exactly one of
+ * them, when a row is clicked. Measured against a network with a few thousand
+ * clients it is four fifths of the snapshot — and the payload carries every
+ * network's snapshot plus the combined one, so that share is paid several times
+ * over on a page nobody has clicked anything on yet. It stays on the server,
+ * where it is already built and already cached, and `/api/v1/client` serves the
+ * one entry a click actually needs.
+ */
+export type PublicSnapshot = Omit<AnalyticsSnapshot, 'clientDetails'>;
+
+export type PublicDashboard = {
+  networks: NetworkSummary[];
+  snapshots: Record<string, PublicSnapshot>;
+  defaultNetwork: string;
+};
+
+/** Strips the drill-down from every snapshot, for anything crossing the wire. */
+export function publicDashboard(dashboard: Dashboard): PublicDashboard {
+  const snapshots: Record<string, PublicSnapshot> = {};
+  for (const [id, snapshot] of Object.entries(dashboard.snapshots)) {
+    const { clientDetails: _details, ...rest } = snapshot;
+    snapshots[id] = rest;
+  }
+  return { ...dashboard, snapshots };
+}
+
+/**
+ * One client's record, for the drill-down.
+ *
+ * Read straight out of the cached snapshot, so a click costs a lookup and no
+ * database work — the same guarantee the dialog had when the whole map was
+ * shipped to the browser.
+ */
+export async function loadClientDetail(
+  network: string,
+  key: string,
+): Promise<ClientDetail | undefined> {
+  const dashboard = await loadDashboard();
+  return dashboard.snapshots[network]?.clientDetails[key];
+}
+
 type SummaryRow = QueryResultRow & {
   schema_version: string;
   block_number: string;
@@ -88,10 +133,11 @@ type DeploymentRow = QueryResultRow & {
 };
 
 type ContractRow = QueryResultRow & { address: Buffer; topics: string[] };
-type WinProbRow = QueryResultRow & { block_number: string; win_prob: Buffer };
-type TicketPriceRow = QueryResultRow & {
+/** One oracle update. Both timelines come back from a single query — see the SQL. */
+type OracleRow = QueryResultRow & {
   block_number: string;
-  ticket_price: Buffer;
+  kind: 'ticket-price' | 'win-prob';
+  value: Buffer;
 };
 
 const pools = new Map<string, Pool>();
@@ -104,7 +150,9 @@ function database(network: NetworkConfig): Pool {
   if (!pool) {
     pool = new Pool({
       connectionString: network.databaseUrl,
-      max: 5,
+      // Matches the fan-out of one snapshot, so no query in the batch below waits
+      // on a connection another one in the same batch is holding.
+      max: 8,
       idleTimeoutMillis: 30_000,
       statement_timeout: 30_000,
     });
@@ -304,31 +352,56 @@ async function queryNetwork(network: NetworkConfig): Promise<NetworkDataset> {
     warnings.push(reason);
   };
 
-  // The summary is the only query a network cannot be rendered without; the rest
-  // degrade to an empty panel so one broken relation never blanks the dashboard.
-  const summaryResult = await db.query<SummaryRow>(await sql('summary'));
-  const summary = summaryResult.rows[0];
-  if (!summary) throw new Error('Blokli chain_info is not initialized');
-
+  // Read together rather than awaited one at a time inside the array below, where
+  // the first request would pay for eight sequential file reads before a single
+  // query went out.
   const [
+    summarySql,
+    channelBalancesSql,
+    safeBalancesSql,
+    redemptionsSql,
+    feedSql,
+    deploymentsSql,
+    oracleSql,
+    contractsSql,
+  ] = await Promise.all([
+    sql('summary'),
+    sql('channel-balances'),
+    sql('safe-balances'),
+    sql('redemptions'),
+    sql('recent-redemptions'),
+    sql('client-deployments'),
+    sql('oracle-updates'),
+    sql('contracts'),
+  ]);
+
+  // The summary rides along with the rest rather than gating them: nothing in the
+  // batch needs its result, so awaiting it first only bought an extra round trip.
+  const [
+    summaryResult,
     channelBalances,
     safeBalances,
     redemptionRows,
     feedRows,
     deploymentRows,
-    winProbRows,
-    priceRows,
+    oracleRows,
     contractRows,
   ] = await Promise.allSettled([
-    db.query<{ balance: Buffer }>(await sql('channel-balances')),
-    db.query<{ balance: Buffer }>(await sql('safe-balances')),
-    db.query<RedemptionRow>(await sql('redemptions'), [exitBytes]),
-    db.query<FeedRow>(await sql('recent-redemptions')),
-    db.query<DeploymentRow>(await sql('client-deployments')),
-    db.query<WinProbRow>(await sql('win-prob-updates')),
-    db.query<TicketPriceRow>(await sql('ticket-price-updates')),
-    db.query<ContractRow>(await sql('contracts')),
+    db.query<SummaryRow>(summarySql),
+    db.query<{ balance: Buffer }>(channelBalancesSql),
+    db.query<{ balance: Buffer }>(safeBalancesSql),
+    db.query<RedemptionRow>(redemptionsSql, [exitBytes]),
+    db.query<FeedRow>(feedSql),
+    db.query<DeploymentRow>(deploymentsSql),
+    db.query<OracleRow>(oracleSql),
+    db.query<ContractRow>(contractsSql),
   ]);
+
+  // It is still the only query a network cannot be rendered without; the rest
+  // degrade to an empty panel so one broken relation never blanks the dashboard.
+  if (summaryResult.status === 'rejected') throw summaryResult.reason;
+  const summary = summaryResult.value.rows[0];
+  if (!summary) throw new Error('Blokli chain_info is not initialized');
 
   const rawRedemptions =
     redemptionRows.status === 'fulfilled' ? redemptionRows.value.rows : [];
@@ -346,11 +419,8 @@ async function queryNetwork(network: NetworkConfig): Promise<NetworkDataset> {
       'Client deployments could not be read; active users count redemptions only.',
     );
   }
-  if (priceRows.status === 'rejected') {
-    unavailable('ticket', 'Ticket price history could not be read.');
-  }
-  if (winProbRows.status === 'rejected') {
-    unavailable('ticket', 'Winning probability history could not be read.');
+  if (oracleRows.status === 'rejected') {
+    unavailable('ticket', 'Oracle history could not be read.');
   }
   if (
     channelBalances.status === 'rejected' ||
@@ -364,13 +434,21 @@ async function queryNetwork(network: NetworkConfig): Promise<NetworkDataset> {
   const currentWinProb = Number(summary.win_prob);
   const fallbackWinProb =
     Number.isFinite(currentWinProb) && currentWinProb > 0 ? currentWinProb : 1;
-  const timeline: Array<[number, number]> =
-    winProbRows.status === 'fulfilled'
-      ? winProbRows.value.rows.map((row) => [
-          Number(row.block_number),
-          decodeWinProbability(row.win_prob),
-        ])
-      : [];
+  //
+  // Both timelines arrive interleaved on one query, tagged by `kind`, and the
+  // query orders by block so each stays ascending as it is split out.
+  const timeline: Array<[number, number]> = [];
+  const priceTimeline: Array<[number, bigint]> = [];
+  if (oracleRows.status === 'fulfilled') {
+    for (const row of oracleRows.value.rows) {
+      const block = Number(row.block_number);
+      if (row.kind === 'win-prob') {
+        timeline.push([block, decodeWinProbability(row.value)]);
+      } else {
+        priceTimeline.push([block, fromBigEndian(row.value)]);
+      }
+    }
+  }
 
   let winProbability: NetworkDataset['winProbability'] = 'historical';
   if (!timeline.length) {
@@ -386,20 +464,15 @@ async function queryNetwork(network: NetworkConfig): Promise<NetworkDataset> {
   }
   const probabilityAt = winProbabilityAt(timeline, fallbackWinProb);
 
-  const priceTimeline: Array<[number, bigint]> =
-    priceRows.status === 'fulfilled'
-      ? priceRows.value.rows.map((row) => [
-          Number(row.block_number),
-          fromBigEndian(row.ticket_price),
-        ])
-      : [];
-
   const latestBlock = Number(summary.block_number);
-  const blocks = [
-    ...rawRedemptions.map((row) => Number(row.published_block)),
-    ...rawDeployments.map((row) => Number(row.published_block)),
-  ];
-  const firstBlock = blocks.length ? Math.min(...blocks) : latestBlock;
+  // Both queries order by block ascending, so the earliest block is the first row
+  // of each and there is nothing to scan for. Spreading every block into
+  // `Math.min` instead — as this did — throws RangeError past roughly a hundred
+  // thousand rows, and the throw surfaces as the whole network going unavailable.
+  const earliest = [rawRedemptions[0], rawDeployments[0]]
+    .filter((row) => row !== undefined)
+    .map((row) => Number(row.published_block));
+  const firstBlock = earliest.length ? Math.min(...earliest) : latestBlock;
 
   let timebase: NetworkDataset['timebase'] = 'estimated';
   let clock = estimatedClock(latestBlock);
@@ -600,6 +673,12 @@ async function refreshDashboard(): Promise<Dashboard> {
  *
  * Concurrent callers that arrive during a refresh share the one in-flight run, so
  * a page view costs no database work of its own.
+ *
+ * A lapsed TTL starts that run but does not wait for it: the previous snapshot is
+ * served while it completes. Waiting made every request that happened to arrive
+ * on the expiry boundary pay for the whole round of queries, which is the one
+ * moment the dashboard is slowest and the only one a visitor was likely to see.
+ * Only the very first load, with nothing cached at all, has to block.
  */
 export async function loadDashboard(): Promise<Dashboard> {
   // UI work against synthetic data, with no database and no deploy in the loop.
@@ -609,6 +688,9 @@ export async function loadDashboard(): Promise<Dashboard> {
   if (fixtures === '1' || fixtures === 'degraded') return fixtureDashboard();
 
   if (cached && cached.expiresAt > Date.now()) return cached.value;
+  const stale = cached?.value;
   refreshing ??= refreshDashboard();
-  return refreshing;
+  // `refreshDashboard` resolves rather than rejects on failure, so the unawaited
+  // promise cannot become an unhandled rejection.
+  return stale ?? refreshing;
 }

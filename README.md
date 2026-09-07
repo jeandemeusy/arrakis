@@ -157,6 +157,9 @@ npm start
 
 The JSON representation of the current snapshot is available at
 `/api/v1/dashboard`; it returns HTTP 503 when the database cannot be reached.
+`/api/v1/client?network=<id>&key=<client key>` returns one client's drill-down
+record, which is excluded from the snapshot above: it holds one record per client
+and would otherwise be most of the payload, for the one record a click needs.
 Kubernetes can use `/api/health/live` for liveness and `/api/health/ready` for
 readiness. Readiness checks the cached analytics snapshot and returns HTTP 503
 when the index database is unavailable.
@@ -216,7 +219,7 @@ by announced accounts are relay-to-relay hops, not client usage.
 **Redemptions.** Blokli appends one `channel_state` row per on-chain channel
 event, and `TicketRedeemed` is the only event that advances `ticket_index`. A row
 whose ticket index exceeds its predecessor's (within the same channel epoch) is
-therefore a redemption. The increment is *not* the number of tickets redeemed: a
+therefore a redemption. The increment is _not_ the number of tickets redeemed: a
 client numbers a ticket for every packet it sends, only winning tickets are
 redeemed, and the contract advances the index past the winner to block replay —
 so the jump swallows every losing ticket issued in between and estimates the
@@ -235,7 +238,8 @@ published `start_day`; the trailing windows still read activity from before it.
 **Ticket parameters.** Ticket price and winning probability are both oracle values
 that Blokli stores only at their latest setting, so each timeline is recovered by
 decoding the oracle's own logs — `TicketPriceUpdated` and `WinProbUpdated` — from
-the raw `log` table. Ticket value is the price divided by the winning probability — the face value of a
+the raw `log` table, in one pass
+([`sql/v1/oracle-updates.sql`](./sql/v1/oracle-updates.sql)). Ticket value is the price divided by the winning probability — the face value of a
 ticket with one remaining hop; a ticket issued earlier in a multi-hop path is worth
 that times the remaining hop count (`hopr-impls/ticket-manager/src/factory.rs`).
 
@@ -246,7 +250,7 @@ force at that redemption's block. Redemptions predating the first oracle update
 have no probability on record and are excluded rather than guessed. Blokli keeps only
 the current probability in `chain_info`, so the timeline is recovered by decoding
 `WinProbUpdated` logs from the raw `log` table
-([`sql/v1/win-prob-updates.sql`](./sql/v1/win-prob-updates.sql)); the 7-byte
+([`sql/v1/oracle-updates.sql`](./sql/v1/oracle-updates.sql)); the 7-byte
 encoding is decoded exactly as `WinningProbability::as_f64` does. When the log
 table is not in this database the page falls back to the current probability and
 says so in a banner.
@@ -256,3 +260,21 @@ requires migration `m006`, which is not present on every deployed index.
 
 Queries are versioned under `sql/v1`. Change their definitions by introducing a
 new version rather than silently rewriting previously published methodology.
+
+### Indexes the queries want
+
+The dashboard connects with a read-only role and creates nothing, so these belong
+to whoever runs the Blokli index. Without them the two heaviest queries still
+work, they just read more than they need to:
+
+```sql
+CREATE INDEX ON channel_state (channel_id, published_block, published_tx_index, published_log_index);
+CREATE INDEX ON announcement (account_id);
+CREATE INDEX ON log (topics);
+```
+
+The first turns the redemption queries' per-channel window function into an index
+scan instead of a sort. The second is probed once per channel to tell a client
+from a relay. The third is what makes the oracle history a range scan rather than
+a sequential read of the largest table in the schema — the queries match event
+signatures as prefix ranges over `topics` specifically so that it can be used.

@@ -24,7 +24,7 @@ import {
   X,
 } from 'lucide-react';
 
-import type { Dashboard as DashboardPayload } from '@/lib/analytics';
+import type { PublicDashboard as DashboardPayload } from '@/lib/analytics';
 import type { ClientDetail, PanelStatus } from '@/lib/snapshot';
 import { COMBINED } from '@/lib/constants';
 import { Tile, type LegendEntry } from './tile';
@@ -231,11 +231,20 @@ function formatDay(value: unknown) {
 /**
  * Search matches any field the row displays, case-insensitively, so pasting a
  * partial address finds it wherever it appears.
+ *
+ * The needle arrives trimmed and lowercased, and every caller skips the filter
+ * outright when it is empty. Both matter, and the second one especially: fields
+ * are passed by value, so an empty-query early return inside this function was
+ * still paying to format a timestamp for every row of every table on every
+ * render — including every keystroke in an unrelated search box.
  */
-function matches(query: string, ...fields: string[]) {
-  const needle = query.trim().toLowerCase();
-  if (!needle) return true;
+function matches(needle: string, ...fields: string[]) {
   return fields.some((field) => field.toLowerCase().includes(needle));
+}
+
+/** The trimmed, lowercased needle a search box is asking for, or none. */
+function needleOf(query: string) {
+  return query.trim().toLowerCase();
 }
 
 function formatTimestamp(value: string) {
@@ -657,28 +666,37 @@ function CohortGrid({
  *
  * The ranking tables answer "who used the most". They cannot answer "what did
  * this one actually do", which is the question anyone investigating a client has
- * next: when it arrived, whether it kept going, and which relays it paid. All of
- * it is already in the snapshot, so the dialog costs a click and no query.
+ * next: when it arrived, whether it kept going, and which relays it paid.
+ *
+ * The record is fetched on the click that opens the dialog, out of the snapshot
+ * the server already has in hand, so it costs a round trip and no query. The
+ * dialog opens on the click rather than on the reply — `pending` is that gap —
+ * because opening only once the data lands reads as a click that did nothing.
  */
 function ClientDialog({
   detail,
+  pending,
+  failed,
   networkLabel,
   relayerCount,
   onClose,
 }: {
   detail: ClientDetail | null;
+  pending: boolean;
+  failed: boolean;
   networkLabel: string | null;
   relayerCount: number;
   onClose: () => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
+  const open = detail !== null || pending || failed;
 
   useEffect(() => {
     const node = dialog.current;
     if (!node) return;
-    if (detail && !node.open) node.showModal();
-    if (!detail && node.open) node.close();
-  }, [detail]);
+    if (open && !node.open) node.showModal();
+    if (!open && node.open) node.close();
+  }, [open]);
 
   const peak = detail
     ? Math.max(...detail.daily.map((point) => point.gigabytes))
@@ -697,6 +715,16 @@ function ClientDialog({
           <X size={16} aria-hidden="true" />
         </button>
       </div>
+
+      {(pending || failed) && (
+        <div className="modal-body client-body">
+          <p className="client-quiet">
+            {failed
+              ? 'This record could not be read. Close and try again.'
+              : 'Loading the record…'}
+          </p>
+        </div>
+      )}
 
       {/* Mounted only while open, so the page carries one dialog and not one per row. */}
       {detail && (
@@ -895,7 +923,14 @@ export default function Dashboard({
   const [deploymentQuery, setDeploymentQuery] = useState('');
   const [feedQuery, setFeedQuery] = useState('');
   const [network, setNetwork] = useState(dashboard.defaultNetwork);
+  /** The client key whose record is open, and that record once it has arrived. */
   const [inspected, setInspected] = useState<string | null>(null);
+  const [fetched, setFetched] = useState<{
+    key: string;
+    network: string;
+    /** Null once the request has been made and failed. */
+    detail: ClientDetail | null;
+  } | null>(null);
 
   // Every network's snapshot is already on the page, so switching is instant.
   const data =
@@ -910,10 +945,69 @@ export default function Dashboard({
   // and the page should not claim the same confidence for both.
   const namedExits = (data.totals.exitsNamed ?? 0) > 0;
 
+  // Which rows open a drill-down.
+  //
+  // The record itself is fetched, but the affordance has to be decided before the
+  // click. `clientDetails` is keyed by exactly the clients that appear in
+  // `clients` — one bucket per redemption payer — together with every deployment,
+  // which are the same two inputs it is built from, so the set is derivable here
+  // and costs no payload of its own.
+  const knownClients = useMemo(
+    () =>
+      new Set([
+        ...data.clients.map((client) => client.key),
+        ...data.deployments.map((row) => row.key),
+      ]),
+    [data.clients, data.deployments],
+  );
+
   // Switching network drops the drill-down: the client keys are per network, so
   // the open record would either vanish or, worse, name a different participant.
-  const inspecting =
-    inspected === null ? null : (data.clientDetails[inspected] ?? null);
+  //
+  // Fetched rather than read out of the payload. One record per client is most of
+  // a snapshot and the dialog shows one at a time, so the page ships without them
+  // and asks for the one a click needs — served from the same cached snapshot the
+  // page was rendered from, so it costs no query.
+  useEffect(() => {
+    if (inspected === null) return;
+    const aborted = new AbortController();
+    fetch(
+      `/api/v1/client?network=${encodeURIComponent(network)}&key=${encodeURIComponent(inspected)}`,
+      { signal: aborted.signal },
+    )
+      .then(async (response) => {
+        // 404 is not a failure: switching network keeps the key but changes which
+        // snapshot it is asked of, and there it names a different participant or
+        // none. Drop the inspection, which is what the dialog did when it read
+        // the map straight off the payload and found nothing.
+        if (response.status === 404) return 'missing' as const;
+        if (!response.ok) throw new Error(`Responded with ${response.status}`);
+        return (await response.json()) as ClientDetail;
+      })
+      .then((detail) => {
+        if (detail === 'missing') setInspected(null);
+        else setFetched({ key: inspected, network, detail });
+      })
+      .catch(() => {
+        if (aborted.signal.aborted) return;
+        // Recorded rather than swallowed, so the dialog says the record could not
+        // be read instead of waiting on one that is never coming.
+        setFetched({ key: inspected, network, detail: null });
+      });
+    return () => aborted.abort();
+  }, [inspected, network]);
+
+  // What arrived is only shown while it still answers what is being asked. Held
+  // alongside its subject rather than cleared on the way out, so no state has to
+  // be reset from inside the effect — and reopening the same client is served
+  // from the browser's cache anyway.
+  const answered =
+    inspected !== null &&
+    fetched?.key === inspected &&
+    fetched.network === network;
+  const inspecting = answered ? fetched.detail : null;
+  /** Asked and answered with a failure, as opposed to still waiting. */
+  const inspectFailed = answered && fetched.detail === null;
 
   // Recharts colours pie slices from a `fill` on each datum, avoiding <Cell>.
   const relayerSlices = useMemo(
@@ -976,30 +1070,46 @@ export default function Dashboard({
   const relayerFlow =
     flow === 'upstream' ? data.relayerDaily : data.relayerDownstreamDaily;
 
-  const rankOf = new Map(
-    rankedClients.map((client, index) => [client.key, index + 1]),
+  const rankOf = useMemo(
+    () =>
+      new Map(rankedClients.map((client, index) => [client.key, index + 1])),
+    [rankedClients],
   );
-  const visibleClients = rankedClients.filter((client) =>
-    matches(clientQuery, client.address, client.network),
-  );
-  const visibleDeployments = data.deployments.filter((row) =>
-    matches(
-      deploymentQuery,
-      row.address,
-      row.network,
-      formatTimestamp(row.timestamp),
-    ),
-  );
-  const visibleRedemptions = data.recentRedemptions.filter((row) =>
-    matches(
-      feedQuery,
-      row.source,
-      row.destination,
-      `0x${row.channelId}`,
-      row.network,
-      timed ? formatTimestamp(row.timestamp) : String(row.block),
-    ),
-  );
+
+  // An unfiltered table is the common case and returns the list it was given, so
+  // no row is touched at all until someone types. Memoised because these run on
+  // every render otherwise, and a keystroke in one search box is a render for all
+  // three tables.
+  const visibleClients = useMemo(() => {
+    const needle = needleOf(clientQuery);
+    if (!needle) return rankedClients;
+    return rankedClients.filter((client) =>
+      matches(needle, client.address, client.network),
+    );
+  }, [rankedClients, clientQuery]);
+
+  const visibleDeployments = useMemo(() => {
+    const needle = needleOf(deploymentQuery);
+    if (!needle) return data.deployments;
+    return data.deployments.filter((row) =>
+      matches(needle, row.address, row.network, formatTimestamp(row.timestamp)),
+    );
+  }, [data.deployments, deploymentQuery]);
+
+  const visibleRedemptions = useMemo(() => {
+    const needle = needleOf(feedQuery);
+    if (!needle) return data.recentRedemptions;
+    return data.recentRedemptions.filter((row) =>
+      matches(
+        needle,
+        row.source,
+        row.destination,
+        `0x${row.channelId}`,
+        row.network,
+        timed ? formatTimestamp(row.timestamp) : String(row.block),
+      ),
+    );
+  }, [data.recentRedemptions, feedQuery, timed]);
 
   const clientRows = () => [
     ['rank', 'client', 'network', 'redemptions', 'upstream_mb'],
@@ -1037,12 +1147,14 @@ export default function Dashboard({
 
   // One row per contract, one column per network: the same role deployed twice is
   // a comparison, not two unrelated rows.
-  const contractNetworks = [
-    ...new Set(data.contracts.map((row) => row.network)),
-  ];
-  const contractRoles = [
-    ...new Set(data.contracts.map((row) => row.role)),
-  ].sort();
+  const contractNetworks = useMemo(
+    () => [...new Set(data.contracts.map((row) => row.network))],
+    [data.contracts],
+  );
+  const contractRoles = useMemo(
+    () => [...new Set(data.contracts.map((row) => row.role))].sort(),
+    [data.contracts],
+  );
 
   // The oldest cohort has the most months behind it and so sets the export width.
   const cohortWidth = Math.max(
@@ -1912,7 +2024,7 @@ export default function Dashboard({
                           <ClientCell
                             address={client.address}
                             network={client.network}
-                            known={client.key in data.clientDetails}
+                            known={knownClients.has(client.key)}
                             onOpen={setInspected}
                           />
                         </td>
@@ -1994,7 +2106,7 @@ export default function Dashboard({
                           <ClientCell
                             address={deployment.address}
                             network={deployment.network}
-                            known={deployment.key in data.clientDetails}
+                            known={knownClients.has(deployment.key)}
                             onOpen={setInspected}
                           />
                         </td>
@@ -2080,10 +2192,9 @@ export default function Dashboard({
                       <ClientCell
                         address={redemption.source}
                         network={redemption.network}
-                        known={
-                          clientKey(redemption.network, redemption.source) in
-                          data.clientDetails
-                        }
+                        known={knownClients.has(
+                          clientKey(redemption.network, redemption.source),
+                        )}
                         onOpen={setInspected}
                       />
                     </td>
@@ -2201,6 +2312,8 @@ export default function Dashboard({
 
       <ClientDialog
         detail={inspecting}
+        pending={inspected !== null && !answered}
+        failed={inspectFailed}
         networkLabel={
           dashboard.networks.length > 1 && inspecting
             ? labelOf(inspecting.network)

@@ -34,45 +34,31 @@
 -- heap to build rows nobody reads. Given none, the caller falls back to guessing
 -- the exits by elimination, and that needs the probe traffic to calibrate with,
 -- so the whole set is returned.
-WITH ordered AS (
+--
+-- Which channels qualify is decided FIRST, in `client_channel`, and the window
+-- function then runs over those channels only. Every one of those predicates is a
+-- property of the channel rather than of the event row, and the window partitions
+-- by channel, so dropping a channel outright cannot change the LAG of any row that
+-- survives. Applied after the window instead — as they read more naturally — they
+-- cannot be pushed down through it, and the partition sort ends up running over
+-- every event in the table on a network where client traffic is a small fraction
+-- of it.
+WITH client_channel AS (
   SELECT
-    cs.channel_id,
-    cs.published_block,
-    cs.epoch,
-    cs.ticket_index,
-    cs.balance,
-    LAG(cs.epoch) OVER w AS previous_epoch,
-    LAG(cs.ticket_index) OVER w AS previous_ticket_index,
-    LAG(cs.balance) OVER w AS previous_balance
-  FROM channel_state cs
-  WHERE cs.corrupted_state = FALSE
-    AND cs.reorg_correction = FALSE
-  WINDOW w AS (
-    PARTITION BY cs.channel_id
-    ORDER BY cs.published_block, cs.published_tx_index, cs.published_log_index
-  )
-)
-SELECT
-  source_account.chain_key AS source,
-  destination_account.chain_key AS destination,
-  EXISTS (
-    SELECT 1 FROM announcement WHERE announcement.account_id = channel.source
-  ) AS source_announced,
-  ordered.published_block,
-  ordered.ticket_index - ordered.previous_ticket_index AS tickets,
-  ordered.previous_balance AS balance_before,
-  ordered.balance AS balance_after
-FROM ordered
-JOIN channel ON channel.id = ordered.channel_id
-JOIN account AS source_account ON source_account.id = channel.source
-JOIN account AS destination_account ON destination_account.id = channel.destination
-WHERE ordered.previous_ticket_index IS NOT NULL
-  AND ordered.epoch = ordered.previous_epoch
-  AND ordered.ticket_index > ordered.previous_ticket_index
+    channel.id,
+    source_account.chain_key AS source,
+    destination_account.chain_key AS destination,
+    -- Whether the payer announced: an announced payer is a relay or an exit.
+    EXISTS (
+      SELECT 1 FROM announcement WHERE announcement.account_id = channel.source
+    ) AS source_announced
+  FROM channel
+  JOIN account AS source_account ON source_account.id = channel.source
+  JOIN account AS destination_account ON destination_account.id = channel.destination
   -- Traffic is only paid for hop by hop, and every hop that gets paid terminates
   -- at an announced node. A channel to an unannounced account carries no relayed
   -- traffic, so it is not a hop anyone is being paid for.
-  AND EXISTS (
+  WHERE EXISTS (
     SELECT 1 FROM announcement WHERE announcement.account_id = channel.destination
   )
   AND (
@@ -84,4 +70,33 @@ WHERE ordered.previous_ticket_index IS NOT NULL
     -- Downstream: the payer is a known exit.
     OR source_account.chain_key = ANY ($1::bytea[])
   )
+),
+ordered AS (
+  SELECT
+    cs.channel_id,
+    cs.published_block,
+    cs.epoch,
+    cs.ticket_index,
+    LAG(cs.epoch) OVER w AS previous_epoch,
+    LAG(cs.ticket_index) OVER w AS previous_ticket_index
+  FROM channel_state cs
+  JOIN client_channel ON client_channel.id = cs.channel_id
+  WHERE cs.corrupted_state = FALSE
+    AND cs.reorg_correction = FALSE
+  WINDOW w AS (
+    PARTITION BY cs.channel_id
+    ORDER BY cs.published_block, cs.published_tx_index, cs.published_log_index
+  )
+)
+SELECT
+  client_channel.source,
+  client_channel.destination,
+  client_channel.source_announced,
+  ordered.published_block,
+  ordered.ticket_index - ordered.previous_ticket_index AS tickets
+FROM ordered
+JOIN client_channel ON client_channel.id = ordered.channel_id
+WHERE ordered.previous_ticket_index IS NOT NULL
+  AND ordered.epoch = ordered.previous_epoch
+  AND ordered.ticket_index > ordered.previous_ticket_index
 ORDER BY ordered.published_block ASC;

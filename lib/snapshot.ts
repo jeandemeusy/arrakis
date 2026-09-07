@@ -368,9 +368,9 @@ export type Redemption = {
  * which is the correction `downstreamByRelayDay` applies.
  */
 type Traffic = {
-  upstream: Redemption[];
-  downstream: Redemption[];
-  probe: Redemption[];
+  upstream: Keyed[];
+  downstream: Keyed[];
+  probe: Keyed[];
 };
 
 /**
@@ -391,14 +391,12 @@ type Traffic = {
  * against a known list says whether any have gone quiet.
  */
 function classify(
-  redemptions: Redemption[],
+  redemptions: Keyed[],
   knownExits: Set<string>,
 ): Traffic & { exits: Set<string> } {
   const relays = new Set<string>();
   for (const redemption of redemptions) {
-    if (!redemption.sourceAnnounced) {
-      relays.add(identity(redemption.network, redemption.destination));
-    }
+    if (!redemption.sourceAnnounced) relays.add(redemption.destinationKey);
   }
 
   const traffic: Traffic & { exits: Set<string> } = {
@@ -413,8 +411,8 @@ function classify(
       traffic.upstream.push(redemption);
       continue;
     }
-    const payer = identity(redemption.network, redemption.source);
-    const paid = identity(redemption.network, redemption.destination);
+    const payer = redemption.sourceKey;
+    const paid = redemption.destinationKey;
 
     // Membership, checked before anything else, is what makes a named exit
     // survive also being a relay.
@@ -466,11 +464,11 @@ function classify(
 const PROBE_QUANTILE = 0.1;
 
 function downstreamByRelayDay(
-  candidates: Redemption[],
-  probes: Redemption[],
+  candidates: Keyed[],
+  probes: Keyed[],
   applyFloor: boolean,
 ): { perRelay: Map<number, Map<string, number>>; floor: Map<number, number> } {
-  const gather = (rows: Redemption[]) => {
+  const gather = (rows: Keyed[]) => {
     const volume = new Map<number, number>();
     const senders = new Map<number, Set<string>>();
     // What each payer spent, so the rate can be read off the quiet end.
@@ -479,7 +477,7 @@ function downstreamByRelayDay(
     const arrivals = new Map<number, Map<string, number>>();
     for (const row of rows) {
       volume.set(row.day, (volume.get(row.day) ?? 0) + row.gigabytes);
-      const sender = identity(row.network, row.source);
+      const sender = row.sourceKey;
       const set = senders.get(row.day) ?? new Set<string>();
       set.add(sender);
       senders.set(row.day, set);
@@ -487,7 +485,7 @@ function downstreamByRelayDay(
       spend.set(sender, (spend.get(sender) ?? 0) + row.gigabytes);
       bySender.set(row.day, spend);
       const byRelay = arrivals.get(row.day) ?? new Map<string, number>();
-      const relay = identity(row.network, row.destination);
+      const relay = row.destinationKey;
       byRelay.set(relay, (byRelay.get(relay) ?? 0) + row.gigabytes);
       arrivals.set(row.day, byRelay);
     }
@@ -598,8 +596,23 @@ export function dayIndex(timestamp: number): number {
   return Math.floor(timestamp / DAY_SECONDS);
 }
 
+/**
+ * Memoised, because the callers ask for the same handful of days over and over.
+ *
+ * The drill-down alone formats the recent window once per client, so a few
+ * thousand clients means tens of thousands of `Date` constructions for thirty
+ * distinct answers. One entry per day index ever rendered is bounded by the
+ * length of the indexed history.
+ */
+const isoDates = new Map<number, string>();
+
 export function isoDate(day: number): string {
-  return new Date(day * DAY_SECONDS * 1000).toISOString().slice(0, 10);
+  let value = isoDates.get(day);
+  if (value === undefined) {
+    value = new Date(day * DAY_SECONDS * 1000).toISOString().slice(0, 10);
+    isoDates.set(day, value);
+  }
+  return value;
 }
 
 /** Volume a redemption accounts for; a zero or unknown probability contributes none. */
@@ -613,6 +626,42 @@ export function redemptionVolume(probability: number): number {
  */
 function identity(network: string, address: string): string {
   return `${network} ${address}`;
+}
+
+/**
+ * A redemption with its participants' identities already resolved.
+ *
+ * Six of the passes below need the identity of a redemption's payer, its payee or
+ * both — the classifier, the probe-floor gather, the relayer breakdown, the client
+ * ranking, the retention cohorts, the active-user index and the drill-down. Each
+ * was calling `identity` itself, so the same string was built from scratch half a
+ * dozen times per row and thrown away every time. At a few hundred thousand
+ * redemptions that is millions of transient allocations, and it showed up spread
+ * across every one of those frames in the profile rather than in any single one.
+ */
+type Keyed = Redemption & { sourceKey: string; destinationKey: string };
+
+/** A deployment with its identity resolved, for the same reason. */
+type KeyedClient = DeployedClient & { key: string };
+
+/**
+ * Interns identities within one network.
+ *
+ * A network has a few dozen relays and some thousands of clients, so the distinct
+ * identities number in the thousands however many redemptions there are. Built
+ * once each and shared, they cost one string per participant instead of one per
+ * mention.
+ */
+function interner(network: string) {
+  const pool = new Map<string, string>();
+  return (address: string): string => {
+    let key = pool.get(address);
+    if (key === undefined) {
+      key = identity(network, address);
+      pool.set(address, key);
+    }
+    return key;
+  };
 }
 
 function weekLabel(day: number): string {
@@ -732,7 +781,7 @@ function weeklySeries(
  * is charted individually — nothing is rolled into an aggregate bucket.
  */
 function relayerBreakdown(
-  redemptions: Redemption[],
+  redemptions: Keyed[],
   downstream: Map<number, Map<string, number>>,
   lastDay: number,
 ): {
@@ -751,7 +800,7 @@ function relayerBreakdown(
   const volumes = new Map<string, number>();
   const byDay = new Map<number, Map<string, number>>();
   for (const redemption of window) {
-    const key = identity(redemption.network, redemption.destination);
+    const key = redemption.destinationKey;
     named.set(key, {
       address: redemption.destination,
       network: redemption.network,
@@ -815,7 +864,7 @@ function relayerBreakdown(
   // one panel and a month in the other would make that legend a lie.
   const totals = new Map<string, { redemptions: number; gigabytes: number }>();
   for (const redemption of window) {
-    const key = identity(redemption.network, redemption.destination);
+    const key = redemption.destinationKey;
     const bucket = totals.get(key) ?? { redemptions: 0, gigabytes: 0 };
     bucket.redemptions += 1;
     bucket.gigabytes += redemption.gigabytes;
@@ -874,10 +923,13 @@ function heatmapDistribution(redemptions: Redemption[]): Heatmap {
     Array.from({ length: 24 }, () => 0),
   );
   for (const redemption of redemptions) {
-    const at = new Date(redemption.timestamp * 1000);
-    // getUTCDay is Sunday-first; the grid reads Monday-first.
-    const weekday = (at.getUTCDay() + 6) % 7;
-    grid[weekday][at.getUTCHours()] += redemption.gigabytes;
+    // Read arithmetically rather than through `Date`, which this used to
+    // construct once per redemption — hundreds of thousands of objects to answer
+    // two questions a division apart. Unix day 0 was a Thursday and the grid
+    // reads Monday-first, so the weekday is the day index shifted by three.
+    const weekday = (Math.floor(redemption.timestamp / DAY_SECONDS) + 3) % 7;
+    const hour = Math.floor(redemption.timestamp / 3600) % 24;
+    grid[weekday][hour] += redemption.gigabytes;
   }
   const total = grid.flat().reduce((sofar, value) => sofar + value, 0);
   if (total === 0) return [];
@@ -902,10 +954,22 @@ function heatmapOverlap(a: Heatmap, b: Heatmap): number | null {
   return 1 - difference / 2;
 }
 
-/** Calendar month of a day index, as a count of months since year zero. */
+/**
+ * Calendar month of a day index, as a count of months since year zero.
+ *
+ * Memoised for the same reason as `isoDate`: the retention pass asks per
+ * redemption and there are only ever as many answers as there are days.
+ */
+const monthsOfDay = new Map<number, number>();
+
 function monthIndex(day: number): number {
-  const at = new Date(day * DAY_SECONDS * 1000);
-  return at.getUTCFullYear() * 12 + at.getUTCMonth();
+  let month = monthsOfDay.get(day);
+  if (month === undefined) {
+    const at = new Date(day * DAY_SECONDS * 1000);
+    month = at.getUTCFullYear() * 12 + at.getUTCMonth();
+    monthsOfDay.set(day, month);
+  }
+  return month;
 }
 
 function monthLabel(index: number): { month: string; label: string } {
@@ -930,27 +994,28 @@ function monthLabel(index: number): { month: string; label: string } {
  * the two.
  */
 function retentionCohorts(
-  redemptions: Redemption[],
-  deployed: DeployedClient[],
+  redemptions: Keyed[],
+  deployed: KeyedClient[],
   lastDay: number,
 ): RetentionCohort[] {
   if (!deployed.length) return [];
 
   const activeMonths = new Map<string, Set<number>>();
   for (const redemption of redemptions) {
-    const key = identity(redemption.network, redemption.source);
-    const months = activeMonths.get(key) ?? new Set<number>();
+    const months = activeMonths.get(redemption.sourceKey) ?? new Set<number>();
     months.add(monthIndex(redemption.day));
-    activeMonths.set(key, months);
+    activeMonths.set(redemption.sourceKey, months);
   }
 
   const cohorts = new Map<number, string[]>();
   for (const client of deployed) {
     const month = monthIndex(client.day);
-    cohorts.set(month, [
-      ...(cohorts.get(month) ?? []),
-      identity(client.network, client.address),
-    ]);
+    // Appended rather than rebuilt: copying the cohort to add one member made
+    // this quadratic in the size of the cohort, which on a busy month is every
+    // client deployed that month.
+    const members = cohorts.get(month);
+    if (members) members.push(client.key);
+    else cohorts.set(month, [client.key]);
   }
 
   const latest = monthIndex(lastDay);
@@ -960,23 +1025,23 @@ function retentionCohorts(
     .map(([month, members]) => ({
       ...monthLabel(month),
       size: members.length,
+      // Counted rather than filtered: the share is all that is wanted, and a
+      // filter allocates a copy of the cohort for every month behind it.
       retention: Array.from({ length: latest - month + 1 }, (_, offset) => {
-        const active = members.filter((key) =>
-          activeMonths.get(key)?.has(month + offset),
-        );
-        return active.length / members.length;
+        let active = 0;
+        for (const key of members) {
+          if (activeMonths.get(key)?.has(month + offset)) active += 1;
+        }
+        return active / members.length;
       }),
     }));
 }
 
 /** Per-client usage over both the recent window and all time. */
-function clientUsage(
-  redemptions: Redemption[],
-  firstRecentDay: number,
-): Client[] {
+function clientUsage(redemptions: Keyed[], firstRecentDay: number): Client[] {
   const buckets = new Map<string, Client>();
   for (const redemption of redemptions) {
-    const key = identity(redemption.network, redemption.source);
+    const key = redemption.sourceKey;
     const client = buckets.get(key) ?? {
       key,
       address: redemption.source,
@@ -1007,17 +1072,14 @@ function clientUsage(
  * the server has in hand.
  */
 function clientDetails(
-  redemptions: Redemption[],
-  deployed: DeployedClient[],
+  redemptions: Keyed[],
+  deployed: KeyedClient[],
   colorIndexOf: Map<string, number>,
   lastDay: number,
 ): Record<string, ClientDetail> {
   const firstRecentDay = lastDay - RECENT_DAYS + 1;
   const deployedAtOf = new Map(
-    deployed.map((client) => [
-      identity(client.network, client.address),
-      client.timestamp,
-    ]),
+    deployed.map((client) => [client.key, client.timestamp]),
   );
 
   type Draft = {
@@ -1055,13 +1117,12 @@ function clientDetails(
   // still has a record. Its row opens like any other, and "nothing yet" is an
   // answer — a row that quietly behaves differently is not.
   for (const client of deployed) {
-    const key = identity(client.network, client.address);
-    if (!drafts.has(key))
-      drafts.set(key, blank(client.network, client.address));
+    if (!drafts.has(client.key))
+      drafts.set(client.key, blank(client.network, client.address));
   }
 
   for (const redemption of redemptions) {
-    const key = identity(redemption.network, redemption.source);
+    const key = redemption.sourceKey;
     let draft = drafts.get(key);
     if (!draft) {
       draft = blank(redemption.network, redemption.source);
@@ -1086,7 +1147,7 @@ function clientDetails(
       );
     }
 
-    const relayerKey = identity(redemption.network, redemption.destination);
+    const relayerKey = redemption.destinationKey;
     const relayer = draft.byRelayer.get(relayerKey) ?? {
       address: redemption.destination,
       redemptions: 0,
@@ -1159,7 +1220,9 @@ function mergePanels(datasets: NetworkDataset[]): Panels {
     const byReason = new Map<string, string[]>();
     for (const dataset of failed) {
       const because = dataset.panels[key].reason ?? '';
-      byReason.set(because, [...(byReason.get(because) ?? []), dataset.label]);
+      const labels = byReason.get(because);
+      if (labels) labels.push(dataset.label);
+      else byReason.set(because, [dataset.label]);
     }
     const reason =
       datasets.length > 1
@@ -1196,7 +1259,23 @@ function bigTotalOf(values: Array<bigint | null>): string | null {
  */
 export function buildSnapshot(datasets: NetworkDataset[]): AnalyticsSnapshot {
   const combined = datasets.length > 1;
-  const all = datasets.flatMap((dataset) => dataset.redemptions);
+  // Identities are resolved once here, in the pass that was already copying every
+  // redemption into one array, and read off the row everywhere below.
+  const all: Keyed[] = [];
+  const deployed: KeyedClient[] = [];
+  for (const dataset of datasets) {
+    const keyOf = interner(dataset.network);
+    for (const row of dataset.redemptions) {
+      all.push({
+        ...row,
+        sourceKey: keyOf(row.source),
+        destinationKey: keyOf(row.destination),
+      });
+    }
+    for (const row of dataset.deployed) {
+      deployed.push({ ...row, key: keyOf(row.address) });
+    }
+  }
   // Everything that names a participant reads upstream only: it is the one
   // direction whose payer is the client itself. Downstream is real traffic with
   // no client in it, so it stays an aggregate.
@@ -1218,7 +1297,7 @@ export function buildSnapshot(datasets: NetworkDataset[]): AnalyticsSnapshot {
   const downstreamPerRelay = new Map<number, Map<string, number>>();
   const probeFloor = new Map<number, number>();
   for (const dataset of datasets) {
-    const mine = (rows: Redemption[]) =>
+    const mine = (rows: Keyed[]) =>
       rows.filter((row) => row.network === dataset.network);
     const { perRelay, floor } = downstreamByRelayDay(
       mine(candidates),
@@ -1242,7 +1321,6 @@ export function buildSnapshot(datasets: NetworkDataset[]): AnalyticsSnapshot {
   const upstreamHours = heatmapDistribution(redemptions);
   const downstreamHours = heatmapDistribution(candidates);
 
-  const deployed = datasets.flatMap((dataset) => dataset.deployed);
   const warnings = datasets.flatMap((dataset) =>
     combined
       ? dataset.warnings.map((warning) => `${dataset.label}: ${warning}`)
@@ -1257,13 +1335,13 @@ export function buildSnapshot(datasets: NetworkDataset[]): AnalyticsSnapshot {
     actorsByDay.set(day, actors);
   };
   for (const redemption of redemptions) {
-    addActor(redemption.day, identity(redemption.network, redemption.source));
+    addActor(redemption.day, redemption.sourceKey);
   }
 
   const deploymentsByDay = new Map<number, number>();
   const deploymentDayOf = new Map<string, number>();
   for (const client of deployed) {
-    const key = identity(client.network, client.address);
+    const key = client.key;
     deploymentsByDay.set(
       client.day,
       (deploymentsByDay.get(client.day) ?? 0) + 1,
@@ -1283,18 +1361,36 @@ export function buildSnapshot(datasets: NetworkDataset[]): AnalyticsSnapshot {
     relayerSeries.map((entry, index) => [entry.key, index]),
   );
   const allClients = clientUsage(redemptions, lastDay - WEEK_DAYS + 1);
-  const recent = redemptions.filter(
-    (redemption) => redemption.day > lastDay - WEEK_DAYS,
-  );
-  const month = redemptions.filter(
-    (redemption) => redemption.day > lastDay - MONTH_DAYS,
-  );
+
+  // Both trailing windows in one pass. Materialising them as filtered arrays and
+  // reducing each twice over walked the whole history four times and kept two
+  // copies of a third of it alive to do it.
+  const weekFrom = lastDay - WEEK_DAYS + 1;
+  const monthFrom = lastDay - MONTH_DAYS + 1;
+  let redemptions7d = 0;
+  let redemptions30d = 0;
+  let gigabytes7d = 0;
+  let gigabytes30d = 0;
+  let upstreamTotal = 0;
+  let ticketsTotal = 0;
+  const relayers7d = new Set<string>();
+  for (const redemption of redemptions) {
+    upstreamTotal += redemption.gigabytes;
+    ticketsTotal += redemption.tickets;
+    if (redemption.day < monthFrom) continue;
+    redemptions30d += 1;
+    gigabytes30d += redemption.gigabytes;
+    if (redemption.day < weekFrom) continue;
+    redemptions7d += 1;
+    gigabytes7d += redemption.gigabytes;
+    relayers7d.add(redemption.destinationKey);
+  }
 
   const deployments = [...deployed]
     .sort((a, b) => a.timestamp - b.timestamp)
     .reverse()
     .map((client) => ({
-      key: identity(client.network, client.address),
+      key: client.key,
       address: client.address,
       network: client.network,
       timestamp: new Date(client.timestamp * 1000).toISOString(),
@@ -1320,7 +1416,6 @@ export function buildSnapshot(datasets: NetworkDataset[]): AnalyticsSnapshot {
     (total, value) => total + value,
     0,
   );
-  const upstreamTotal = sum(redemptions, (row) => row.gigabytes);
   const downstreamOver = (days: number) => {
     let total = 0;
     for (let offset = 0; offset < days; offset += 1) {
@@ -1387,14 +1482,12 @@ export function buildSnapshot(datasets: NetworkDataset[]): AnalyticsSnapshot {
       weeklyActiveUsers: latest?.weekly ?? null,
       monthlyActiveUsers: latest?.monthly ?? null,
       allTimeUsers: hasUsage ? allClients.length : null,
-      redemptions7d: hasUsage ? recent.length : null,
-      redemptions30d: hasUsage ? month.length : null,
+      redemptions7d: hasUsage ? redemptions7d : null,
+      redemptions30d: hasUsage ? redemptions30d : null,
       redemptionsTotal: hasUsage ? redemptions.length : null,
-      gigabytes7d: hasUsage ? sum(recent, (row) => row.gigabytes) : null,
-      gigabytes30d: hasUsage ? sum(month, (row) => row.gigabytes) : null,
-      gigabytesTotal: hasUsage
-        ? sum(redemptions, (row) => row.gigabytes)
-        : null,
+      gigabytes7d: hasUsage ? gigabytes7d : null,
+      gigabytes30d: hasUsage ? gigabytes30d : null,
+      gigabytesTotal: hasUsage ? upstreamTotal : null,
       gigabytesDownstream7d: hasUsage ? downstreamOver(WEEK_DAYS) : null,
       gigabytesDownstream30d: hasUsage ? downstreamOver(MONTH_DAYS) : null,
       gigabytesDownstreamTotal: hasUsage ? downstreamTotal : null,
@@ -1414,11 +1507,8 @@ export function buildSnapshot(datasets: NetworkDataset[]): AnalyticsSnapshot {
           : null,
       exitsNamed: hasUsage ? knownExits.size : null,
       exitsSeen: hasUsage ? exits.size : null,
-      ticketsTotal: hasUsage ? sum(redemptions, (row) => row.tickets) : null,
-      relayers7d: hasUsage
-        ? new Set(recent.map((row) => identity(row.network, row.destination)))
-            .size
-        : null,
+      ticketsTotal: hasUsage ? ticketsTotal : null,
+      relayers7d: hasUsage ? relayers7d.size : null,
       deployments7d: hasDeployments ? deployments7d : null,
       deployments30d: hasDeployments ? (latest?.deployments ?? null) : null,
       clientsDeployed: hasDeployments ? deployed.length : null,
