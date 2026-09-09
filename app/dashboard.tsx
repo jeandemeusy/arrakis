@@ -1352,25 +1352,6 @@ export default function Dashboard({
             onExpand={setEnlarged}
             chart={<VolumeChart weeks={data.weeks} />}
           />
-          <Tile
-            id="share"
-            status={panels.usage}
-            className="service-chart span-6"
-            eyebrow="LAST 30 DAYS · UPSTREAM"
-            title="Share of redemptions"
-            legend={relayerLegend}
-            showLegend={false}
-            note={
-              <>
-                <Empty when={!data.relayers.length}>
-                  No client redemptions were indexed in the last 30 days.
-                </Empty>
-              </>
-            }
-            expanded={enlarged}
-            onExpand={setEnlarged}
-            chart={<RelayerShareChart slices={relayerSlices} />}
-          />
         </div>
         <div className="tile-grid">
           <Metric
@@ -1540,9 +1521,28 @@ export default function Dashboard({
         </div>
         <div className="tile-grid">
           <Tile
+            id="share"
+            status={panels.usage}
+            className="service-chart span-4"
+            eyebrow="LAST 30 DAYS · UPSTREAM"
+            title="Share of data volume"
+            legend={relayerLegend}
+            showLegend={false}
+            note={
+              <>
+                <Empty when={!data.relayers.length}>
+                  No client data volume was indexed in the last 30 days.
+                </Empty>
+              </>
+            }
+            expanded={enlarged}
+            onExpand={setEnlarged}
+            chart={<RelayerShareChart slices={relayerSlices} />}
+          />
+          <Tile
             id="relayer-volume"
             status={panels.usage}
-            className="service-chart span-12"
+            className="service-chart span-8"
             eyebrow="LAST 30 DAYS"
             title="Estimated daily volume per relayer"
             legend={relayerLegend}

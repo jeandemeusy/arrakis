@@ -22,7 +22,6 @@ import {
   CURSOR,
   GRID,
   INK,
-  INTEGER,
   PLUM,
   TOOLTIP,
   YELLOW,
@@ -232,7 +231,7 @@ export const RelayerShareChart = memo(function RelayerShareChart({
       <PieChart>
         <Pie
           data={slices}
-          dataKey="redemptions"
+          dataKey="gigabytes"
           nameKey="address"
           innerRadius="55%"
           outerRadius="82%"
@@ -244,7 +243,7 @@ export const RelayerShareChart = memo(function RelayerShareChart({
           contentStyle={ADDRESS_TOOLTIP}
           formatter={(input: unknown, name: unknown) =>
             [
-              `${INTEGER.format(Number(input))} redemptions`,
+              volume(Number(input)),
               typeof name === 'string' ? name : '',
             ] as [string, string]
           }

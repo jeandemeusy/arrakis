@@ -774,7 +774,7 @@ function weeklySeries(
 }
 
 /**
- * Relayer breakdown: the ordering, the daily stack and the share of redemptions.
+ * Relayer breakdown: the ordering, the daily stack and the share of data volume.
  *
  * The stacked chart, the donut and the legend all read from one list of relayers,
  * ordered by volume, so a colour means the same relayer everywhere. Every relayer
@@ -859,9 +859,10 @@ function relayerBreakdown(
   const daily = stack(byDay);
   const downstreamDaily = stack(downstream);
 
-  // The share breakdown reads the same window as the stack beside it. They share
-  // one legend and one colour per relayer, so a relayer weighted over a week in
-  // one panel and a month in the other would make that legend a lie.
+  // The share breakdown reads the same window as the stack beside it. It is
+  // weighted by estimated volume, not redemption count: a redemption's traffic
+  // depends on the winning probability in force at its block. One legend and one
+  // colour per relayer keep the two views directly comparable.
   const totals = new Map<string, { redemptions: number; gigabytes: number }>();
   for (const redemption of window) {
     const key = redemption.destinationKey;
@@ -870,6 +871,10 @@ function relayerBreakdown(
     bucket.gigabytes += redemption.gigabytes;
     totals.set(key, bucket);
   }
+  const totalGigabytes = [...totals.values()].reduce(
+    (total, bucket) => total + bucket.gigabytes,
+    0,
+  );
   const distribution = [...totals.entries()]
     .map(([key, bucket]) => ({
       key,
@@ -877,10 +882,10 @@ function relayerBreakdown(
       network: named.get(key)?.network ?? '',
       redemptions: bucket.redemptions,
       gigabytes: bucket.gigabytes,
-      share: bucket.redemptions / window.length,
+      share: totalGigabytes ? bucket.gigabytes / totalGigabytes : 0,
       colorIndex: colorIndexOf.get(key) ?? 0,
     }))
-    .sort((a, b) => b.redemptions - a.redemptions);
+    .sort((a, b) => b.gigabytes - a.gigabytes);
 
   return { series, daily, downstreamDaily, distribution };
 }
