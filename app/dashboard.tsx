@@ -1140,7 +1140,7 @@ export default function Dashboard({
         Skip to content
       </a>
       <header className="topbar">
-        <a className="brand" href="#top" aria-label="Bloklune home">
+        <a className="brand" href="#top" aria-label="Arrakis home">
           <span className="brand-mark">
             <span />
           </span>

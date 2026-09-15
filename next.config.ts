@@ -3,7 +3,11 @@ import type { NextConfig } from 'next';
 const nextConfig: NextConfig = {
   // Emits .next/standalone with a self-contained server and only the traced
   // dependencies, which is what the container image ships.
-  output: 'standalone',
+  // The package derivation enables standalone output for the container. The
+  // development shell keeps ordinary output because its dependencies are
+  // symlinks into the read-only Nix store, which Next's standalone tracer
+  // cannot copy safely.
+  output: process.env.NEXT_STANDALONE === '1' ? 'standalone' : undefined,
 
   // Auto-memoises client components, so a re-render caused by one widget's state
   // does not reconcile every chart and table on the page. The repo already lints

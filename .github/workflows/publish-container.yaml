@@ -17,14 +17,13 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  IMAGE_NAME: ghcr.io/jeandemeusy/bloklune
+  IMAGE_NAME: ghcr.io/jeandemeusy/arrakis
 
 # There is deliberately no Nix store cache here. Everything these jobs pull is
 # stock nixpkgs, already served by cache.nixos.org; the only paths this repo
-# builds are the bloklune package and its npm-deps FOD, and both change on
+# builds are the arrakis package and its npm-deps FOD, and both change on
 # almost every push. Uploading the closure to the Actions cache cost ~5 min a
-# run and saved nothing. What is worth caching is npm's own download cache,
-# which `nix develop` does not cover.
+# run and saved nothing.
 
 jobs:
   check:
@@ -39,16 +38,8 @@ jobs:
           extra-conf: |
             accept-flake-config = true
 
-      - name: Cache npm downloads
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.npm
-          key: npm-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
-          restore-keys: npm-${{ runner.os }}-
-
       - name: Type check and lint
         run: |
-          nix develop --command npm ci
           nix develop --command npx tsc --noEmit
           nix develop --command npm run lint
 

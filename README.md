@@ -1,4 +1,4 @@
-# Bloklune
+# Arrakis
 
 A public, read-only investor dashboard powered by a Blokli index database. The
 application is intentionally self-contained so it can live in a dedicated
@@ -186,13 +186,13 @@ nix build .#container   # Linux only; dockerTools does not run on macOS
 docker load < result
 ```
 
-`nix build .#bloklune` produces the same application tree without wrapping it in
-an image, and `result/bin/bloklune` runs it directly. Both use Next's standalone
+`nix build .#arrakis` produces the same application tree without wrapping it in
+an image, and `result/bin/arrakis` runs it directly. Both use Next's standalone
 output, so only the dependencies `next build` actually traced are shipped.
 
 The `Publish container` workflow type-checks and lints every pull request, and on
 a push to `main` or a `v*` tag builds the image and publishes it to
-`ghcr.io/jeandemeusy/bloklune`. Every build receives an immutable
+`ghcr.io/jeandemeusy/arrakis`. Every build receives an immutable
 `sha-<full-commit-sha>` tag; version tags and the mutable `main` convenience tag
 are also published.
 

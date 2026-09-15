@@ -8,7 +8,8 @@
   "scripts": {
     "dev": "next dev",
     "dev:fixtures": "DASHBOARD_FIXTURES=1 next dev",
-    "build": "next build",
+    "build": "nix develop -c npm run build:nix",
+    "build:nix": "next build --webpack",
     "start": "next start",
     "lint": "oxlint app lib && stylelint 'app/**/*.css'",
     "format": "oxfmt && stylelint --fix 'app/**/*.css'"
