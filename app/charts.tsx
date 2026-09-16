@@ -8,6 +8,8 @@ import {
   CartesianGrid,
   ComposedChart,
   Line,
+  Pie,
+  PieChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -248,90 +250,46 @@ export const DailyUsersChart = memo(function DailyUsersChart({
   );
 });
 
-export type RelayerParetoPoint = {
-  label: string;
+export type RelayerSharePoint = {
+  address: string;
   gigabytes: number;
-  cumulativeShare: number;
+  fill: string;
 };
 
 /**
- * The ranked view answers concentration at a glance: bar length says volume,
- * the line says how much of the market the leaders account for together.
+ * A compact concentration ring. The tail is one slice so the chart remains a
+ * recognisable shape rather than a wheel of indistinguishable address fragments.
  */
-export const RelayerParetoChart = memo(function RelayerParetoChart({
-  points,
+export const RelayerShareChart = memo(function RelayerShareChart({
+  slices,
 }: {
-  points: RelayerParetoPoint[];
+  slices: RelayerSharePoint[];
 }) {
   const palette = usePalette();
   return (
     <ResponsiveContainer width="100%" height={250}>
-      <ComposedChart
-        layout="vertical"
-        data={points}
-        margin={{ top: 18, right: 12, left: 0, bottom: 0 }}
-      >
-        <CartesianGrid
-          horizontal={false}
-          stroke={palette.grid}
-          strokeDasharray={palette.gridDash}
-        />
-        <XAxis
-          xAxisId="volume"
-          type="number"
-          axisLine={false}
-          tickLine={false}
-          tick={palette.axis}
-          tickFormatter={(value: number) => volume(value)}
-        />
-        <XAxis
-          xAxisId="share"
-          type="number"
-          orientation="top"
-          domain={[0, 1]}
-          axisLine={false}
-          tickLine={false}
-          tick={palette.axis}
-          tickFormatter={(value: number) => `${Math.round(value * 100)}%`}
-        />
-        <YAxis
-          type="category"
-          dataKey="label"
-          axisLine={false}
-          tickLine={false}
-          tick={palette.axis}
-          width={102}
+      <PieChart>
+        <Pie
+          data={slices}
+          dataKey="gigabytes"
+          nameKey="address"
+          innerRadius="55%"
+          outerRadius="82%"
+          paddingAngle={1}
+          stroke={palette.barStroke ?? 'none'}
+          strokeWidth={palette.barStrokeWidth}
+          isAnimationActive={false}
         />
         <Tooltip
-          cursor={palette.cursor}
           contentStyle={palette.addressTooltip}
           formatter={(input: unknown, name: unknown) =>
-            name === 'Cumulative share'
-              ? `${(Number(input) * 100).toFixed(1)}%`
-              : volume(Number(input))
+            [volume(Number(input)), typeof name === 'string' ? name : ''] as [
+              string,
+              string,
+            ]
           }
         />
-        <Bar
-          dataKey="gigabytes"
-          xAxisId="volume"
-          name="Volume"
-          fill={palette.accent}
-          stroke={palette.barStroke}
-          strokeWidth={palette.barStrokeWidth}
-          radius={palette.barRadius}
-          isAnimationActive={false}
-        />
-        <Line
-          type="monotone"
-          dataKey="cumulativeShare"
-          xAxisId="share"
-          name="Cumulative share"
-          stroke={palette.accent2}
-          strokeWidth={palette.lineWidth}
-          dot={{ r: 2, fill: palette.accent2 }}
-          isAnimationActive={false}
-        />
-      </ComposedChart>
+      </PieChart>
     </ResponsiveContainer>
   );
 });

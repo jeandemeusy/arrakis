@@ -57,8 +57,8 @@ const DailyUsersChart = dynamicImport(
   () => import('./charts').then((module) => module.DailyUsersChart),
   { ssr: false, loading: reserve(250) },
 );
-const RelayerParetoChart = dynamicImport(
-  () => import('./charts').then((module) => module.RelayerParetoChart),
+const RelayerShareChart = dynamicImport(
+  () => import('./charts').then((module) => module.RelayerShareChart),
   { ssr: false, loading: reserve(250) },
 );
 const RelayerStackChart = dynamicImport(
@@ -1021,29 +1021,28 @@ export default function Dashboard({
   /** Asked and answered with a failure, as opposed to still waiting. */
   const inspectFailed = answered && fetched.detail === null;
 
-  // The ranked view stays deliberately short. The tail is a meaningful share of
-  // the network, so it becomes one "Other" row rather than disappearing.
-  const relayerPareto = useMemo(() => {
-    const leaders = data.relayers.slice(0, 10).map((relayer, index) => ({
-      label: `${index + 1}. ${shortAddress(relayer.address)}`,
+  // The ring stays readable because the long tail is one intentional slice,
+  // while hovering preserves every address where it is actually needed.
+  const relayerSlices = useMemo(() => {
+    const leaders = data.relayers.slice(0, 20).map((relayer) => ({
+      address: relayer.address,
       gigabytes: relayer.gigabytes,
+      fill: relayerColor(
+        palette,
+        relayer.colorIndex,
+        data.relayerSeries.length,
+      ),
     }));
-    const tail = data.relayers.slice(10);
+    const tail = data.relayers.slice(20);
     const other = tail.reduce((total, relayer) => total + relayer.gigabytes, 0);
-    if (other > 0) leaders.push({ label: 'Other relayers', gigabytes: other });
-
-    let cumulative = 0;
-    return leaders.map((entry) => {
-      cumulative += entry.gigabytes;
-      return {
-        ...entry,
-        cumulativeShare: cumulative / (data.relayers.reduce(
-          (total, relayer) => total + relayer.gigabytes,
-          0,
-        ) || 1),
-      };
-    });
-  }, [data.relayers]);
+    if (other > 0)
+      leaders.push({
+        address: 'Other relayers',
+        gigabytes: other,
+        fill: palette.seriesNeutral,
+      });
+    return leaders;
+  }, [data.relayers, data.relayerSeries.length, palette]);
 
   // Series are keyed by network+address to stay unique; labels must resolve back
   // to the plain address rather than slicing the composite key.
@@ -1091,10 +1090,6 @@ export default function Dashboard({
     color: relayerColor(palette, relayer.colorIndex, data.relayerSeries.length),
     label: shortAddress(relayer.address),
   }));
-  const paretoLegend: LegendEntry[] = [
-    { color: palette.accent, label: 'Relay volume' },
-    { color: palette.accent2, label: 'Cumulative share', align: 'right' },
-  ];
 
   const hourGrid = hours === 'upstream' ? data.heatmap : data.heatmapDownstream;
   // With no RPC the clock is extrapolated from block height, so the feed shows
@@ -1580,7 +1575,7 @@ export default function Dashboard({
             className="service-chart span-4"
             eyebrow="LAST 30 DAYS · UPSTREAM"
             title="Relayer concentration"
-            legend={paretoLegend}
+            showLegend={false}
             note={
               <>
                 <Empty when={!data.relayers.length}>
@@ -1590,7 +1585,7 @@ export default function Dashboard({
             }
             expanded={enlarged}
             onExpand={setEnlarged}
-            chart={<RelayerParetoChart points={relayerPareto} />}
+            chart={<RelayerShareChart slices={relayerSlices} />}
           />
           <Tile
             id="relayer-volume"
