@@ -4,32 +4,35 @@ import {
   cloneElement,
   useEffect,
   useRef,
+  type CSSProperties,
   type ReactElement,
   type ReactNode,
 } from 'react';
 import { AlertTriangle, Download, Maximize, Search, X } from 'lucide-react';
 
 import type { PanelStatus } from '@/lib/snapshot';
-
-const PAPER = '#fffdf8';
-const INK = '#17191c';
-const MUTED = '#6a6760';
-const SANS = 'Arial, Helvetica, sans-serif';
+import type { Palette } from './chart-theme';
+import { usePalette } from './style';
 
 /** One legend entry, shared by the rendered legend and the exported image. */
 export type LegendEntry = { color: string; label: string; dashed?: boolean };
 
+/*
+ * The series colour is handed to CSS as a custom property rather than as a
+ * finished `background`, so the stylesheet decides what shape a swatch is: a
+ * rule in the editorial style, a block in the heavy one. Setting `background`
+ * inline would have pinned that decision here, and a style that draws swatches
+ * as outlined blocks could then only blank them out, losing the colour that is
+ * the whole point of a key.
+ */
 export function ChartLegend({ items }: { items: LegendEntry[] }) {
   return (
     <div className="legend">
       {items.map((item) => (
         <span key={item.label}>
           <i
-            style={
-              item.dashed
-                ? { borderTop: `2px dashed ${item.color}`, background: 'none' }
-                : { background: item.color }
-            }
+            className={item.dashed ? 'dashed' : undefined}
+            style={{ '--swatch': item.color } as CSSProperties}
           />
           {item.label}
         </span>
@@ -140,16 +143,18 @@ async function rasterise(
 export async function exportChart(
   frame: HTMLElement | null,
   title: string,
+  palette: Palette,
   legend: LegendEntry[] = [],
 ) {
   const source = frame?.querySelector('svg');
   if (!source) return;
+  const faces = palette.faces;
 
   const { width, height } = source.getBoundingClientRect();
   const clone = source.cloneNode(true) as SVGSVGElement;
   clone.setAttribute('width', String(width));
   clone.setAttribute('height', String(height));
-  clone.style.fontFamily = SANS;
+  clone.style.fontFamily = faces.sans;
 
   const pad = 24;
   const perRow = Math.max(1, Math.floor(width / 190));
@@ -162,17 +167,29 @@ export async function exportChart(
   out.setAttribute('xmlns', SVG_NS);
   // The viewBox stays in logical units; `rasterise` sets the pixel size.
   out.setAttribute('viewBox', `0 0 ${totalWidth} ${totalHeight}`);
-  out.append(svgRect(0, 0, totalWidth, totalHeight, PAPER));
+  out.append(svgRect(0, 0, totalWidth, totalHeight, palette.surface));
   out.append(
-    svgText(title, pad, pad + 12, 'Georgia, serif', INK, { 'font-size': '17' }),
+    svgText(title, pad, pad + 12, faces.display, palette.ink, {
+      'font-size': '17',
+    }),
   );
 
   legend.forEach((item, index) => {
     const x = pad + (index % perRow) * 190;
     const y = pad + 34 + Math.floor(index / perRow) * 20;
-    out.append(svgRect(x, y - 1, 20, 2, item.color));
+    // A style that outlines its marks gets a block; one that does not, a rule.
+    const swatch = palette.barStroke
+      ? svgRect(x, y - 6, 20, 12, item.color)
+      : svgRect(x, y - 1, 20, 2, item.color);
+    if (palette.barStroke) {
+      swatch.setAttribute('stroke', palette.barStroke);
+      swatch.setAttribute('stroke-width', String(palette.barStrokeWidth));
+    }
+    out.append(swatch);
     out.append(
-      svgText(item.label, x + 28, y + 4, SANS, MUTED, { 'font-size': '12' }),
+      svgText(item.label, x + 28, y + 4, faces.sans, palette.muted, {
+        'font-size': '12',
+      }),
     );
   });
 
@@ -190,7 +207,13 @@ export async function exportChart(
  * A number tile is a label, a figure and a note, so the image reproduces them with
  * the same faces and colours the page uses rather than rasterising the DOM.
  */
-async function exportFigure(title: string, figure: string, note: string) {
+async function exportFigure(
+  title: string,
+  figure: string,
+  note: string,
+  palette: Palette,
+) {
+  const faces = palette.faces;
   const width = 520;
   const height = 240;
   const pad = 34;
@@ -198,21 +221,23 @@ async function exportFigure(title: string, figure: string, note: string) {
   const out = document.createElementNS(SVG_NS, 'svg');
   out.setAttribute('xmlns', SVG_NS);
   out.setAttribute('viewBox', `0 0 ${width} ${height}`);
-  out.append(svgRect(0, 0, width, height, PAPER));
+  out.append(svgRect(0, 0, width, height, palette.surface));
   out.append(
-    svgText(title.toUpperCase(), pad, pad, SANS, MUTED, {
+    svgText(title.toUpperCase(), pad, pad, faces.sans, palette.muted, {
       'font-size': '10',
       'letter-spacing': '1.4',
     }),
   );
   out.append(
-    svgText(figure, pad, pad + 92, 'Georgia, serif', INK, {
+    svgText(figure, pad, pad + 92, faces.display, palette.ink, {
       'font-size': '68',
     }),
   );
   if (note) {
     out.append(
-      svgText(note, pad, height - pad, SANS, MUTED, { 'font-size': '12' }),
+      svgText(note, pad, height - pad, faces.sans, palette.muted, {
+        'font-size': '12',
+      }),
     );
   }
 
@@ -313,6 +338,7 @@ export function Tile({
 }: TileProps) {
   const dialog = useRef<HTMLDialogElement>(null);
   const frame = useRef<HTMLDivElement>(null);
+  const palette = usePalette();
   const open = expanded === id;
 
   useEffect(() => {
@@ -328,8 +354,9 @@ export function Tile({
   // Nothing to export from a tile whose query never returned.
   const canDownload = Boolean(chart || rows || isNumber) && !broken;
   const download = () => {
-    if (chart) void exportChart(frame.current, title, legend);
-    else if (isNumber) void exportFigure(title, figure, noteText ?? '');
+    if (chart) void exportChart(frame.current, title, palette, legend);
+    else if (isNumber)
+      void exportFigure(title, figure, noteText ?? '', palette);
     else if (rows) exportCsv(rows(), title);
   };
 

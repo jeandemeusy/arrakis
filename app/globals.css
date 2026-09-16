@@ -1,5 +1,5 @@
 :where(a, button, [tabindex]):focus-visible {
-  outline: 2px solid #8a6d00;
+  outline: 2px solid var(--warn-ink);
   outline-offset: 2px;
   border-radius: 2px;
 }
@@ -22,7 +22,7 @@
   top: -60px;
   z-index: 10;
   background: var(--ink);
-  color: #f6f3ea;
+  color: var(--on-ink);
   padding: 10px 16px;
   font-size: 12px;
   letter-spacing: 0.08em;
@@ -33,12 +33,78 @@
   top: 12px;
 }
 
+/*
+ * The style tokens.
+ *
+ * Every colour, rule weight, radius, shadow and face on the page is named here
+ * and nowhere else, so a second visual style is a second block of values rather
+ * than a second stylesheet. `[data-style='neubrutal']` at the foot of this file
+ * is that second block: it restates these tokens and adds only the handful of
+ * rules whose *shape* differs (hard shadows, pressed buttons), because the rest
+ * of the page already reads its appearance from here.
+ *
+ * The attribute lives on <html> and is written before first paint by the inline
+ * script in `app/layout.tsx`, so a reload never flashes the other style.
+ */
 :root {
-  --ink: #111315;
+  color-scheme: light;
+
+  /* Ground and panels. */
   --paper: #f2efe7;
-  --yellow: #ffd84d;
+  --surface: #fffdf8;
+  --surface-alt: #f4f1e8;
+  --surface-veil: rgb(255 253 248 / 0.85);
+  --on-ink: #f6f3ea;
+
+  /* Text. */
+  --ink: #111315;
+  --ink-soft: #35332f;
   --muted: #6a6760;
+  --muted-2: #55534e;
+  --muted-3: #98958e;
+  --footer-muted: #7f858b;
+
+  /* Accents. Mirrored in `app/chart-theme.ts` for the plots. */
+  --yellow: #ffd84d;
+  --accent-2: #8d4f68;
+  --accent-3: #4c8f7b;
+
+  /* Rules and separators. */
   --line: #d7d2c7;
+  --line-soft: #ece8de;
+  --line-strong: #c3bfb4;
+
+  /* A relay with no place in a chart's key still needs a swatch. */
+  --swatch-unknown: #b8b4aa;
+
+  /* Rules drawn over the accent band, where a grey has too little contrast. */
+  --rule-strong: rgb(0 0 0 / 0.3);
+  --rule: rgb(0 0 0 / 0.25);
+  --rule-soft: rgb(0 0 0 / 0.12);
+  --rule-text: rgb(0 0 0 / 0.35);
+
+  /* States. */
+  --ok: #35ba75;
+  --ok-halo: rgb(53 186 117 / 0.12);
+  --warn: #d8a916;
+  --warn-halo: rgb(216 169 22 / 0.12);
+  --warn-ink: #5f4700;
+  --danger: #7a4a5e;
+  --overlay: rgb(17 19 21 / 0.5);
+
+  /* Faces. The display face carries headings and every figure. */
+  --font-sans: 'Arial', 'Helvetica', sans-serif;
+  --font-display: 'Georgia', 'Times New Roman', serif;
+  --display-weight: 400;
+
+  /* Shape. A tile's border, its corner, and what it casts. */
+  --tile-border: 0;
+  --tile-border-color: var(--line);
+  --tile-shadow: none;
+  --control-border: 1px;
+  --radius: 0px;
+  --radius-pill: 999px;
+  --shadow-sm: none;
 
   /* One horizontal inset for every full-width band, so nothing drifts out of line. */
   --gutter: clamp(24px, 5vw, 76px);
@@ -62,7 +128,7 @@ body {
   margin: 0;
   background: var(--paper);
   color: var(--ink);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans);
 }
 
 a {
@@ -136,19 +202,66 @@ main {
 .topbar nav {
   display: flex;
   gap: 32px;
-  color: #54544f;
+  color: var(--muted);
 }
 
 .topbar nav a:hover {
-  color: #000;
+  color: var(--ink);
 }
 
 .source-link {
   display: flex;
   align-items: center;
   gap: 7px;
-  border-bottom: 1px solid var(--ink);
+  border-bottom: var(--control-border) solid var(--ink);
   padding-bottom: 4px;
+}
+
+.topbar-end {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+}
+
+/*
+ * The style selector: a pressed pair, drawn in whichever style is on. It is
+ * deliberately the plainest control on the page — it changes how everything else
+ * looks, so it should not itself be the loudest thing in the bar.
+ */
+.style-switch {
+  display: flex;
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-inline-size: 0;
+}
+
+.style-switch button {
+  background: none;
+  border: var(--control-border) solid var(--line);
+  border-radius: var(--radius);
+  padding: 5px 11px;
+  font: inherit;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+/* The pair share one rule between them rather than drawing two side by side. */
+.style-switch button + button {
+  margin-left: calc(var(--control-border) * -1);
+}
+
+.style-switch button:hover {
+  color: var(--ink);
+}
+
+.style-switch button.active {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--on-ink);
 }
 
 .intro {
@@ -203,7 +316,7 @@ main {
   align-items: center;
   gap: 8px;
   min-width: 0;
-  border: 1px solid var(--line);
+  border: var(--control-border) solid var(--line);
   padding: 6px 11px;
   color: var(--muted);
 }
@@ -255,8 +368,8 @@ main {
 
 .network-switch button {
   background: none;
-  border: 1px solid var(--line);
-  border-radius: 999px;
+  border: var(--control-border) solid var(--line);
+  border-radius: var(--radius-pill);
   padding: 5px 13px;
   font: inherit;
   font-size: 11px;
@@ -268,7 +381,7 @@ main {
 .network-switch button.active {
   background: var(--ink);
   border-color: var(--ink);
-  color: #f6f3ea;
+  color: var(--on-ink);
 }
 
 .status-line {
@@ -277,7 +390,7 @@ main {
   gap: 9px;
   font-size: 10px;
   letter-spacing: 0.16em;
-  color: #555650;
+  color: var(--muted);
   margin-bottom: 28px;
 }
 
@@ -286,26 +399,26 @@ main {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: #35ba75;
-  box-shadow: 0 0 0 5px rgb(53, 186, 117, 0.12);
+  background: var(--ok);
+  box-shadow: 0 0 0 5px var(--ok-halo);
 }
 
 .unavailable-dot {
-  background: #d8a916;
-  box-shadow: 0 0 0 5px rgb(216, 169, 22, 0.12);
+  background: var(--warn);
+  box-shadow: 0 0 0 5px var(--warn-halo);
 }
 
 .intro h1 {
   margin: 0;
-  font-family: Georgia, 'Times New Roman', serif;
+  font-family: var(--font-display);
   font-size: clamp(28px, 5.6vw, 84px);
-  font-weight: 400;
+  font-weight: var(--display-weight);
   line-height: 0.83;
   letter-spacing: -0.07em;
 }
 
 .intro-copy > p {
-  font-family: Georgia, serif;
+  font-family: var(--font-display);
   font-size: clamp(18px, 1.7vw, 24px);
   line-height: 1.45;
   margin: 0 0 38px;
@@ -339,7 +452,7 @@ main {
 }
 
 .metric {
-  background: #fffdf8;
+  background: var(--surface);
   min-height: 206px;
   padding: 28px;
   display: flex;
@@ -349,9 +462,9 @@ main {
 
 /* The number tile renders the same shape as every other: label, body, note. */
 .metric > strong {
-  font-family: Georgia, serif;
+  font-family: var(--font-display);
   font-size: clamp(30px, 3vw, 44px);
-  font-weight: 400;
+  font-weight: var(--display-weight);
   letter-spacing: -0.04em;
   overflow-wrap: anywhere;
 }
@@ -391,7 +504,7 @@ main {
 }
 
 .mau-footer span {
-  color: #8a6d00;
+  color: var(--warn-ink);
   display: flex;
   align-items: center;
   gap: 5px;
@@ -402,9 +515,9 @@ main {
 }
 
 .metric strong {
-  font-family: Georgia, serif;
+  font-family: var(--font-display);
   font-size: clamp(30px, 3vw, 44px);
-  font-weight: 400;
+  font-weight: var(--display-weight);
   letter-spacing: -0.04em;
   color: var(--ink);
   overflow-wrap: anywhere;
@@ -431,21 +544,21 @@ main {
 }
 
 .section-index {
-  color: #6a6760;
+  color: var(--muted);
   font-size: 11px;
 }
 
 .section h2,
 .methodology > h2 {
-  font-family: Georgia, serif;
-  font-weight: 400;
+  font-family: var(--font-display);
+  font-weight: var(--display-weight);
   letter-spacing: -0.045em;
   font-size: clamp(14px, 2.6vw, 24px);
   margin: 0;
 }
 
 .section-heading > p {
-  color: #686864;
+  color: var(--muted);
   line-height: 1.5;
   font-size: 12px;
   margin: 6px 0 0;
@@ -456,7 +569,7 @@ main {
   grid-template-columns: minmax(0, 1fr) 290px;
   gap: var(--seam);
   background: var(--line);
-  border: 1px solid var(--line);
+  border: var(--control-border) solid var(--line);
 }
 
 /*
@@ -527,11 +640,19 @@ main {
   }
 }
 
+/*
+ * The tile. Its border, corner and shadow are tokens rather than values: the
+ * editorial style draws none of the three and separates tiles by the grid gap
+ * alone, while a style that outlines and casts them only restates the tokens.
+ */
 .chart-card {
-  background: #fffdf8;
+  background: var(--surface);
   position: relative;
   display: flex;
   flex-direction: column;
+  border: var(--tile-border) solid var(--tile-border-color);
+  border-radius: var(--radius);
+  box-shadow: var(--tile-shadow);
 }
 
 /*
@@ -550,7 +671,7 @@ main {
 }
 
 .main-chart {
-  background: #fffdf8;
+  background: var(--surface);
   padding: 30px 26px 34px;
 }
 
@@ -590,15 +711,15 @@ main {
 
 .chart-title span,
 .aside-label {
-  color: #6a6760;
+  color: var(--muted);
   font-size: 10px;
   letter-spacing: 0.14em;
 }
 
 .chart-title h3 {
-  font-family: Georgia, serif;
+  font-family: var(--font-display);
   font-size: 24px;
-  font-weight: 400;
+  font-weight: var(--display-weight);
   margin: 8px 0 0;
 }
 
@@ -617,12 +738,19 @@ main {
   gap: 8px;
 }
 
+/* `--swatch` is the series colour, set inline by `ChartLegend`. */
 .legend i {
   display: block;
   box-sizing: border-box;
   width: 20px;
   height: 2px;
   flex: none;
+  background: var(--swatch);
+}
+
+.legend i.dashed {
+  background: none;
+  border-top: 2px dashed var(--swatch);
 }
 
 .legend .actual {
@@ -634,7 +762,7 @@ main {
 }
 
 .chart-note {
-  color: #777d84;
+  color: var(--muted);
   font-size: 10px;
   line-height: 1.5;
   margin: 8px 10px 0;
@@ -642,11 +770,11 @@ main {
 }
 
 .legend i.deployments {
-  background: #4c8f7b;
+  background: var(--accent-3);
 }
 
 .legend i.new-client {
-  background: #8d4f68;
+  background: var(--accent-2);
 }
 
 .legend i.cumulative {
@@ -662,7 +790,7 @@ main {
  * changes the height of the row when pressed.
  */
 .relayer-key {
-  background: #fffdf8;
+  background: var(--surface);
   padding: 20px 18px;
   min-width: 0;
   overflow: hidden;
@@ -700,7 +828,7 @@ main {
 }
 
 .relayer-key code {
-  color: #55534e;
+  color: var(--muted-2);
 }
 
 .table-card {
@@ -754,7 +882,7 @@ main {
   height: 26px;
   padding: 0 6px;
   background: none;
-  border: 1px solid transparent;
+  border: var(--control-border) solid transparent;
   font: inherit;
   font-size: 11px;
   color: var(--muted);
@@ -770,12 +898,12 @@ main {
 
 .pager-page.active {
   border-color: var(--line);
-  background: #f4f1e8;
+  background: var(--surface-alt);
   color: var(--ink);
 }
 
 .pager-step:disabled {
-  color: #c3bfb4;
+  color: var(--line-strong);
   cursor: default;
 }
 
@@ -830,18 +958,18 @@ main {
   font-size: 9px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: #6a6760;
-  background: #f4f1e8;
+  color: var(--muted);
+  background: var(--surface-alt);
   position: sticky;
   top: 0;
 }
 
 .rank-table td {
-  border-bottom: 1px solid #ece8de;
+  border-bottom: 1px solid var(--line-soft);
 }
 
 .rank-table .rank-number {
-  font-family: Georgia, serif;
+  font-family: var(--font-display);
   font-size: 14px;
   color: var(--ink);
 }
@@ -889,7 +1017,7 @@ main {
 .contracts {
   margin-top: 32px;
   padding: 24px 0;
-  border-top: 1px solid rgb(0, 0, 0, 0.18);
+  border-top: 1px solid var(--rule);
 }
 
 .contracts summary {
@@ -898,7 +1026,7 @@ main {
   font-size: 11px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: #5f4700;
+  color: var(--warn-ink);
 }
 
 .contracts summary:hover {
@@ -917,14 +1045,14 @@ main {
   font-size: 9px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: #5f4700;
+  color: var(--warn-ink);
   padding: 0 28px 8px 0;
 }
 
 .contracts td,
 .contracts tbody th {
   padding: 5px 28px 5px 0;
-  border-top: 1px solid rgb(0, 0, 0, 0.12);
+  border-top: 1px solid var(--rule-soft);
   white-space: nowrap;
 }
 
@@ -939,7 +1067,7 @@ main {
 
 /* A contract one network deploys and another does not. */
 .contracts .absent {
-  color: rgb(0, 0, 0, 0.35);
+  color: var(--rule-text);
 }
 
 .contracts code {
@@ -948,7 +1076,7 @@ main {
 }
 
 .contracts .address:hover code {
-  border-bottom-color: rgb(0, 0, 0, 0.4);
+  border-bottom-color: var(--rule-strong);
 }
 
 /* Reads as the text around it; the affordance is the cursor and the hover. */
@@ -964,7 +1092,7 @@ main {
 
 .rank-table code {
   font-size: 11px;
-  color: #35332f;
+  color: var(--ink-soft);
 }
 
 .rank-table .numeric {
@@ -974,7 +1102,7 @@ main {
 
 .rank-table .timestamp {
   font-variant-numeric: tabular-nums;
-  color: #55534e;
+  color: var(--muted-2);
   white-space: nowrap;
 }
 
@@ -984,13 +1112,13 @@ main {
   padding: 0 0 3px;
   font: inherit;
   font-size: 13px;
-  color: #98958e;
+  color: var(--muted-3);
   cursor: pointer;
   border-bottom: 2px solid transparent;
 }
 
 .tab-switch button.active {
-  color: #17191c;
+  color: var(--ink);
   border-bottom-color: var(--yellow);
 }
 
@@ -1000,7 +1128,7 @@ main {
 }
 
 .service-chart .chart-title span {
-  color: #75726b;
+  color: var(--muted);
 }
 
 .service-chart .chart-title h3 {
@@ -1008,8 +1136,8 @@ main {
 }
 
 .axis-badge {
-  border: 1px solid var(--line);
-  color: #696862;
+  border: var(--control-border) solid var(--line);
+  color: var(--muted);
   font-size: 9px;
   letter-spacing: 0.1em;
   padding: 7px 9px;
@@ -1019,7 +1147,7 @@ main {
 .data-warning {
   list-style: none;
   padding: 0;
-  color: #5f4700;
+  color: var(--warn-ink);
   font-size: 10px;
   line-height: 1.5;
   margin: 0 0 24px;
@@ -1049,8 +1177,8 @@ main {
   width: 28px;
   height: 28px;
   padding: 0;
-  background: #fffdf8;
-  border: 1px solid var(--line);
+  background: var(--surface);
+  border: var(--control-border) solid var(--line);
   color: var(--muted);
   cursor: pointer;
 }
@@ -1067,8 +1195,8 @@ main {
 /* Enlarged, a number keeps the tile's face and colour and only grows. */
 .modal-number strong {
   display: block;
-  font-family: Georgia, serif;
-  font-weight: 400;
+  font-family: var(--font-display);
+  font-weight: var(--display-weight);
   font-size: clamp(64px, 9vw, 132px);
   line-height: 1;
   letter-spacing: -0.05em;
@@ -1094,14 +1222,14 @@ main {
   margin: auto;
   width: min(1180px, 92vw);
   max-height: 88vh;
-  border: 1px solid var(--line);
-  background: #fffdf8;
+  border: var(--control-border) solid var(--line);
+  background: var(--surface);
   color: var(--ink);
   padding: 24px 26px 28px;
 }
 
 .modal::backdrop {
-  background: rgb(17, 19, 21, 0.5);
+  background: var(--overlay);
 }
 
 .modal-head {
@@ -1125,8 +1253,8 @@ main {
 }
 
 .modal-head h2 {
-  font-family: Georgia, serif;
-  font-weight: 400;
+  font-family: var(--font-display);
+  font-weight: var(--display-weight);
   font-size: 22px;
   margin: 0 auto 0 0;
 }
@@ -1144,7 +1272,7 @@ main {
   height: 30px;
   padding: 0;
   background: none;
-  border: 1px solid var(--line);
+  border: var(--control-border) solid var(--line);
   color: var(--ink);
   cursor: pointer;
 }
@@ -1169,7 +1297,7 @@ main {
   min-height: 180px;
   padding: 24px 32px;
   text-align: center;
-  color: #7a4a5e;
+  color: var(--danger);
 }
 
 .tile-unavailable p {
@@ -1187,7 +1315,7 @@ main {
   gap: 4px;
   padding: 2px 6px;
   border: 1px solid currentcolor;
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans);
   font-size: 9px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -1195,11 +1323,11 @@ main {
 }
 
 .tile-flag.failed {
-  color: #7a4a5e;
+  color: var(--danger);
 }
 
 .tile-flag.partial {
-  color: #7d6420;
+  color: var(--warn-ink);
 }
 
 /* The header row is ordered, not sourced: the title block is `order: 1` and the
@@ -1218,7 +1346,7 @@ main {
 }
 
 .metric-unavailable {
-  color: #7a4a5e;
+  color: var(--danger);
   font-size: 11px;
   line-height: 1.5;
   margin: 0;
@@ -1260,8 +1388,8 @@ main {
 }
 
 .client-body h3 {
-  font-family: Georgia, serif;
-  font-weight: 400;
+  font-family: var(--font-display);
+  font-weight: var(--display-weight);
   font-size: 14px;
   margin: 22px 0 8px;
 }
@@ -1286,7 +1414,7 @@ main {
   align-items: center;
   gap: 5px;
   font-size: 11px;
-  color: #55534e;
+  color: var(--muted-2);
 }
 
 .client-stats {
@@ -1297,7 +1425,7 @@ main {
 }
 
 .client-stats dt {
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans);
   font-size: 9px;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -1305,7 +1433,7 @@ main {
 }
 
 .client-stats dd {
-  font-family: Georgia, serif;
+  font-family: var(--font-display);
   font-size: 24px;
   line-height: 1.2;
   margin: 4px 0 0;
@@ -1355,7 +1483,7 @@ main {
 
 .timeline-label {
   display: block;
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans);
   font-size: 9px;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -1368,18 +1496,18 @@ main {
   margin-top: 5px;
   font-size: 12px;
   font-variant-numeric: tabular-nums;
-  color: #35332f;
+  color: var(--ink-soft);
 }
 
 /* Identity, not history: the network belongs beside the address it qualifies. */
 .client-network {
   padding: 2px 7px;
-  border: 1px solid var(--line);
-  font-family: Arial, Helvetica, sans-serif;
+  border: var(--control-border) solid var(--line);
+  font-family: var(--font-sans);
   font-size: 9px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: #55534e;
+  color: var(--muted-2);
 }
 
 .client-quiet {
@@ -1409,8 +1537,8 @@ main {
   z-index: 2;
   transform: translate(14px, -50%);
   padding: 10px;
-  background: #fffdf8;
-  border: 1px solid #d9d5cb;
+  background: var(--surface);
+  border: var(--control-border) solid var(--line);
   border-radius: 2px;
   font-size: 12px;
   line-height: 1.5;
@@ -1438,11 +1566,9 @@ main {
   align-items: center;
   justify-content: center;
   text-align: center;
-  color: #6f6c65;
-  font:
-    12px Georgia,
-    serif;
-  background: rgb(255, 253, 248, 0.85);
+  color: var(--muted);
+  font: var(--display-weight) 12px var(--font-display);
+  background: var(--surface-veil);
 }
 
 .methodology {
@@ -1462,13 +1588,13 @@ main {
 .method-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  border-top: 1px solid rgb(0, 0, 0, 0.3);
+  border-top: 1px solid var(--rule-strong);
   margin-top: 50px;
 }
 
 .method-grid > div {
   padding: 28px 38px 30px 0;
-  border-right: 1px solid rgb(0, 0, 0, 0.25);
+  border-right: 1px solid var(--rule);
   margin-right: 38px;
 }
 
@@ -1481,9 +1607,7 @@ main {
 }
 
 .method-grid h3 {
-  font:
-    23px Georgia,
-    serif;
+  font: var(--display-weight) 23px var(--font-display);
   margin: 26px 0 9px;
 }
 
@@ -1495,7 +1619,7 @@ main {
 }
 
 .integrity {
-  border-top: 1px solid rgb(0, 0, 0, 0.3);
+  border-top: 1px solid var(--rule-strong);
   padding-top: 22px;
   display: flex;
   align-items: center;
@@ -1516,13 +1640,13 @@ footer {
   align-items: center;
   gap: 42px;
   background: var(--ink);
-  color: #f6f3ea;
+  color: var(--on-ink);
   font-size: 10px;
   letter-spacing: 0.1em;
 }
 
 footer p {
-  color: #7f858b;
+  color: var(--footer-muted);
   letter-spacing: 0;
   font-size: 11px;
 }
@@ -1557,7 +1681,7 @@ footer a {
 
   .method-grid > div {
     border-right: 0;
-    border-bottom: 1px solid rgb(0, 0, 0, 0.25);
+    border-bottom: 1px solid var(--rule);
     margin-right: 0;
   }
 
@@ -1627,5 +1751,348 @@ footer a {
 
   footer a {
     margin-left: 0;
+  }
+}
+
+/*
+ * ---------------------------------------------------------------------------
+ * Neubrutalism.
+ *
+ * The convention in one line: nothing is soft. Flat saturated fills, a hard
+ * black rule around every box, a solid offset shadow instead of a blur, square
+ * corners, and a heavy sans doing the work the serif does in the editorial
+ * style. A press moves the box into its own shadow, because the only feedback a
+ * style with no gradients has left is position.
+ *
+ * Most of this block is token values — the page already reads its appearance
+ * from those. The rules that follow are only for the places where the shape,
+ * not the colour, differs: the tiles that cast, the buttons that move, and the
+ * handful of panels the editorial style drew with a hairline and this one draws
+ * with a slab. The chart colours live in `PALETTES.neubrutal` in
+ * `app/chart-theme.ts`; recharts takes no cascade, so the two are kept in step
+ * by hand.
+ * ---------------------------------------------------------------------------
+ */
+[data-style='neubrutal'] {
+  --paper: #ffeedb;
+  --surface: #fff;
+  --surface-alt: #ffd800;
+  --surface-veil: rgb(255 255 255 / 0.88);
+  --on-ink: #fff;
+
+  /* Text: one black, and a grey only where a second level is unavoidable. */
+  --ink: #000;
+  --ink-soft: #000;
+  --muted: #3d3a36;
+  --muted-2: #000;
+  --muted-3: #3d3a36;
+  --footer-muted: #d5d0c8;
+
+  /* Accents. Mirrored in `PALETTES.neubrutal`. */
+  --yellow: #ffd800;
+  --accent-2: #ff4d6d;
+  --accent-3: #00d4aa;
+
+  /* Every rule is the same black at the same weight. */
+  --line: #000;
+  --line-soft: #000;
+  --line-strong: #000;
+  --swatch-unknown: #fff;
+
+  /* Rules over the accent band, which here are the same black as the rest. */
+  --rule-strong: #000;
+  --rule: #000;
+  --rule-soft: #000;
+  --rule-text: rgb(0 0 0 / 0.45);
+
+  /* States. */
+  --ok: #00d4aa;
+  --ok-halo: rgb(0 212 170 / 0.25);
+  --warn: #ff8a00;
+  --warn-halo: rgb(255 138 0 / 0.25);
+  --warn-ink: #000;
+  --danger: #ff4d6d;
+  --overlay: rgb(0 0 0 / 0.55);
+
+  /* Faces: one heavy sans for everything large. */
+  --font-sans: 'Arial Black', 'Helvetica Neue', 'Arial', sans-serif;
+  --font-display: 'Arial Black', 'Helvetica Neue', 'Arial', sans-serif;
+  --display-weight: 900;
+
+  /* Shape: outlined, square, and casting a solid shadow. */
+  --tile-border: 3px;
+  --tile-border-color: #000;
+  --tile-shadow: 6px 6px 0 #000;
+  --control-border: 2px;
+  --radius: 0px;
+  --radius-pill: 0px;
+  --shadow-sm: 3px 3px 0 #000;
+
+  /* Room for the shadow a tile now casts; at 4px it fell on its neighbour. */
+  --grid-gap: 18px;
+}
+
+/*
+ * The body copy is set in the same heavy sans as the headings, which at running
+ * sizes is unreadable. So the face is heavy only where it is large — headings,
+ * figures, labels — and everything that is read as a sentence or a table cell
+ * drops back to a normal sans at a normal weight.
+ */
+[data-style='neubrutal'] body,
+[data-style='neubrutal'] p,
+[data-style='neubrutal'] td,
+[data-style='neubrutal'] code,
+[data-style='neubrutal'] input,
+[data-style='neubrutal'] time {
+  font-family: Arial, Helvetica, sans-serif;
+  font-weight: 400;
+}
+
+[data-style='neubrutal'] .intro-copy > p,
+[data-style='neubrutal'] .chart-note,
+[data-style='neubrutal'] .section-heading > p {
+  font-family: Arial, Helvetica, sans-serif;
+  font-weight: 400;
+}
+
+/* A heavy face needs far less negative tracking than a serif to read as set. */
+[data-style='neubrutal'] .intro h1 {
+  letter-spacing: -0.03em;
+  line-height: 0.92;
+  text-transform: uppercase;
+}
+
+[data-style='neubrutal'] .metric > strong,
+[data-style='neubrutal'] .metric strong,
+[data-style='neubrutal'] .mau-card > strong,
+[data-style='neubrutal'] .modal-number strong,
+[data-style='neubrutal'] .section h2,
+[data-style='neubrutal'] .methodology > h2,
+[data-style='neubrutal'] .chart-title h3,
+[data-style='neubrutal'] .modal-head h2 {
+  letter-spacing: -0.02em;
+}
+
+[data-style='neubrutal'] .section h2,
+[data-style='neubrutal'] .methodology > h2,
+[data-style='neubrutal'] .chart-title h3 {
+  text-transform: uppercase;
+}
+
+/* The bar is a slab with a rule under it, not a hairline. */
+[data-style='neubrutal'] .topbar {
+  background: var(--yellow);
+  border-bottom: 3px solid var(--ink);
+}
+
+[data-style='neubrutal'] .topbar nav,
+[data-style='neubrutal'] .status-line {
+  color: var(--ink);
+}
+
+/*
+ * Every control is a box that casts, and a press drops it into its own shadow:
+ * the same translation as the offset, so the box lands exactly where the shadow
+ * was. With no blur, no glow and no transition to lean on, movement is the only
+ * feedback left.
+ */
+[data-style='neubrutal'] .style-switch button,
+[data-style='neubrutal'] .network-switch button,
+[data-style='neubrutal'] .chart-actions button,
+[data-style='neubrutal'] .modal-head button,
+[data-style='neubrutal'] .pager-page,
+[data-style='neubrutal'] .pager-step,
+[data-style='neubrutal'] .tile-search,
+[data-style='neubrutal'] .axis-badge,
+[data-style='neubrutal'] .client-network,
+[data-style='neubrutal'] .tile-flag {
+  border-color: var(--ink);
+  border-radius: 0;
+  box-shadow: var(--shadow-sm);
+  font-weight: 700;
+}
+
+[data-style='neubrutal'] .style-switch button:active,
+[data-style='neubrutal'] .network-switch button:active,
+[data-style='neubrutal'] .chart-actions button:active,
+[data-style='neubrutal'] .modal-head button:active,
+[data-style='neubrutal'] .pager-page:active,
+[data-style='neubrutal'] .pager-step:active:not(:disabled) {
+  box-shadow: none;
+  transform: translate(3px, 3px);
+}
+
+/* The pair overlap by a whole rule, so the shared edge stays one line thick. */
+[data-style='neubrutal'] .style-switch button + button {
+  margin-left: -2px;
+}
+
+/* A pager button with no border drawn is a shadow floating on nothing. */
+[data-style='neubrutal'] .pager-page,
+[data-style='neubrutal'] .pager-step {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+[data-style='neubrutal'] .pager-page.active {
+  background: var(--ink);
+  color: var(--on-ink);
+}
+
+[data-style='neubrutal'] .pager-step:disabled {
+  color: var(--rule-text);
+  box-shadow: none;
+}
+
+/* The headline tile takes the accent as its whole ground, not as a top rule. */
+[data-style='neubrutal'] .mau-card {
+  background: var(--yellow);
+  border-top: var(--tile-border) solid var(--ink);
+}
+
+[data-style='neubrutal'] .mau-card > span,
+[data-style='neubrutal'] .mau-footer span,
+[data-style='neubrutal'] .mau-footer small {
+  color: var(--ink);
+}
+
+/*
+ * The tile's own controls sit on the card in the editorial style and fade in on
+ * hover. Here they are boxes that cast a shadow, so they are always drawn —
+ * something that appears and disappears reads as a fault in a style this flat.
+ *
+ * Always drawn means always in the way, though: on a number tile they share the
+ * bottom of the card with its note, which the hover-only version never had to
+ * make room for. So the note gives up the corner the buttons stand in. 74px is
+ * two 28px boxes, the 6px between them and the 12px inset they sit at.
+ */
+[data-style='neubrutal'] .chart-actions {
+  opacity: 1;
+}
+
+[data-style='neubrutal'] .metric > p,
+[data-style='neubrutal'] .mau-footer {
+  padding-right: 74px;
+}
+
+[data-style='neubrutal'] .chart-actions button {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+[data-style='neubrutal'] .chart-actions button:hover {
+  background: var(--yellow);
+}
+
+/* A table header is a band, and the rows under it are ruled, not tinted. */
+[data-style='neubrutal'] .rank-table th {
+  background: var(--ink);
+  color: var(--on-ink);
+  font-weight: 700;
+  border-bottom: 3px solid var(--ink);
+}
+
+[data-style='neubrutal'] .rank-table td {
+  border-bottom: 2px solid var(--ink);
+}
+
+[data-style='neubrutal'] .rank-table tbody tr:hover td {
+  background: var(--yellow);
+}
+
+[data-style='neubrutal'] .rank-table .rank-number {
+  font-weight: 900;
+}
+
+[data-style='neubrutal'] .swatch,
+[data-style='neubrutal'] .relayer-key i,
+[data-style='neubrutal'] .timeline-mark {
+  border: 2px solid var(--ink);
+  border-radius: 0;
+}
+
+/*
+ * A key entry is a block of colour with a rule round it, not a 2px line — and a
+ * dashed series is a striped block rather than a dashed rule, so it keeps its
+ * colour and still reads as the broken line it stands for.
+ */
+[data-style='neubrutal'] .legend i {
+  height: 12px;
+  border: 2px solid var(--ink);
+}
+
+[data-style='neubrutal'] .legend i.dashed {
+  border: 2px solid var(--ink);
+  background: repeating-linear-gradient(
+    90deg,
+    var(--swatch) 0 5px,
+    var(--surface) 5px 10px
+  );
+}
+
+[data-style='neubrutal'] .tab-switch button {
+  color: var(--ink);
+  opacity: 0.45;
+  border-bottom-width: 4px;
+}
+
+[data-style='neubrutal'] .tab-switch button.active {
+  opacity: 1;
+  border-bottom-color: var(--accent-2);
+}
+
+/* The dialog is the loudest box on the page, so it casts the longest shadow. */
+[data-style='neubrutal'] .modal {
+  border: 4px solid var(--ink);
+  border-radius: 0;
+  box-shadow: 10px 10px 0 var(--ink);
+}
+
+[data-style='neubrutal'] .brand-mark {
+  border-radius: 0;
+  border-width: 3px;
+}
+
+[data-style='neubrutal'] .live-dot,
+[data-style='neubrutal'] .unavailable-dot {
+  border-radius: 0;
+  border: 2px solid var(--ink);
+  box-shadow: none;
+}
+
+/* Bands: the two full-width blocks are ruled off rather than blending out. */
+[data-style='neubrutal'] .methodology {
+  border-top: 3px solid var(--ink);
+  border-bottom: 3px solid var(--ink);
+}
+
+[data-style='neubrutal'] .method-grid > div {
+  border-right-width: 3px;
+}
+
+[data-style='neubrutal'] footer p {
+  color: var(--footer-muted);
+}
+
+[data-style='neubrutal'] .skip-link {
+  border: 3px solid var(--ink);
+  box-shadow: var(--shadow-sm);
+}
+
+/* The focus ring is the one place a second accent earns its keep. */
+[data-style='neubrutal'] :where(a, button, [tabindex]):focus-visible {
+  outline: 3px solid var(--accent-2);
+  outline-offset: 3px;
+  border-radius: 0;
+}
+
+/*
+ * The tile grid is gapped wide enough for a shadow, which at phone width leaves
+ * the cards further apart than they are tall. Half the gap there: the shadow is
+ * 6px, so 10px still clears it.
+ */
+@media (width <= 560px) {
+  [data-style='neubrutal'] {
+    --grid-gap: 10px;
   }
 }

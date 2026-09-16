@@ -14,13 +14,12 @@ import {
 import type { PublicDashboard as DashboardPayload } from '@/lib/analytics';
 import {
   DECIMAL,
-  INK,
   INTEGER,
-  PLUM,
-  YELLOW,
+  heatColor,
   relayerColor,
   volume,
 } from './chart-theme';
+import { StyleSwitch, usePalette } from './style';
 
 /**
  * The charts, fetched only once the page is interactive.
@@ -370,17 +369,6 @@ function ClientCell({
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 /**
- * Blends the paper ground towards plum by share, so an empty hour is the card's
- * own background and a busy one is solid.
- */
-function heatColor(intensity: number) {
-  const from = [244, 241, 232];
-  const to = [141, 79, 104];
-  const at = (i: number) => Math.round(from[i] + (to[i] - from[i]) * intensity);
-  return `rgb(${at(0)} ${at(1)} ${at(2)})`;
-}
-
-/**
  * Volume by weekday and hour, drawn as SVG rather than with a chart library.
  *
  * Recharts has no heatmap, and hand-drawing it keeps the tile's PNG export
@@ -399,6 +387,7 @@ function Heatmap({
   height?: number;
 }) {
   const frame = useRef<HTMLDivElement>(null);
+  const palette = usePalette();
   const [hover, setHover] = useState<{
     x: number;
     y: number;
@@ -453,7 +442,7 @@ function Heatmap({
               y={top + weekday * cell}
               width={cell - gap}
               height={cell - gap}
-              fill={heatColor(peak > 0 ? share / peak : 0)}
+              fill={heatColor(palette, peak > 0 ? share / peak : 0)}
               onMouseMove={(event) =>
                 show(
                   event,
@@ -472,7 +461,8 @@ function Heatmap({
             textAnchor="end"
             dominantBaseline="middle"
             fontSize="10"
-            fill="#8a877f"
+            fill={palette.axis.fill}
+            fontWeight={palette.axis.fontWeight}
           >
             {day}
           </text>
@@ -483,7 +473,8 @@ function Heatmap({
             x={left + hour * cell}
             y={full - 6}
             fontSize="10"
-            fill="#8a877f"
+            fill={palette.axis.fill}
+            fontWeight={palette.axis.fontWeight}
           >
             {String(hour).padStart(2, '0')}:00
           </text>
@@ -492,7 +483,9 @@ function Heatmap({
       {hover && (
         <div className="chart-tip" style={{ left: hover.x, top: hover.y }}>
           <p className="chart-tip-label">{hover.label}</p>
-          <p style={{ color: PLUM }}>Share : {percent(hover.share)}</p>
+          <p style={{ color: palette.accent2 }}>
+            Share : {percent(hover.share)}
+          </p>
           {total !== null && (
             <p className="chart-tip-note">
               {volume(hover.share * total)} relayed
@@ -520,6 +513,7 @@ function CohortGrid({
   height?: number;
 }) {
   const frame = useRef<HTMLDivElement>(null);
+  const palette = usePalette();
   const [hover, setHover] = useState<{
     x: number;
     y: number;
@@ -587,7 +581,8 @@ function CohortGrid({
             y={top - 6}
             textAnchor="middle"
             fontSize="9"
-            fill="#8a877f"
+            fill={palette.axis.fill}
+            fontWeight={palette.axis.fontWeight}
           >
             {offset}
           </text>
@@ -600,7 +595,8 @@ function CohortGrid({
               textAnchor="end"
               dominantBaseline="middle"
               fontSize="10"
-              fill="#8a877f"
+              fill={palette.axis.fill}
+              fontWeight={palette.axis.fontWeight}
             >
               {`${cohort.label.replace(' 20', " '")} · ${cohort.size}`}
             </text>
@@ -611,7 +607,7 @@ function CohortGrid({
                 y={top + row * cell}
                 width={cell - gap}
                 height={cell - gap}
-                fill={heatColor(share)}
+                fill={heatColor(palette, share)}
                 onMouseMove={(event) =>
                   show(event, {
                     label: `${cohort.label} · month ${offset}`,
@@ -628,7 +624,9 @@ function CohortGrid({
       {hover && (
         <div className="chart-tip" style={{ left: hover.x, top: hover.y }}>
           <p className="chart-tip-label">{hover.label}</p>
-          <p style={{ color: PLUM }}>Retention : {percent(hover.share)}</p>
+          <p style={{ color: palette.accent2 }}>
+            Retention : {percent(hover.share)}
+          </p>
           <p className="chart-tip-note">
             {count(hover.active)} of {count(hover.size)} clients
           </p>
@@ -666,6 +664,7 @@ function ClientDialog({
   onClose: () => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
+  const palette = usePalette();
   const open = detail !== null || pending || failed;
 
   useEffect(() => {
@@ -792,8 +791,15 @@ function ClientDialog({
                           style={{
                             background:
                               relayer.colorIndex >= 0
-                                ? relayerColor(relayer.colorIndex, relayerCount)
-                                : '#b8b4aa',
+                                ? relayerColor(
+                                    palette,
+                                    relayer.colorIndex,
+                                    relayerCount,
+                                  )
+                                : // A relay outside the charted roster has no
+                                  // colour to carry, so it takes the style's
+                                  // own neutral rather than a series colour.
+                                  'var(--swatch-unknown)',
                           }}
                         />
                         <AddressLink address={relayer.address} />
@@ -872,6 +878,7 @@ export default function Dashboard({
   const [deploymentQuery, setDeploymentQuery] = useState('');
   const [feedQuery, setFeedQuery] = useState('');
   const [network, setNetwork] = useState(dashboard.defaultNetwork);
+  const palette = usePalette();
   /** The client key whose record is open, and that record once it has arrived. */
   const [inspected, setInspected] = useState<string | null>(null);
   const [fetched, setFetched] = useState<{
@@ -963,9 +970,13 @@ export default function Dashboard({
     () =>
       data.relayers.map((relayer) => ({
         ...relayer,
-        fill: relayerColor(relayer.colorIndex, data.relayerSeries.length),
+        fill: relayerColor(
+          palette,
+          relayer.colorIndex,
+          data.relayerSeries.length,
+        ),
       })),
-    [data.relayers, data.relayerSeries.length],
+    [data.relayers, data.relayerSeries.length, palette],
   );
 
   // Series are keyed by network+address to stay unique; labels must resolve back
@@ -990,21 +1001,25 @@ export default function Dashboard({
   // Defined as data once: the card header renders it, the dialog renders it, and
   // the PNG export paints it. Three surfaces, one source.
   const activeUsersLegend: LegendEntry[] = [
-    { color: YELLOW, label: 'Active, last 30 days' },
-    { color: '#9b978d', label: 'Active, last 7 days' },
-    { color: PLUM, label: 'New clients, last 30 days', dashed: true },
+    { color: palette.accent, label: 'Active, last 30 days' },
+    { color: palette.seriesNeutral, label: 'Active, last 7 days' },
+    {
+      color: palette.accent2,
+      label: 'New clients, last 30 days',
+      dashed: true,
+    },
   ];
   const volumeLegend: LegendEntry[] = [
-    { color: YELLOW, label: 'Upstream' },
+    { color: palette.accent, label: 'Upstream' },
     {
-      color: PLUM,
+      color: palette.accent2,
       label: namedExits ? 'Downstream' : 'Downstream (inferred)',
     },
-    { color: INK, label: 'Cumulative' },
+    { color: palette.seriesTotal, label: 'Cumulative' },
   ];
   const dailyUsersLegend: LegendEntry[] = [
-    { color: YELLOW, label: 'Returning' },
-    { color: PLUM, label: 'New' },
+    { color: palette.accent, label: 'Returning' },
+    { color: palette.accent2, label: 'New' },
   ];
   const relayerLegend: LegendEntry[] = relayerSlices.map((relayer) => ({
     color: relayer.fill,
@@ -1156,15 +1171,18 @@ export default function Dashboard({
           <a href="#clients">Clients</a>
           <a href="#methodology">Methodology</a>
         </nav>
-        <a
-          className="source-link"
-          href="https://github.com/hoprnet/blokli"
-          target="_blank"
-          rel="noreferrer"
-        >
-          Blokli source <ExternalLink size={13} aria-hidden="true" />
-          <span className="sr-only">(opens in a new tab)</span>
-        </a>
+        <div className="topbar-end">
+          <StyleSwitch />
+          <a
+            className="source-link"
+            href="https://github.com/hoprnet/blokli"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Blokli source <ExternalLink size={13} aria-hidden="true" />
+            <span className="sr-only">(opens in a new tab)</span>
+          </a>
+        </div>
       </header>
 
       <section className="intro" id="top">
@@ -1515,9 +1533,7 @@ export default function Dashboard({
             <span className="section-index">03</span>
             <h2>Data volume by relayer</h2>
           </div>
-          <p>
-            Estimated client traffic carried by each relay.
-          </p>
+          <p>Estimated client traffic carried by each relay.</p>
         </div>
         <div className="tile-grid">
           <Tile
