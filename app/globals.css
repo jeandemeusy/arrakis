@@ -1595,45 +1595,27 @@ main {
 }
 
 footer {
-  padding: 34px var(--gutter);
+  padding: 20px var(--gutter);
   display: flex;
   align-items: center;
-  gap: 42px;
+  gap: 24px;
   background: var(--ink);
   color: var(--on-ink);
   font-size: 10px;
   letter-spacing: 0.1em;
 }
 
-.footer-meta {
+.footer-signature {
   display: flex;
   align-items: center;
-  gap: 32px;
+  gap: 16px;
 }
 
-footer .status-line {
-  margin: 0;
+footer .footer-byline {
   color: var(--footer-muted);
-  white-space: nowrap;
-}
-
-footer .asof {
-  grid-template-columns: max-content max-content;
-  gap: 4px 10px;
-  padding: 0;
-  border: 0;
-  color: var(--footer-muted);
-  white-space: nowrap;
-}
-
-footer .asof dd {
-  color: var(--on-ink);
-}
-
-footer p {
-  color: var(--footer-muted);
-  letter-spacing: 0;
   font-size: 11px;
+  letter-spacing: 0;
+  white-space: nowrap;
 }
 
 footer > a {
@@ -1644,6 +1626,7 @@ footer > a {
 footer .source-link {
   border-color: var(--footer-muted);
   color: var(--yellow);
+  margin-left: 0;
 }
 
 @media (width <= 900px) {
@@ -1737,10 +1720,10 @@ footer .source-link {
     flex-direction: column;
   }
 
-  .footer-meta {
+  .footer-signature {
     align-items: flex-start;
     flex-direction: column;
-    gap: 14px;
+    gap: 5px;
   }
 
   footer > a {
@@ -1882,10 +1865,6 @@ footer .source-link {
 [data-style='neubrutal'] .topbar nav,
 [data-style='neubrutal'] .status-line {
   color: var(--ink);
-}
-
-[data-style='neubrutal'] footer .status-line {
-  color: var(--footer-muted);
 }
 
 /*

@@ -105,17 +105,6 @@ const COMPACT = new Intl.NumberFormat('en', {
 const SIGNIFICANT_2 = new Intl.NumberFormat('en', {
   maximumSignificantDigits: 2,
 });
-// The snapshot is cached for a minute, so the time it was taken is worth showing.
-const OBSERVED = new Intl.DateTimeFormat('en-GB', {
-  day: '2-digit',
-  month: 'short',
-  year: 'numeric',
-  hour: '2-digit',
-  minute: '2-digit',
-  hour12: false,
-  timeZone: 'UTC',
-  timeZoneName: 'short',
-});
 // The client timeline is read as a shape, not a log, so it drops the seconds.
 const MOMENT = new Intl.DateTimeFormat('en-GB', {
   day: '2-digit',
@@ -2021,37 +2010,19 @@ export default function Dashboard({
       />
 
       <footer>
-        <span>GNOSIS VPN × HOPR</span>
-        <p>On-chain data insights powered by Blokli.</p>
-        <div className="footer-meta">
-          <div className="status-line">
-            <span
-              className={
-                data.source === 'live' ? 'live-dot' : 'unavailable-dot'
-              }
-            />
-            {data.source === 'live'
-              ? 'LIVE · BLOKLI INDEX DATA'
-              : data.source === 'degraded'
-                ? 'PARTIAL · SOME SERIES UNAVAILABLE'
-                : 'DATA SOURCE UNAVAILABLE'}
-          </div>
-          <dl className="asof">
-            <dt>Last indexed block</dt>
-            <dd>{data.blockNumber ? `#${count(data.blockNumber)}` : '—'}</dd>
-            <dt>Observed</dt>
-            <dd>{OBSERVED.format(new Date(data.observedAt))}</dd>
-          </dl>
-          <a
-            className="source-link"
-            href="https://github.com/hoprnet/blokli"
-            target="_blank"
-            rel="noreferrer"
-          >
-            Blokli source <ExternalLink size={13} aria-hidden="true" />
-            <span className="sr-only">(opens in a new tab)</span>
-          </a>
+        <div className="footer-signature">
+          <span>GNOSIS VPN × HOPR</span>
+          <span className="footer-byline">Data indexed by Blokli</span>
         </div>
+        <a
+          className="source-link"
+          href="https://github.com/hoprnet/blokli"
+          target="_blank"
+          rel="noreferrer"
+        >
+          Source <ExternalLink size={13} aria-hidden="true" />
+          <span className="sr-only">(opens in a new tab)</span>
+        </a>
         <a href="#top">Back to top ↑</a>
       </footer>
     </main>
