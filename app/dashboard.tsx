@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import dynamicImport from 'next/dynamic';
+import Image from 'next/image';
 import {
   ChevronLeft,
   ChevronRight,
@@ -1015,7 +1016,6 @@ export default function Dashboard({
       color: palette.accent2,
       label: namedExits ? 'Downstream' : 'Downstream (inferred)',
     },
-    { color: palette.seriesTotal, label: 'Cumulative' },
   ];
   const dailyUsersLegend: LegendEntry[] = [
     { color: palette.accent, label: 'Returning' },
@@ -1150,18 +1150,13 @@ export default function Dashboard({
     rows.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
   return (
-    <main>
+    <main id="top">
       <a className="skip-link" href="#top">
         Skip to content
       </a>
       <header className="topbar">
-        <a className="brand" href="#top" aria-label="Arrakis home">
-          <span className="brand-mark">
-            <span />
-          </span>
-          <span>
-            GNOSIS<span className="brand-light">VPN</span>
-          </span>
+        <a className="brand" href="#top" aria-label="Gnosis VPN home">
+          <Image src="/gnosis-owl.svg" alt="" width={230} height={230} />
         </a>
         <nav aria-label="Dashboard navigation">
           <a href="#usage">Usage</a>
@@ -1173,81 +1168,41 @@ export default function Dashboard({
         </nav>
         <div className="topbar-end">
           <StyleSwitch />
-          <a
-            className="source-link"
-            href="https://github.com/hoprnet/blokli"
-            target="_blank"
-            rel="noreferrer"
-          >
-            Blokli source <ExternalLink size={13} aria-hidden="true" />
-            <span className="sr-only">(opens in a new tab)</span>
-          </a>
         </div>
       </header>
 
-      <section className="intro" id="top">
-        <div>
-          <div className="status-line">
-            <span
-              className={
-                data.source === 'live' ? 'live-dot' : 'unavailable-dot'
-              }
-            />
-            {data.source === 'live'
-              ? 'LIVE · BLOKLI INDEX DATA'
-              : data.source === 'degraded'
-                ? 'PARTIAL · SOME SERIES UNAVAILABLE'
-                : 'DATA SOURCE UNAVAILABLE'}
-          </div>
-          {dashboard.networks.length > 1 && (
-            <fieldset className="network-switch">
-              <legend className="sr-only">Network</legend>
+      {dashboard.networks.length > 1 && (
+        <section className="intro">
+          <fieldset className="network-switch">
+            <legend className="sr-only">Network</legend>
+            <button
+              type="button"
+              aria-pressed={combined}
+              className={combined ? 'active' : ''}
+              onClick={() => {
+                setNetwork(COMBINED);
+                setInspected(null);
+              }}
+            >
+              All networks
+            </button>
+            {dashboard.networks.map((entry) => (
               <button
+                key={entry.id}
                 type="button"
-                aria-pressed={combined}
-                className={combined ? 'active' : ''}
+                aria-pressed={network === entry.id}
+                className={network === entry.id ? 'active' : ''}
                 onClick={() => {
-                  setNetwork(COMBINED);
+                  setNetwork(entry.id);
                   setInspected(null);
                 }}
               >
-                All networks
+                {entry.label}
               </button>
-              {dashboard.networks.map((entry) => (
-                <button
-                  key={entry.id}
-                  type="button"
-                  aria-pressed={network === entry.id}
-                  className={network === entry.id ? 'active' : ''}
-                  onClick={() => {
-                    setNetwork(entry.id);
-                    setInspected(null);
-                  }}
-                >
-                  {entry.label}
-                </button>
-              ))}
-            </fieldset>
-          )}
-          <h1>
-            Private access.
-            <br />
-            Public proof.
-          </h1>
-        </div>
-        <div className="intro-copy">
-          <p>
-            Gnosis VPN client usage measured directly from Gnosis Chain. Every
-            figure below counts traffic paid for by VPN clients.
-          </p>
-          <dl className="asof">
-            <dt>Last indexed block</dt>
-            <dd>{data.blockNumber ? `#${count(data.blockNumber)}` : '—'}</dd>
-            <dt>Observed</dt>
-            <dd>{OBSERVED.format(new Date(data.observedAt))}</dd>
-          </dl>
-        </div>
-      </section>
+            ))}
+          </fieldset>
+        </section>
+      )}
 
       <section
         className="headline-grid tile-grid"
@@ -1347,7 +1302,7 @@ export default function Dashboard({
             id="volume"
             status={panels.usage}
             className="service-chart span-6"
-            eyebrow="PER WEEK AND CUMULATIVE"
+            eyebrow="PER WEEK"
             title="Data volume"
             legend={volumeLegend}
             note={
@@ -1963,11 +1918,12 @@ export default function Dashboard({
         <div className="method-grid">
           <div>
             <span>01</span>
-            <h3>Client traffic only</h3>
+            <h3>VPN traffic paths</h3>
             <p>
-              Relays announce themselves on chain. A channel sourced by an
-              account that never announced is a VPN client paying for its own
-              sessions, so only those channels are counted.
+              Client-to-relayer channels are counted directly as upstream
+              traffic. The return path, paid by exits to relayers, is shown as
+              downstream traffic; it is measured when exits are configured and
+              otherwise estimated after excluding relay probe traffic.
             </p>
           </div>
           <div>
@@ -2048,7 +2004,6 @@ export default function Dashboard({
               ? 'POSTGRESQL → BACKEND → PUBLIC DASHBOARD'
               : 'DATABASE CONNECTION PENDING'}
           </span>
-          <code>Schema {data.schemaVersion ?? 'unavailable'}</code>
         </div>
       </section>
 
@@ -2067,7 +2022,36 @@ export default function Dashboard({
 
       <footer>
         <span>GNOSIS VPN × HOPR</span>
-        <p>On-chain network intelligence powered by Blokli.</p>
+        <p>On-chain data insights powered by Blokli.</p>
+        <div className="footer-meta">
+          <div className="status-line">
+            <span
+              className={
+                data.source === 'live' ? 'live-dot' : 'unavailable-dot'
+              }
+            />
+            {data.source === 'live'
+              ? 'LIVE · BLOKLI INDEX DATA'
+              : data.source === 'degraded'
+                ? 'PARTIAL · SOME SERIES UNAVAILABLE'
+                : 'DATA SOURCE UNAVAILABLE'}
+          </div>
+          <dl className="asof">
+            <dt>Last indexed block</dt>
+            <dd>{data.blockNumber ? `#${count(data.blockNumber)}` : '—'}</dd>
+            <dt>Observed</dt>
+            <dd>{OBSERVED.format(new Date(data.observedAt))}</dd>
+          </dl>
+          <a
+            className="source-link"
+            href="https://github.com/hoprnet/blokli"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Blokli source <ExternalLink size={13} aria-hidden="true" />
+            <span className="sr-only">(opens in a new tab)</span>
+          </a>
+        </div>
         <a href="#top">Back to top ↑</a>
       </footer>
     </main>

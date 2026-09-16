@@ -155,13 +155,6 @@ export const VolumeChart = memo(function VolumeChart({
           tickLine={false}
           tick={palette.axis}
         />
-        <YAxis
-          yAxisId="right"
-          orientation="right"
-          axisLine={false}
-          tickLine={false}
-          tick={palette.axis}
-        />
         <Tooltip
           cursor={palette.cursor}
           contentStyle={palette.tooltip}
@@ -185,15 +178,6 @@ export const VolumeChart = memo(function VolumeChart({
           stroke={palette.barStroke}
           strokeWidth={palette.barStrokeWidth}
           radius={palette.barRadius}
-        />
-        <Line
-          yAxisId="right"
-          type="monotone"
-          dataKey="cumulativeGigabytes"
-          name="Cumulative volume"
-          stroke={palette.seriesTotal}
-          strokeWidth={palette.lineWidth}
-          dot={false}
         />
       </ComposedChart>
     </ResponsiveContainer>
