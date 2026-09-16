@@ -1189,7 +1189,10 @@ export default function Dashboard({
   const volumeWeeks = useMemo(() => {
     if (range === 'all' || range === '90d')
       return inRange(data.weeks.map((week) => ({ ...week, date: week.key })), range);
-    return inRange(data.relayerDaily, range).map((point, index) => ({
+    const downstreamByDay = new Map(
+      data.relayerDownstreamDaily.map((point) => [point.date, point]),
+    );
+    return inRange(data.relayerDaily, range).map((point) => ({
       key: point.date,
       label: point.date,
       date: point.date,
@@ -1201,7 +1204,7 @@ export default function Dashboard({
       ),
       downstreamGigabytes: data.relayerSeries.reduce(
         (total, entry) =>
-          total + Number(data.relayerDownstreamDaily[index]?.[entry.key] ?? 0),
+          total + Number(downstreamByDay.get(point.date)?.[entry.key] ?? 0),
         0,
       ),
       cumulativeGigabytes: 0,
