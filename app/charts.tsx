@@ -136,8 +136,10 @@ export const ActiveUsersChart = memo(function ActiveUsersChart({
 
 export const VolumeChart = memo(function VolumeChart({
   weeks,
+  daily = false,
 }: {
   weeks: WeekPoint[];
+  daily?: boolean;
 }) {
   const palette = usePalette();
   return (
@@ -157,6 +159,7 @@ export const VolumeChart = memo(function VolumeChart({
           tickLine={false}
           tick={palette.axis}
           minTickGap={24}
+          tickFormatter={daily ? formatDay : undefined}
         />
         <YAxis
           yAxisId="left"

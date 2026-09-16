@@ -92,6 +92,14 @@ const EXPLORER = 'https://gnosisscan.io/address/';
  * window on it is the current state, like a balance or an oracle value.
  */
 const PAGE_SIZE = 50;
+type Range = '7d' | '30d' | '90d' | 'all';
+
+const RANGE_LABEL: Record<Range, string> = {
+  '7d': 'Last 7 days',
+  '30d': 'Last 30 days',
+  '90d': 'Last 90 days',
+  all: 'All time',
+};
 
 // Constructing an Intl formatter is expensive and these run per tick and per row.
 const PERCENT = new Intl.NumberFormat('en', {
@@ -140,6 +148,13 @@ function observedAt(value: string) {
   return `updated ${Math.floor(seconds / 3600)}h ago`;
 }
 
+function inRange<T extends { date: string }>(points: T[], range: Range) {
+  if (range === 'all' || points.length === 0) return points;
+  const days = range === '7d' ? 7 : range === '30d' ? 31 : 90;
+  const last = Date.parse(points.at(-1)!.date);
+  return points.filter((point) => Date.parse(point.date) > last - days * 86_400_000);
+}
+
 /**
  * A colour per relayer, ordered by volume.
  *
@@ -150,18 +165,6 @@ function observedAt(value: string) {
  */
 function count(input: number | null) {
   return input === null ? '—' : INTEGER.format(input);
-}
-
-/**
- * Packets paid for, rounded to the nearest ten thousand.
- *
- * The count comes from ticket-index jumps rather than from packets themselves,
- * so its last digits are precision it has not earned. Rounding says the figure
- * is an estimate before the label has to.
- */
-function packets(input: number | null) {
-  if (input === null) return '—';
-  return INTEGER.format(Math.round(input / 10_000) * 10_000);
 }
 
 function percent(share: number) {
@@ -846,7 +849,7 @@ function Metric({
   label: string;
   figure: string;
   note: string;
-  span: 3 | 4;
+  span: 2 | 3 | 4 | 12;
   status?: PanelStatus;
   expanded: string | null;
   onExpand: (id: string | null) => void;
@@ -871,7 +874,7 @@ export default function Dashboard({
 }: {
   dashboard: DashboardPayload;
 }) {
-  const [scope, setScope] = useState<'weekly' | 'all'>('weekly');
+  const [range, setRange] = useState<Range>('30d');
   const [flow, setFlow] = useState<'upstream' | 'downstream'>('upstream');
   const [hours, setHours] = useState<'upstream' | 'downstream'>('upstream');
   const [clientPage, setClientPage] = useState(0);
@@ -904,6 +907,40 @@ export default function Dashboard({
   // Named exits make downstream a measurement; guessed ones make it an estimate,
   // and the page should not claim the same confidence for both.
   const namedExits = (data.totals.exitsNamed ?? 0) > 0;
+  const rangeTotals = {
+    redemptions:
+      range === '7d'
+        ? data.totals.redemptions7d
+        : range === '30d'
+          ? data.totals.redemptions30d
+          : range === '90d'
+            ? data.totals.redemptions90d
+            : data.totals.redemptionsTotal,
+    gigabytes:
+      range === '7d'
+        ? data.totals.gigabytes7d
+        : range === '30d'
+          ? data.totals.gigabytes30d
+          : range === '90d'
+            ? data.totals.gigabytes90d
+            : data.totals.gigabytesTotal,
+    downstream:
+      range === '7d'
+        ? data.totals.gigabytesDownstream7d
+        : range === '30d'
+          ? data.totals.gigabytesDownstream30d
+          : range === '90d'
+            ? data.totals.gigabytesDownstream90d
+            : data.totals.gigabytesDownstreamTotal,
+    deployments:
+      range === '7d'
+        ? data.totals.deployments7d
+        : range === '30d'
+          ? data.totals.deployments30d
+          : range === '90d'
+            ? data.totals.deployments90d
+            : data.totals.clientsDeployed,
+  };
 
   const selectNetwork = useCallback(
     async (next: string, history: 'push' | 'replace' = 'push') => {
@@ -942,9 +979,20 @@ export default function Dashboard({
     [dashboard.defaultNetwork, loadingNetwork, network, snapshots],
   );
 
+  const selectRange = useCallback((next: Range) => {
+    setRange(next);
+    const url = new URL(window.location.href);
+    if (next === '30d') url.searchParams.delete('range');
+    else url.searchParams.set('range', next);
+    window.history.pushState(null, '', url);
+  }, []);
+
   useEffect(() => {
     const syncFromAddress = () => {
       const requested = new URL(window.location.href).searchParams.get('network');
+      const requestedRange = new URL(window.location.href).searchParams.get('range');
+      if (requestedRange && requestedRange in RANGE_LABEL)
+        setRange(requestedRange as Range);
       if (
         requested &&
         dashboard.networks.some((entry) => entry.id === requested)
@@ -1024,16 +1072,24 @@ export default function Dashboard({
   // The ring stays readable because the long tail is one intentional slice,
   // while hovering preserves every address where it is actually needed.
   const relayerSlices = useMemo(() => {
-    const leaders = data.relayers.slice(0, 20).map((relayer) => ({
-      address: relayer.address,
-      gigabytes: relayer.gigabytes,
-      fill: relayerColor(
-        palette,
-        relayer.colorIndex,
-        data.relayerSeries.length,
-      ),
-    }));
-    const tail = data.relayers.slice(20);
+    const volumes = new Map<string, number>();
+    for (const point of inRange(data.relayerDaily, range)) {
+      for (const entry of data.relayerSeries) {
+        const value = point[entry.key];
+        if (typeof value === 'number')
+          volumes.set(entry.key, (volumes.get(entry.key) ?? 0) + value);
+      }
+    }
+    const ranked = data.relayerSeries
+      .map((entry, index) => ({
+        address: entry.address,
+        gigabytes: volumes.get(entry.key) ?? 0,
+        fill: relayerColor(palette, index, data.relayerSeries.length),
+      }))
+      .filter((entry) => entry.gigabytes > 0)
+      .sort((a, b) => b.gigabytes - a.gigabytes);
+    const leaders = ranked.slice(0, 20);
+    const tail = ranked.slice(20);
     const other = tail.reduce((total, relayer) => total + relayer.gigabytes, 0);
     if (other > 0)
       leaders.push({
@@ -1042,7 +1098,7 @@ export default function Dashboard({
         fill: palette.seriesNeutral,
       });
     return leaders;
-  }, [data.relayers, data.relayerSeries.length, palette]);
+  }, [data.relayerDaily, data.relayerSeries, palette, range]);
 
   // Series are keyed by network+address to stay unique; labels must resolve back
   // to the plain address rather than slicing the composite key.
@@ -1054,14 +1110,41 @@ export default function Dashboard({
 
   const rankedClients = useMemo(() => {
     const ranked = [...data.clients].sort((a, b) =>
-      scope === 'weekly'
+      (range === '7d'
         ? b.gigabytes7d - a.gigabytes7d
-        : b.gigabytesTotal - a.gigabytesTotal,
+        : range === '30d'
+          ? b.gigabytes30d - a.gigabytes30d
+          : range === '90d'
+            ? b.gigabytes90d - a.gigabytes90d
+            : b.gigabytesTotal - a.gigabytesTotal),
     );
     return ranked.filter((client) =>
-      scope === 'weekly' ? client.gigabytes7d > 0 : client.gigabytesTotal > 0,
+      range === '7d'
+        ? client.gigabytes7d > 0
+        : range === '30d'
+          ? client.gigabytes30d > 0
+          : range === '90d'
+            ? client.gigabytes90d > 0
+            : client.gigabytesTotal > 0,
     );
-  }, [data.clients, scope]);
+  }, [data.clients, range]);
+
+  const clientRedemptions = (client: (typeof data.clients)[number]) =>
+    range === '7d'
+      ? client.redemptions7d
+      : range === '30d'
+        ? client.redemptions30d
+        : range === '90d'
+          ? client.redemptions90d
+          : client.redemptionsTotal;
+  const clientGigabytes = (client: (typeof data.clients)[number]) =>
+    range === '7d'
+      ? client.gigabytes7d
+      : range === '30d'
+        ? client.gigabytes30d
+        : range === '90d'
+          ? client.gigabytes90d
+          : client.gigabytesTotal;
 
   // Defined as data once: the card header renders it, the dialog renders it, and
   // the PNG export paints it. Three surfaces, one source.
@@ -1091,13 +1174,50 @@ export default function Dashboard({
     label: shortAddress(relayer.address),
   }));
 
-  const hourGrid = hours === 'upstream' ? data.heatmap : data.heatmapDownstream;
+  const hourGrid =
+    hours === 'upstream' ? data.heatmaps[range] : data.heatmapsDownstream[range];
   // With no RPC the clock is extrapolated from block height, so the feed shows
   // the block it actually knows rather than a timestamp it inferred.
   const timed = data.timebase === 'rpc';
 
   const relayerFlow =
     flow === 'upstream' ? data.relayerDaily : data.relayerDownstreamDaily;
+  const activeUserPoints = useMemo(
+    () => inRange(data.activeUsers, range),
+    [data.activeUsers, range],
+  );
+  const volumeWeeks = useMemo(() => {
+    if (range === 'all' || range === '90d')
+      return inRange(data.weeks.map((week) => ({ ...week, date: week.key })), range);
+    return inRange(data.relayerDaily, range).map((point, index) => ({
+      key: point.date,
+      label: point.date,
+      date: point.date,
+      redemptions: 0,
+      tickets: 0,
+      gigabytes: data.relayerSeries.reduce(
+        (total, entry) => total + Number(point[entry.key] ?? 0),
+        0,
+      ),
+      downstreamGigabytes: data.relayerSeries.reduce(
+        (total, entry) =>
+          total + Number(data.relayerDownstreamDaily[index]?.[entry.key] ?? 0),
+        0,
+      ),
+      cumulativeGigabytes: 0,
+    }));
+  }, [data.relayerDaily, data.relayerDownstreamDaily, data.relayerSeries, data.weeks, range]);
+  const dailyUserPoints = useMemo(
+    () => inRange(data.dailyUsers, range),
+    [data.dailyUsers, range],
+  );
+  // Retention is a lifecycle curve, not a traffic total. It keeps every cohort
+  // visible so a short traffic range cannot turn the panel into an empty state.
+  const rangedCohorts = data.retention;
+  const rangedRelayerFlow = useMemo(
+    () => inRange(relayerFlow, range),
+    [relayerFlow, range],
+  );
 
   const rankOf = useMemo(
     () =>
@@ -1147,10 +1267,10 @@ export default function Dashboard({
       client.address,
       client.network,
       String(
-        scope === 'weekly' ? client.redemptions7d : client.redemptionsTotal,
+        clientRedemptions(client),
       ),
       (
-        (scope === 'weekly' ? client.gigabytes7d : client.gigabytesTotal) * 1000
+        clientGigabytes(client) * 1000
       ).toFixed(2),
     ]),
   ];
@@ -1281,6 +1401,24 @@ export default function Dashboard({
         </section>
       )}
 
+      <section className="range-control" aria-label="Dashboard time range">
+        <span>VIEW</span>
+        <fieldset className="tab-switch">
+          <legend className="sr-only">Time range</legend>
+          {(Object.keys(RANGE_LABEL) as Range[]).map((entry) => (
+            <button
+              key={entry}
+              type="button"
+              aria-pressed={range === entry}
+              className={range === entry ? 'active' : ''}
+              onClick={() => selectRange(entry)}
+            >
+              {RANGE_LABEL[entry]}
+            </button>
+          ))}
+        </fieldset>
+      </section>
+
       <section
         id="main-content"
         className="headline-grid tile-grid"
@@ -1305,34 +1443,42 @@ export default function Dashboard({
           onExpand={setEnlarged}
         />
         <Metric
-          id="redemptions-7-days"
+          id="data-relayed-7-days"
           status={panels.usage}
           span={3}
-          label="REDEMPTIONS · LAST 30 DAYS"
-          figure={count(data.totals.redemptions30d)}
-          note={`${count(data.totals.redemptions7d)} in the last 7 days`}
+          label={`DATA RELAYED · ${RANGE_LABEL[range].toUpperCase()}`}
+          figure={volume(plus(rangeTotals.gigabytes, rangeTotals.downstream))}
+          note="Upstream and downstream combined"
           expanded={enlarged}
           onExpand={setEnlarged}
         />
         <Metric
-          id="data-relayed-7-days"
+          id="redemptions-7-days"
           status={panels.usage}
-          span={3}
-          label="DATA RELAYED · LAST 30 DAYS"
-          figure={volume(
-            plus(data.totals.gigabytes30d, data.totals.gigabytesDownstream30d),
-          )}
-          note={`${volume(plus(data.totals.gigabytes7d, data.totals.gigabytesDownstream7d))} in the last 7 days`}
+          span={2}
+          label={`REDEMPTIONS · ${RANGE_LABEL[range].toUpperCase()}`}
+          figure={count(rangeTotals.redemptions)}
+          note="Client-channel redemptions"
           expanded={enlarged}
           onExpand={setEnlarged}
         />
         <Metric
           id="new-clients-30-days"
           status={panels.deployments}
-          span={3}
-          label="NEW CLIENTS · LAST 30 DAYS"
-          figure={count(data.totals.deployments30d)}
-          note={`${count(data.totals.deployments7d)} in the last 7 days`}
+          span={2}
+          label={`NEW CLIENTS · ${RANGE_LABEL[range].toUpperCase()}`}
+          figure={count(rangeTotals.deployments)}
+          note="New client deployments"
+          expanded={enlarged}
+          onExpand={setEnlarged}
+        />
+        <Metric
+          id="active-channels"
+          status={panels.balances}
+          span={2}
+          label="ACTIVE CHANNELS"
+          figure={count(data.openChannels)}
+          note={`${compactToken(data.channelBalance)} allocated`}
           expanded={enlarged}
           onExpand={setEnlarged}
         />
@@ -1357,7 +1503,7 @@ export default function Dashboard({
             id="active-users"
             status={panels.usage}
             className="main-chart span-6"
-            eyebrow="SINCE 01 JAN 2026"
+            eyebrow={RANGE_LABEL[range].toUpperCase()}
             title="Monthly and weekly active users"
             legend={activeUsersLegend}
             note={
@@ -1374,13 +1520,13 @@ export default function Dashboard({
             }
             expanded={enlarged}
             onExpand={setEnlarged}
-            chart={<ActiveUsersChart points={data.activeUsers} />}
+            chart={<ActiveUsersChart points={activeUserPoints} />}
           />
           <Tile
             id="volume"
             status={panels.usage}
             className="service-chart span-6"
-            eyebrow="PER WEEK"
+            eyebrow={RANGE_LABEL[range].toUpperCase()}
             title="Data volume"
             legend={volumeLegend}
             note={
@@ -1401,44 +1547,7 @@ export default function Dashboard({
             }
             expanded={enlarged}
             onExpand={setEnlarged}
-            chart={<VolumeChart weeks={data.weeks} />}
-          />
-        </div>
-        <div className="tile-grid">
-          <Metric
-            id="total-redemptions"
-            status={panels.usage}
-            span={4}
-            label="REDEMPTIONS · ALL TIME"
-            figure={count(data.totals.redemptionsTotal)}
-            note={`An estimated ${packets(data.totals.ticketsTotal)} packets paid for`}
-            expanded={enlarged}
-            onExpand={setEnlarged}
-          />
-          <Metric
-            id="total-data-relayed"
-            status={panels.usage}
-            span={4}
-            label="DATA RELAYED · ALL TIME"
-            figure={volume(
-              plus(
-                data.totals.gigabytesTotal,
-                data.totals.gigabytesDownstreamTotal,
-              ),
-            )}
-            note={`${volume(data.totals.gigabytesTotal)} upstream · ${volume(data.totals.gigabytesDownstreamTotal)} downstream`}
-            expanded={enlarged}
-            onExpand={setEnlarged}
-          />
-          <Metric
-            id="active-channels"
-            status={panels.balances}
-            span={4}
-            label="ACTIVE CHANNELS"
-            figure={count(data.openChannels)}
-            note={`${compactToken(data.channelBalance)} allocated`}
-            expanded={enlarged}
-            onExpand={setEnlarged}
+            chart={<VolumeChart weeks={volumeWeeks} daily={range === '7d' || range === '30d'} />}
           />
         </div>
       </section>
@@ -1459,7 +1568,7 @@ export default function Dashboard({
             id="daily-users"
             status={panels.usage}
             className="service-chart span-4"
-            eyebrow="LAST 30 DAYS"
+            eyebrow={RANGE_LABEL[range].toUpperCase()}
             title="Daily users"
             legend={dailyUsersLegend}
             note={
@@ -1471,7 +1580,7 @@ export default function Dashboard({
             }
             expanded={enlarged}
             onExpand={setEnlarged}
-            chart={<DailyUsersChart points={data.dailyUsers} />}
+            chart={<DailyUsersChart points={dailyUserPoints} />}
           />
           <Tile
             id="retention"
@@ -1497,13 +1606,13 @@ export default function Dashboard({
             }
             expanded={enlarged}
             onExpand={setEnlarged}
-            chart={<CohortGrid cohorts={data.retention} />}
+            chart={<CohortGrid cohorts={rangedCohorts} />}
           />
           <Tile
             id="hourly"
             status={panels.usage}
             className="service-chart span-4"
-            eyebrow="ALL TIME"
+            eyebrow={RANGE_LABEL[range].toUpperCase()}
             title="When VPN is used"
             badge={
               <fieldset className="tab-switch">
@@ -1573,13 +1682,13 @@ export default function Dashboard({
             id="share"
             status={panels.usage}
             className="service-chart span-4"
-            eyebrow="LAST 30 DAYS · UPSTREAM"
+            eyebrow={`${RANGE_LABEL[range].toUpperCase()} · UPSTREAM`}
             title="Relayer concentration"
             showLegend={false}
             note={
               <>
-                <Empty when={!data.relayers.length}>
-                  No client data volume was indexed in the last 30 days.
+                <Empty when={!relayerSlices.length}>
+                  No client data volume was indexed in this window.
                 </Empty>
               </>
             }
@@ -1591,7 +1700,7 @@ export default function Dashboard({
             id="relayer-volume"
             status={panels.usage}
             className="service-chart span-8"
-            eyebrow="LAST 30 DAYS"
+            eyebrow={RANGE_LABEL[range].toUpperCase()}
             title="Estimated daily volume per relayer"
             legend={relayerLegend}
             showLegend={false}
@@ -1634,7 +1743,7 @@ export default function Dashboard({
             onExpand={setEnlarged}
             chart={
               <RelayerStackChart
-                points={relayerFlow}
+                points={rangedRelayerFlow}
                 series={data.relayerSeries}
                 addressOf={addressOfSeries}
               />
@@ -1716,23 +1825,8 @@ export default function Dashboard({
             title="Most active users"
             badge={
               <fieldset className="tab-switch">
-                <legend className="sr-only">Ranking window</legend>
-                <button
-                  type="button"
-                  aria-pressed={scope === 'weekly'}
-                  className={scope === 'weekly' ? 'active' : ''}
-                  onClick={() => setScope('weekly')}
-                >
-                  Last 7 days
-                </button>
-                <button
-                  type="button"
-                  aria-pressed={scope === 'all'}
-                  className={scope === 'all' ? 'active' : ''}
-                  onClick={() => setScope('all')}
-                >
-                  All time
-                </button>
+                <legend className="sr-only">Dashboard time range</legend>
+                <span>{RANGE_LABEL[range]}</span>
               </fieldset>
             }
             note={
@@ -1760,9 +1854,7 @@ export default function Dashboard({
             <div className="table-scroll">
               <table className="rank-table">
                 <caption className="sr-only">
-                  {scope === 'weekly'
-                    ? 'Most active clients over the last 7 days'
-                    : 'Most active clients, all time'}
+                  {`Most active clients, ${RANGE_LABEL[range].toLowerCase()}`}
                 </caption>
                 <colgroup>
                   <col className="rank" />
@@ -1803,18 +1895,10 @@ export default function Dashboard({
                           />
                         </td>
                         <td className="numeric">
-                          {count(
-                            scope === 'weekly'
-                              ? client.redemptions7d
-                              : client.redemptionsTotal,
-                          )}
+                          {count(clientRedemptions(client))}
                         </td>
                         <td className="numeric">
-                          {megabytes(
-                            scope === 'weekly'
-                              ? client.gigabytes7d
-                              : client.gigabytesTotal,
-                          )}
+                          {megabytes(clientGigabytes(client))}
                         </td>
                       </tr>
                     );

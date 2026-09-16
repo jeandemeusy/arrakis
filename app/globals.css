@@ -314,6 +314,19 @@ main {
   padding: 28px var(--gutter);
 }
 
+.range-control {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 var(--gutter) 20px;
+}
+
+.range-control > span {
+  color: var(--muted);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+}
+
 /*
  * The strip under a table: how many rows, a filter, then the pager and the tile's
  * own controls. The controls live in this row rather than floating over the card,
@@ -2185,6 +2198,37 @@ footer .source-link {
 [data-style='neubrutal'] .tab-switch button.active {
   opacity: 1;
   border-bottom-color: var(--accent-2);
+}
+
+/* The range changes the whole reading lens, so it belongs to the same family as
+   the network selector. It is smaller and lighter because it is secondary, but
+   no longer an editorial underline dropped into a boxed interface. */
+[data-style='neubrutal'] .range-control .tab-switch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+[data-style='neubrutal'] .range-control .tab-switch button {
+  padding: 7px 10px;
+  border: 2px solid var(--ink);
+  border-bottom: 2px solid var(--ink);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  color: var(--ink);
+  font-size: 11px;
+  opacity: 1;
+}
+
+[data-style='neubrutal'] .range-control .tab-switch button.active {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--on-ink);
+}
+
+[data-style='neubrutal'] .range-control .tab-switch button:active {
+  box-shadow: none;
+  transform: translate(3px, 3px);
 }
 
 /* The dialog is the loudest box on the page, so it casts the longest shadow. */

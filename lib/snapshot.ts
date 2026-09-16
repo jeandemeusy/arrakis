@@ -16,8 +16,9 @@ export const GIGABYTES_PER_REDEMPTION = 650 / 2 ** 30;
 // 30 days is day-30..day, matching how the published Dune queries slice them.
 const WEEK_DAYS = 7;
 const MONTH_DAYS = 31;
+const QUARTER_DAYS = 90;
 /** Window shared by the daily panels: relayer stack, daily users. */
-const RECENT_DAYS = 30;
+const RECENT_DAYS = QUARTER_DAYS;
 /**
  * First day of the published active-user series.
  *
@@ -87,8 +88,12 @@ export type Client = {
   address: string;
   network: string;
   gigabytes7d: number;
+  gigabytes30d: number;
+  gigabytes90d: number;
   gigabytesTotal: number;
   redemptions7d: number;
+  redemptions30d: number;
+  redemptions90d: number;
   redemptionsTotal: number;
 };
 
@@ -112,6 +117,7 @@ export type DailyUserPoint = {
  * a fifth of the payload for the same information.
  */
 export type Heatmap = number[][];
+export type Heatmaps = Record<'7d' | '30d' | '90d' | 'all', Heatmap>;
 
 /**
  * One deployment cohort's retention.
@@ -267,11 +273,14 @@ export type AnalyticsSnapshot = {
   deployments: Deployment[];
   dailyUsers: DailyUserPoint[];
   heatmap: Heatmap;
+  /** Hour distributions for each selectable usage window. */
+  heatmaps: Heatmaps;
   /**
    * The same grid for the return path, built from the exits' own redemptions
    * rather than the per-day estimate, because a heatmap needs the hour.
    */
   heatmapDownstream: Heatmap;
+  heatmapsDownstream: Heatmaps;
   /**
    * How much the two grids agree, 0 to 1.
    *
@@ -309,8 +318,10 @@ export type AnalyticsSnapshot = {
      * how the active-user series counts a month.
      */
     redemptions30d: number | null;
+    redemptions90d: number | null;
     gigabytes7d: number | null;
     gigabytes30d: number | null;
+    gigabytes90d: number | null;
     gigabytesTotal: number | null;
     /**
      * Downstream is inferred, not attributed: the exit pays for the return path
@@ -318,6 +329,7 @@ export type AnalyticsSnapshot = {
      */
     gigabytesDownstream7d: number | null;
     gigabytesDownstream30d: number | null;
+    gigabytesDownstream90d: number | null;
     gigabytesDownstreamTotal: number | null;
     /** Downstream per unit of upstream. The check on the whole inference. */
     downstreamRatio: number | null;
@@ -335,6 +347,7 @@ export type AnalyticsSnapshot = {
     relayers7d: number | null;
     deployments7d: number | null;
     deployments30d: number | null;
+    deployments90d: number | null;
     clientsDeployed: number | null;
   };
   warnings: string[];
@@ -1043,7 +1056,7 @@ function retentionCohorts(
 }
 
 /** Per-client usage over both the recent window and all time. */
-function clientUsage(redemptions: Keyed[], firstRecentDay: number): Client[] {
+function clientUsage(redemptions: Keyed[], lastDay: number): Client[] {
   const buckets = new Map<string, Client>();
   for (const redemption of redemptions) {
     const key = redemption.sourceKey;
@@ -1052,13 +1065,25 @@ function clientUsage(redemptions: Keyed[], firstRecentDay: number): Client[] {
       address: redemption.source,
       network: redemption.network,
       gigabytes7d: 0,
+      gigabytes30d: 0,
+      gigabytes90d: 0,
       gigabytesTotal: 0,
       redemptions7d: 0,
+      redemptions30d: 0,
+      redemptions90d: 0,
       redemptionsTotal: 0,
     };
     client.gigabytesTotal += redemption.gigabytes;
     client.redemptionsTotal += 1;
-    if (redemption.day >= firstRecentDay) {
+    if (redemption.day >= lastDay - QUARTER_DAYS + 1) {
+      client.gigabytes90d += redemption.gigabytes;
+      client.redemptions90d += 1;
+    }
+    if (redemption.day >= lastDay - MONTH_DAYS + 1) {
+      client.gigabytes30d += redemption.gigabytes;
+      client.redemptions30d += 1;
+    }
+    if (redemption.day >= lastDay - WEEK_DAYS + 1) {
       client.gigabytes7d += redemption.gigabytes;
       client.redemptions7d += 1;
     }
@@ -1319,20 +1344,25 @@ export function buildSnapshot(datasets: NetworkDataset[]): AnalyticsSnapshot {
     }
   }
   const downstream = totalByDay(downstreamPerRelay);
+  const lastDay = Math.max(...datasets.map((dataset) => dataset.lastDay));
 
   // Built from the exits' own rows rather than the per-day estimate, because the
   // estimate has no hour in it. With the exits named the two describe the same
   // volume anyway, since no probe floor is taken off.
-  const upstreamHours = heatmapDistribution(redemptions);
-  const downstreamHours = heatmapDistribution(candidates);
+  const hoursFor = (rows: Redemption[]): Heatmaps => ({
+    '7d': heatmapDistribution(rows.filter((row) => row.day >= lastDay - 6)),
+    '30d': heatmapDistribution(rows.filter((row) => row.day >= lastDay - 30)),
+    '90d': heatmapDistribution(rows.filter((row) => row.day >= lastDay - 89)),
+    all: heatmapDistribution(rows),
+  });
+  const upstreamHours = hoursFor(redemptions);
+  const downstreamHours = hoursFor(candidates);
 
   const warnings = datasets.flatMap((dataset) =>
     combined
       ? dataset.warnings.map((warning) => `${dataset.label}: ${warning}`)
       : dataset.warnings,
   );
-  const lastDay = Math.max(...datasets.map((dataset) => dataset.lastDay));
-
   const actorsByDay = new Map<number, Set<string>>();
   const addActor = (day: number, key: string) => {
     const actors = actorsByDay.get(day) ?? new Set<string>();
@@ -1365,23 +1395,30 @@ export function buildSnapshot(datasets: NetworkDataset[]): AnalyticsSnapshot {
   const colorIndexOf = new Map(
     relayerSeries.map((entry, index) => [entry.key, index]),
   );
-  const allClients = clientUsage(redemptions, lastDay - WEEK_DAYS + 1);
+  const allClients = clientUsage(redemptions, lastDay);
 
   // Both trailing windows in one pass. Materialising them as filtered arrays and
   // reducing each twice over walked the whole history four times and kept two
   // copies of a third of it alive to do it.
   const weekFrom = lastDay - WEEK_DAYS + 1;
   const monthFrom = lastDay - MONTH_DAYS + 1;
+  const quarterFrom = lastDay - QUARTER_DAYS + 1;
   let redemptions7d = 0;
   let redemptions30d = 0;
+  let redemptions90d = 0;
   let gigabytes7d = 0;
   let gigabytes30d = 0;
+  let gigabytes90d = 0;
   let upstreamTotal = 0;
   let ticketsTotal = 0;
   const relayers7d = new Set<string>();
   for (const redemption of redemptions) {
     upstreamTotal += redemption.gigabytes;
     ticketsTotal += redemption.tickets;
+    if (redemption.day >= quarterFrom) {
+      redemptions90d += 1;
+      gigabytes90d += redemption.gigabytes;
+    }
     if (redemption.day < monthFrom) continue;
     redemptions30d += 1;
     gigabytes30d += redemption.gigabytes;
@@ -1413,8 +1450,12 @@ export function buildSnapshot(datasets: NetworkDataset[]): AnalyticsSnapshot {
   const hasUsage = panels.usage.state !== 'failed';
   const hasDeployments = panels.deployments.state !== 'failed';
   let deployments7d = 0;
+  let deployments90d = 0;
   for (let offset = 0; offset < WEEK_DAYS; offset += 1) {
     deployments7d += deploymentsByDay.get(lastDay - offset) ?? 0;
+  }
+  for (let offset = 0; offset < QUARTER_DAYS; offset += 1) {
+    deployments90d += deploymentsByDay.get(lastDay - offset) ?? 0;
   }
 
   const downstreamTotal = [...downstream.values()].reduce(
@@ -1463,9 +1504,11 @@ export function buildSnapshot(datasets: NetworkDataset[]): AnalyticsSnapshot {
     clientDetails: clientDetails(redemptions, deployed, colorIndexOf, lastDay),
     deployments,
     dailyUsers: dailyUserSeries(actorsByDay, deploymentDayOf, lastDay),
-    heatmap: upstreamHours,
-    heatmapDownstream: downstreamHours,
-    heatmapAgreement: heatmapOverlap(upstreamHours, downstreamHours),
+    heatmap: upstreamHours.all,
+    heatmaps: upstreamHours,
+    heatmapDownstream: downstreamHours.all,
+    heatmapsDownstream: downstreamHours,
+    heatmapAgreement: heatmapOverlap(upstreamHours.all, downstreamHours.all),
     retention: retentionCohorts(redemptions, deployed, lastDay),
     recentRedemptions,
     contracts: datasets
@@ -1489,12 +1532,15 @@ export function buildSnapshot(datasets: NetworkDataset[]): AnalyticsSnapshot {
       allTimeUsers: hasUsage ? allClients.length : null,
       redemptions7d: hasUsage ? redemptions7d : null,
       redemptions30d: hasUsage ? redemptions30d : null,
+      redemptions90d: hasUsage ? redemptions90d : null,
       redemptionsTotal: hasUsage ? redemptions.length : null,
       gigabytes7d: hasUsage ? gigabytes7d : null,
       gigabytes30d: hasUsage ? gigabytes30d : null,
+      gigabytes90d: hasUsage ? gigabytes90d : null,
       gigabytesTotal: hasUsage ? upstreamTotal : null,
       gigabytesDownstream7d: hasUsage ? downstreamOver(WEEK_DAYS) : null,
       gigabytesDownstream30d: hasUsage ? downstreamOver(MONTH_DAYS) : null,
+      gigabytesDownstream90d: hasUsage ? downstreamOver(QUARTER_DAYS) : null,
       gigabytesDownstreamTotal: hasUsage ? downstreamTotal : null,
       downstreamRatio:
         hasUsage && upstreamTotal > 0 ? downstreamTotal / upstreamTotal : null,
@@ -1516,6 +1562,7 @@ export function buildSnapshot(datasets: NetworkDataset[]): AnalyticsSnapshot {
       relayers7d: hasUsage ? relayers7d.size : null,
       deployments7d: hasDeployments ? deployments7d : null,
       deployments30d: hasDeployments ? (latest?.deployments ?? null) : null,
+      deployments90d: hasDeployments ? deployments90d : null,
       clientsDeployed: hasDeployments ? deployed.length : null,
     },
     warnings,
@@ -1530,11 +1577,14 @@ export const EMPTY_TOTALS: AnalyticsSnapshot['totals'] = {
   redemptions7d: null,
   redemptionsTotal: null,
   redemptions30d: null,
+  redemptions90d: null,
   gigabytes7d: null,
   gigabytes30d: null,
+  gigabytes90d: null,
   gigabytesTotal: null,
   gigabytesDownstream7d: null,
   gigabytesDownstream30d: null,
+  gigabytesDownstream90d: null,
   gigabytesDownstreamTotal: null,
   downstreamRatio: null,
   gigabytesDownstreamRaw: null,
@@ -1546,6 +1596,7 @@ export const EMPTY_TOTALS: AnalyticsSnapshot['totals'] = {
   relayers7d: null,
   deployments7d: null,
   deployments30d: null,
+  deployments90d: null,
   clientsDeployed: null,
 };
 
@@ -1574,7 +1625,9 @@ export function unavailableSnapshot(message: string): AnalyticsSnapshot {
     deployments: [],
     dailyUsers: [],
     heatmap: [],
+    heatmaps: { '7d': [], '30d': [], '90d': [], all: [] },
     heatmapDownstream: [],
+    heatmapsDownstream: { '7d': [], '30d': [], '90d': [], all: [] },
     heatmapAgreement: null,
     retention: [],
     recentRedemptions: [],
