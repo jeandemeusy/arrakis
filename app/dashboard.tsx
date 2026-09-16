@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import dynamicImport from 'next/dynamic';
 import Image from 'next/image';
 import {
@@ -8,11 +8,15 @@ import {
   ChevronRight,
   Database,
   ExternalLink,
+  Menu,
   ShieldCheck,
   X,
 } from 'lucide-react';
 
-import type { PublicDashboard as DashboardPayload } from '@/lib/analytics';
+import type {
+  PublicDashboard as DashboardPayload,
+  PublicSnapshot,
+} from '@/lib/analytics';
 import {
   DECIMAL,
   INTEGER,
@@ -53,8 +57,8 @@ const DailyUsersChart = dynamicImport(
   () => import('./charts').then((module) => module.DailyUsersChart),
   { ssr: false, loading: reserve(250) },
 );
-const RelayerShareChart = dynamicImport(
-  () => import('./charts').then((module) => module.RelayerShareChart),
+const RelayerParetoChart = dynamicImport(
+  () => import('./charts').then((module) => module.RelayerParetoChart),
   { ssr: false, loading: reserve(250) },
 );
 const RelayerStackChart = dynamicImport(
@@ -125,6 +129,16 @@ const TIMESTAMP = new Intl.DateTimeFormat('en-GB', {
   timeZone: 'UTC',
   hour12: false,
 });
+
+function observedAt(value: string) {
+  const seconds = Math.max(
+    0,
+    Math.round((Date.now() - Date.parse(value)) / 1000),
+  );
+  if (seconds < 60) return 'updated just now';
+  if (seconds < 3600) return `updated ${Math.floor(seconds / 60)}m ago`;
+  return `updated ${Math.floor(seconds / 3600)}h ago`;
+}
 
 /**
  * A colour per relayer, ordered by volume.
@@ -868,6 +882,8 @@ export default function Dashboard({
   const [deploymentQuery, setDeploymentQuery] = useState('');
   const [feedQuery, setFeedQuery] = useState('');
   const [network, setNetwork] = useState(dashboard.defaultNetwork);
+  const [snapshots, setSnapshots] = useState(dashboard.snapshots);
+  const [loadingNetwork, setLoadingNetwork] = useState<string | null>(null);
   const palette = usePalette();
   /** The client key whose record is open, and that record once it has arrived. */
   const [inspected, setInspected] = useState<string | null>(null);
@@ -879,9 +895,7 @@ export default function Dashboard({
   } | null>(null);
 
   // Every network's snapshot is already on the page, so switching is instant.
-  const data =
-    dashboard.snapshots[network] ??
-    dashboard.snapshots[dashboard.defaultNetwork];
+  const data = snapshots[network] ?? snapshots[dashboard.defaultNetwork];
   const combined = network === COMBINED;
   const labelOf = (id: string) =>
     dashboard.networks.find((entry) => entry.id === id)?.label ?? id;
@@ -890,6 +904,58 @@ export default function Dashboard({
   // Named exits make downstream a measurement; guessed ones make it an estimate,
   // and the page should not claim the same confidence for both.
   const namedExits = (data.totals.exitsNamed ?? 0) > 0;
+
+  const selectNetwork = useCallback(
+    async (next: string, history: 'push' | 'replace' = 'push') => {
+      if (next === network || loadingNetwork !== null) return;
+      const setAddress = () => {
+        const url = new URL(window.location.href);
+        if (next === dashboard.defaultNetwork) url.searchParams.delete('network');
+        else url.searchParams.set('network', next);
+        window.history[history === 'push' ? 'pushState' : 'replaceState'](
+          null,
+          '',
+          url,
+        );
+      };
+      if (snapshots[next]) {
+        setNetwork(next);
+        setInspected(null);
+        setAddress();
+        return;
+      }
+      setLoadingNetwork(next);
+      try {
+        const response = await fetch(
+          `/api/v1/dashboard?network=${encodeURIComponent(next)}`,
+        );
+        if (!response.ok) throw new Error(`Responded with ${response.status}`);
+        const snapshot = (await response.json()) as PublicSnapshot;
+        setSnapshots((current) => ({ ...current, [next]: snapshot }));
+        setNetwork(next);
+        setInspected(null);
+        setAddress();
+      } finally {
+        setLoadingNetwork(null);
+      }
+    },
+    [dashboard.defaultNetwork, loadingNetwork, network, snapshots],
+  );
+
+  useEffect(() => {
+    const syncFromAddress = () => {
+      const requested = new URL(window.location.href).searchParams.get('network');
+      if (
+        requested &&
+        dashboard.networks.some((entry) => entry.id === requested)
+      ) {
+        void selectNetwork(requested, 'replace');
+      }
+    };
+    syncFromAddress();
+    window.addEventListener('popstate', syncFromAddress);
+    return () => window.removeEventListener('popstate', syncFromAddress);
+  }, [dashboard.networks, selectNetwork]);
 
   // Which rows open a drill-down.
   //
@@ -955,19 +1021,29 @@ export default function Dashboard({
   /** Asked and answered with a failure, as opposed to still waiting. */
   const inspectFailed = answered && fetched.detail === null;
 
-  // Recharts colours pie slices from a `fill` on each datum, avoiding <Cell>.
-  const relayerSlices = useMemo(
-    () =>
-      data.relayers.map((relayer) => ({
-        ...relayer,
-        fill: relayerColor(
-          palette,
-          relayer.colorIndex,
-          data.relayerSeries.length,
-        ),
-      })),
-    [data.relayers, data.relayerSeries.length, palette],
-  );
+  // The ranked view stays deliberately short. The tail is a meaningful share of
+  // the network, so it becomes one "Other" row rather than disappearing.
+  const relayerPareto = useMemo(() => {
+    const leaders = data.relayers.slice(0, 10).map((relayer, index) => ({
+      label: `${index + 1}. ${shortAddress(relayer.address)}`,
+      gigabytes: relayer.gigabytes,
+    }));
+    const tail = data.relayers.slice(10);
+    const other = tail.reduce((total, relayer) => total + relayer.gigabytes, 0);
+    if (other > 0) leaders.push({ label: 'Other relayers', gigabytes: other });
+
+    let cumulative = 0;
+    return leaders.map((entry) => {
+      cumulative += entry.gigabytes;
+      return {
+        ...entry,
+        cumulativeShare: cumulative / (data.relayers.reduce(
+          (total, relayer) => total + relayer.gigabytes,
+          0,
+        ) || 1),
+      };
+    });
+  }, [data.relayers]);
 
   // Series are keyed by network+address to stay unique; labels must resolve back
   // to the plain address rather than slicing the composite key.
@@ -997,6 +1073,7 @@ export default function Dashboard({
       color: palette.accent2,
       label: 'New clients, last 30 days',
       dashed: true,
+      align: 'right',
     },
   ];
   const volumeLegend: LegendEntry[] = [
@@ -1010,10 +1087,14 @@ export default function Dashboard({
     { color: palette.accent, label: 'Returning' },
     { color: palette.accent2, label: 'New' },
   ];
-  const relayerLegend: LegendEntry[] = relayerSlices.map((relayer) => ({
-    color: relayer.fill,
+  const relayerLegend: LegendEntry[] = data.relayers.map((relayer) => ({
+    color: relayerColor(palette, relayer.colorIndex, data.relayerSeries.length),
     label: shortAddress(relayer.address),
   }));
+  const paretoLegend: LegendEntry[] = [
+    { color: palette.accent, label: 'Relay volume' },
+    { color: palette.accent2, label: 'Cumulative share', align: 'right' },
+  ];
 
   const hourGrid = hours === 'upstream' ? data.heatmap : data.heatmapDownstream;
   // With no RPC the clock is extrapolated from block height, so the feed shows
@@ -1140,7 +1221,7 @@ export default function Dashboard({
 
   return (
     <main id="top">
-      <a className="skip-link" href="#top">
+      <a className="skip-link" href="#main-content">
         Skip to content
       </a>
       <header className="topbar">
@@ -1156,7 +1237,25 @@ export default function Dashboard({
           <a href="#methodology">Methodology</a>
         </nav>
         <div className="topbar-end">
+          <span className={`freshness ${data.source}`}>
+            <i aria-hidden="true" />
+            {observedAt(data.observedAt)}
+            {data.timebase === 'estimated' && ' · estimated time'}
+          </span>
           <StyleSwitch />
+          <details className="mobile-nav">
+            <summary aria-label="Open dashboard navigation">
+              <Menu size={18} aria-hidden="true" />
+            </summary>
+            <nav aria-label="Dashboard navigation">
+              <a href="#usage">Usage</a>
+              <a href="#activity">Activity</a>
+              <a href="#relayers">Relayers</a>
+              <a href="#ticket">Tickets</a>
+              <a href="#clients">Clients</a>
+              <a href="#methodology">Methodology</a>
+            </nav>
+          </details>
         </div>
       </header>
 
@@ -1168,12 +1267,9 @@ export default function Dashboard({
               type="button"
               aria-pressed={combined}
               className={combined ? 'active' : ''}
-              onClick={() => {
-                setNetwork(COMBINED);
-                setInspected(null);
-              }}
+              onClick={() => void selectNetwork(COMBINED)}
             >
-              All networks
+              {loadingNetwork === COMBINED ? 'Loading…' : 'All networks'}
             </button>
             {dashboard.networks.map((entry) => (
               <button
@@ -1181,12 +1277,9 @@ export default function Dashboard({
                 type="button"
                 aria-pressed={network === entry.id}
                 className={network === entry.id ? 'active' : ''}
-                onClick={() => {
-                  setNetwork(entry.id);
-                  setInspected(null);
-                }}
+                onClick={() => void selectNetwork(entry.id)}
               >
-                {entry.label}
+                {loadingNetwork === entry.id ? 'Loading…' : entry.label}
               </button>
             ))}
           </fieldset>
@@ -1194,6 +1287,7 @@ export default function Dashboard({
       )}
 
       <section
+        id="main-content"
         className="headline-grid tile-grid"
         aria-label="Headline metrics"
       >
@@ -1485,9 +1579,8 @@ export default function Dashboard({
             status={panels.usage}
             className="service-chart span-4"
             eyebrow="LAST 30 DAYS · UPSTREAM"
-            title="Share of data volume"
-            legend={relayerLegend}
-            showLegend={false}
+            title="Relayer concentration"
+            legend={paretoLegend}
             note={
               <>
                 <Empty when={!data.relayers.length}>
@@ -1497,7 +1590,7 @@ export default function Dashboard({
             }
             expanded={enlarged}
             onExpand={setEnlarged}
-            chart={<RelayerShareChart slices={relayerSlices} />}
+            chart={<RelayerParetoChart points={relayerPareto} />}
           />
           <Tile
             id="relayer-volume"

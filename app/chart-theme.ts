@@ -19,7 +19,7 @@ export const STYLES = [
 
 export type StyleName = (typeof STYLES)[number]['id'];
 
-export const DEFAULT_STYLE: StyleName = 'editorial';
+export const DEFAULT_STYLE: StyleName = 'neubrutal';
 
 /** The key the choice is stored under, read by the pre-paint script in `layout.tsx`. */
 export const STYLE_STORAGE_KEY = 'arrakis:style';

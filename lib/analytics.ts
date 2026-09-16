@@ -77,9 +77,15 @@ export type PublicDashboard = {
 };
 
 /** Strips the drill-down from every snapshot, for anything crossing the wire. */
-export function publicDashboard(dashboard: Dashboard): PublicDashboard {
+export function publicDashboard(
+  dashboard: Dashboard,
+  /** The initial page needs one view; the rest load only on selection. */
+  initialSnapshots = Object.keys(dashboard.snapshots),
+): PublicDashboard {
   const snapshots: Record<string, PublicSnapshot> = {};
-  for (const [id, snapshot] of Object.entries(dashboard.snapshots)) {
+  for (const id of initialSnapshots) {
+    const snapshot = dashboard.snapshots[id];
+    if (!snapshot) continue;
     const { clientDetails: _details, ...rest } = snapshot;
     snapshots[id] = rest;
   }

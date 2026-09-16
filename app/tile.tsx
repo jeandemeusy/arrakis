@@ -15,7 +15,13 @@ import type { Palette } from './chart-theme';
 import { usePalette } from './style';
 
 /** One legend entry, shared by the rendered legend and the exported image. */
-export type LegendEntry = { color: string; label: string; dashed?: boolean };
+export type LegendEntry = {
+  color: string;
+  label: string;
+  dashed?: boolean;
+  /** A key can visually declare the axis its series reads against. */
+  align?: 'left' | 'right';
+};
 
 /*
  * The series colour is handed to CSS as a custom property rather than as a
@@ -26,17 +32,22 @@ export type LegendEntry = { color: string; label: string; dashed?: boolean };
  * the whole point of a key.
  */
 export function ChartLegend({ items }: { items: LegendEntry[] }) {
+  const left = items.filter((item) => item.align !== 'right');
+  const right = items.filter((item) => item.align === 'right');
+  const group = (entries: LegendEntry[]) =>
+    entries.map((item) => (
+      <span key={item.label} className="legend-item">
+        <i
+          className={item.dashed ? 'dashed' : undefined}
+          style={{ '--swatch': item.color } as CSSProperties}
+        />
+        {item.label}
+      </span>
+    ));
   return (
     <div className="legend">
-      {items.map((item) => (
-        <span key={item.label}>
-          <i
-            className={item.dashed ? 'dashed' : undefined}
-            style={{ '--swatch': item.color } as CSSProperties}
-          />
-          {item.label}
-        </span>
-      ))}
+      <div className="legend-group">{group(left)}</div>
+      {right.length > 0 && <div className="legend-group right">{group(right)}</div>}
     </div>
   );
 }

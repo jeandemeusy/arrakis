@@ -95,6 +95,7 @@
   /* Faces. The display face carries headings and every figure. */
   --font-sans: 'Arial', 'Helvetica', sans-serif;
   --font-display: 'Georgia', 'Times New Roman', serif;
+  --font-mono: ui-monospace, 'SFMono-Regular', menlo, monaco, consolas, monospace;
   --display-weight: 400;
 
   /* Shape. A tile's border, its corner, and what it casts. */
@@ -185,6 +186,87 @@ main {
   display: flex;
   align-items: center;
   gap: 22px;
+}
+
+/* Freshness belongs in the chrome, not in the reading column. It answers the
+   confidence question without competing with the headline metrics. */
+.freshness {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.freshness i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ok);
+}
+
+.freshness.degraded i,
+.freshness.unavailable i {
+  background: var(--warn);
+}
+
+.share-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 0 4px;
+  border: 0;
+  border-bottom: var(--control-border) solid var(--line);
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.share-link:hover {
+  color: var(--ink);
+  border-color: var(--ink);
+}
+
+.mobile-nav {
+  display: none;
+  position: relative;
+}
+
+.mobile-nav summary {
+  display: flex;
+  list-style: none;
+  cursor: pointer;
+}
+
+.mobile-nav summary::-webkit-details-marker {
+  display: none;
+}
+
+.mobile-nav nav {
+  position: absolute;
+  z-index: 3;
+  right: 0;
+  top: 28px;
+  display: grid;
+  min-width: 160px;
+  padding: 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-sm);
+}
+
+.mobile-nav a {
+  padding: 8px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.mobile-nav a:hover {
+  color: var(--ink);
 }
 
 /*
@@ -409,6 +491,34 @@ main {
 
 .headline-grid {
   margin: 0 var(--gutter) 56px;
+}
+
+/* A single sentence after the headline makes the dashboard's current state
+   scannable without introducing another hero or a second row of cards. */
+.network-pulse {
+  display: grid;
+  grid-template-columns: 132px minmax(0, 1fr) auto;
+  gap: 18px;
+  align-items: baseline;
+  margin: -32px var(--gutter) 34px;
+  padding: 13px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.network-pulse > span,
+.network-pulse small {
+  color: var(--muted);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.network-pulse p {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 16px;
+  letter-spacing: -0.02em;
 }
 
 .metric {
@@ -692,7 +802,19 @@ main {
   gap: 6px 18px;
 }
 
-.legend span {
+.legend-group {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 18px;
+}
+
+.legend-group.right {
+  justify-content: flex-end;
+}
+
+.legend-item {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -1048,6 +1170,17 @@ main {
 .address:hover code {
   color: var(--ink);
   border-bottom: 1px solid var(--line);
+}
+
+/* Addresses are identifiers, not prose. Set the face on both the link/button
+   and its nested code element so the browser cannot inherit a display face from
+   a table variant or an alternate visual style. */
+.rank-table .address,
+.rank-table .address code,
+.client-id code,
+.contracts .address code {
+  font-family: var(--font-mono);
+  font-variant-ligatures: none;
 }
 
 .rank-table code {
@@ -1634,6 +1767,14 @@ footer .source-link {
     display: none;
   }
 
+  .mobile-nav {
+    display: block;
+  }
+
+  .freshness {
+    display: none;
+  }
+
   .intro {
     padding-top: 28px;
   }
@@ -1686,6 +1827,34 @@ footer .source-link {
   .headline-grid {
     margin: 0 var(--gutter) 32px;
     grid-template-columns: 1fr;
+  }
+
+  .topbar-end {
+    gap: 14px;
+  }
+
+  .share-link {
+    font-size: 0;
+    border-bottom: 0;
+  }
+
+  .share-link svg {
+    width: 17px;
+    height: 17px;
+  }
+
+  .network-pulse {
+    grid-template-columns: 1fr;
+    gap: 5px;
+    margin: -14px var(--gutter) 26px;
+  }
+
+  .network-pulse p {
+    font-size: 15px;
+  }
+
+  .chart-actions {
+    opacity: 1;
   }
 
   .mau-card,

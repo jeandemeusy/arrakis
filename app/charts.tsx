@@ -8,8 +8,6 @@ import {
   CartesianGrid,
   ComposedChart,
   Line,
-  Pie,
-  PieChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -23,7 +21,6 @@ import type {
   ActiveUserPoint,
   ClientDetail,
   DailyUserPoint,
-  Relayer,
   RelayerDayPoint,
   RelayerSeries,
   WeekPoint,
@@ -93,6 +90,15 @@ export const ActiveUsersChart = memo(function ActiveUsersChart({
           tick={palette.axis}
           allowDecimals={false}
         />
+        <YAxis
+          yAxisId="deployments"
+          orientation="right"
+          axisLine={false}
+          tickLine={false}
+          tick={palette.axis}
+          allowDecimals={false}
+          width={28}
+        />
         <Tooltip labelFormatter={formatDay} contentStyle={palette.tooltip} />
         <Area
           type="monotone"
@@ -114,6 +120,7 @@ export const ActiveUsersChart = memo(function ActiveUsersChart({
         <Line
           type="monotone"
           dataKey="deployments"
+          yAxisId="deployments"
           name="New clients, last 30 days"
           stroke={palette.accent2}
           strokeWidth={palette.lineWidth - 0.5}
@@ -241,36 +248,90 @@ export const DailyUsersChart = memo(function DailyUsersChart({
   );
 });
 
-export const RelayerShareChart = memo(function RelayerShareChart({
-  slices,
+export type RelayerParetoPoint = {
+  label: string;
+  gigabytes: number;
+  cumulativeShare: number;
+};
+
+/**
+ * The ranked view answers concentration at a glance: bar length says volume,
+ * the line says how much of the market the leaders account for together.
+ */
+export const RelayerParetoChart = memo(function RelayerParetoChart({
+  points,
 }: {
-  slices: Array<Relayer & { fill: string }>;
+  points: RelayerParetoPoint[];
 }) {
   const palette = usePalette();
   return (
     <ResponsiveContainer width="100%" height={250}>
-      <PieChart>
-        <Pie
-          data={slices}
-          dataKey="gigabytes"
-          nameKey="address"
-          innerRadius="55%"
-          outerRadius="82%"
-          paddingAngle={1}
-          stroke={palette.barStroke ?? 'none'}
-          strokeWidth={palette.barStrokeWidth}
-          isAnimationActive={false}
+      <ComposedChart
+        layout="vertical"
+        data={points}
+        margin={{ top: 18, right: 12, left: 0, bottom: 0 }}
+      >
+        <CartesianGrid
+          horizontal={false}
+          stroke={palette.grid}
+          strokeDasharray={palette.gridDash}
+        />
+        <XAxis
+          xAxisId="volume"
+          type="number"
+          axisLine={false}
+          tickLine={false}
+          tick={palette.axis}
+          tickFormatter={(value: number) => volume(value)}
+        />
+        <XAxis
+          xAxisId="share"
+          type="number"
+          orientation="top"
+          domain={[0, 1]}
+          axisLine={false}
+          tickLine={false}
+          tick={palette.axis}
+          tickFormatter={(value: number) => `${Math.round(value * 100)}%`}
+        />
+        <YAxis
+          type="category"
+          dataKey="label"
+          axisLine={false}
+          tickLine={false}
+          tick={palette.axis}
+          width={102}
         />
         <Tooltip
+          cursor={palette.cursor}
           contentStyle={palette.addressTooltip}
           formatter={(input: unknown, name: unknown) =>
-            [volume(Number(input)), typeof name === 'string' ? name : ''] as [
-              string,
-              string,
-            ]
+            name === 'Cumulative share'
+              ? `${(Number(input) * 100).toFixed(1)}%`
+              : volume(Number(input))
           }
         />
-      </PieChart>
+        <Bar
+          dataKey="gigabytes"
+          xAxisId="volume"
+          name="Volume"
+          fill={palette.accent}
+          stroke={palette.barStroke}
+          strokeWidth={palette.barStrokeWidth}
+          radius={palette.barRadius}
+          isAnimationActive={false}
+        />
+        <Line
+          type="monotone"
+          dataKey="cumulativeShare"
+          xAxisId="share"
+          name="Cumulative share"
+          stroke={palette.accent2}
+          strokeWidth={palette.lineWidth}
+          dot={{ r: 2, fill: palette.accent2 }}
+          isAnimationActive={false}
+        />
+      </ComposedChart>
     </ResponsiveContainer>
   );
 });
