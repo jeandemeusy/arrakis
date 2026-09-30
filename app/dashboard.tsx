@@ -1150,13 +1150,6 @@ export default function Dashboard({
   // the PNG export paints it. Three surfaces, one source.
   const activeUsersLegend: LegendEntry[] = [
     { color: palette.accent, label: 'Active, last 30 days' },
-    { color: palette.seriesNeutral, label: 'Active, last 7 days' },
-    {
-      color: palette.accent2,
-      label: 'New clients, last 30 days',
-      dashed: true,
-      align: 'right',
-    },
   ];
   const volumeLegend: LegendEntry[] = [
     { color: palette.accent, label: 'Upstream' },
