@@ -92,15 +92,6 @@ export const ActiveUsersChart = memo(function ActiveUsersChart({
           tick={palette.axis}
           allowDecimals={false}
         />
-        <YAxis
-          yAxisId="deployments"
-          orientation="right"
-          axisLine={false}
-          tickLine={false}
-          tick={palette.axis}
-          allowDecimals={false}
-          width={28}
-        />
         <Tooltip labelFormatter={formatDay} contentStyle={palette.tooltip} />
         <Area
           type="monotone"
@@ -109,24 +100,6 @@ export const ActiveUsersChart = memo(function ActiveUsersChart({
           stroke={palette.accent}
           fill="url(#fillMonthly)"
           strokeWidth={palette.lineWidth + 1}
-          dot={false}
-        />
-        <Line
-          type="monotone"
-          dataKey="weekly"
-          name="Active, last 7 days"
-          stroke={palette.seriesNeutral}
-          strokeWidth={palette.lineWidth - 0.5}
-          dot={false}
-        />
-        <Line
-          type="monotone"
-          dataKey="deployments"
-          yAxisId="deployments"
-          name="New clients, last 30 days"
-          stroke={palette.accent2}
-          strokeWidth={palette.lineWidth - 0.5}
-          strokeDasharray="4 4"
           dot={false}
         />
       </ComposedChart>

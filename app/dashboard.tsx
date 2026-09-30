@@ -1435,13 +1435,10 @@ export default function Dashboard({
           figure={count(data.totals.monthlyActiveUsers)}
           note={
             <div className="mau-footer">
-              <span>
-                {count(data.totals.weeklyActiveUsers)} in the last 7 days
-              </span>
               <small>Distinct clients, last 30 days</small>
             </div>
           }
-          noteText={`${count(data.totals.weeklyActiveUsers)} in the last 7 days · distinct clients, last 30 days`}
+          noteText="distinct clients, last 30 days"
           expanded={enlarged}
           onExpand={setEnlarged}
         />
