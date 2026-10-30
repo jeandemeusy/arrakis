@@ -49,6 +49,8 @@
                 relative == topLevel
                 -> lib.elem topLevel [
                   "app"
+                  "db"
+                  "instrumentation.ts"
                   "lib"
                   "public"
                   "sql"
@@ -84,11 +86,13 @@
 
             mkdir -p $out/share/arrakis
             cp -r .next/standalone/. $out/share/arrakis/
-            # Standalone omits these two: static assets are served from disk, and
-            # the SQL is read at runtime relative to the working directory.
+            # Standalone omits these: static assets are served from disk, and
+            # the SQL and the app database migrations are read at runtime
+            # relative to the working directory.
             cp -r .next/static $out/share/arrakis/.next/static
             cp -r public $out/share/arrakis/public
             cp -r sql $out/share/arrakis/sql
+            cp -r db $out/share/arrakis/db
 
             mkdir -p $out/bin
             # Next reads HOSTNAME for its bind address, but HOSTNAME is also a

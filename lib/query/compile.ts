@@ -1,0 +1,322 @@
+import { badRequest } from '../api/errors';
+import {
+  PG_TYPE,
+  SYSTEM_PARAMETERS,
+  coerce,
+  isSystemParameter,
+  type BindValue,
+  type ParameterDefinition,
+  type SystemParameter,
+} from './params';
+import { segments } from './scan';
+
+/**
+ * Turns a saved query's template into one parameterized statement.
+ *
+ * The template language is deliberately small:
+ *
+ *   {{name}}               a declared parameter, bound as $n::<type>
+ *   {{network}}, {{exits}} system parameters the platform fills in
+ *   {{> slug}}             another saved query of kind `fragment`, inlined as a
+ *                          parenthesized subquery: `FROM {{> clients}} AS c`
+ *                          or `WITH c AS {{> clients}}`
+ *   {{block_time(expr)}}   the timestamp of block number `expr`, interpolated
+ *                          between sampled anchor blocks (see clock.ts)
+ *
+ * Placeholders are only recognized in code, never inside strings or comments.
+ * Raw positional parameters ($1) and a second statement are rejected here, with
+ * a message, before the database would reject them less helpfully.
+ */
+
+export type FragmentSource = {
+  slug: string;
+  versionId: string;
+  sql: string;
+  parameters: ParameterDefinition[];
+};
+
+export type ResolveFragment = (slug: string) => Promise<FragmentSource | null>;
+
+type Slot =
+  | { kind: 'user'; name: string }
+  | { kind: 'system'; name: SystemParameter }
+  | { kind: 'clock'; part: 'blocks' | 'times' };
+
+export type Compiled = {
+  /** The statement, with $n placeholders. */
+  text: string;
+  /** What each $n is bound to, in order. */
+  slots: Slot[];
+  /** Every declared parameter in scope — the query's own and its fragments'. */
+  parameters: ParameterDefinition[];
+  /** The declared parameters the statement actually uses. */
+  used: string[];
+  system: SystemParameter[];
+  usesClock: boolean;
+  /** Fragments inlined, outermost first, each with the version that was used. */
+  fragments: Array<{ slug: string; versionId: string }>;
+};
+
+const MAX_FRAGMENT_DEPTH = 8;
+const FRAGMENT = /^>\s*([a-z0-9][a-z0-9-]{0,79})$/;
+const BLOCK_TIME = /^block_time\s*\(([\s\S]+)\)$/;
+const NAME = /^[a-z_][a-z0-9_]{0,62}$/;
+
+type Placeholder = { start: number; end: number; inner: string };
+
+/** Finds placeholders and enforces the single-statement and no-$n rules. */
+function analyse(
+  sql: string,
+  where: string,
+): {
+  placeholders: Placeholder[];
+  trailing: number[];
+} {
+  const code: boolean[] = [];
+  for (const segment of segments(sql)) {
+    for (let index = 0; index < segment.text.length; index += 1) {
+      code.push(segment.code);
+    }
+  }
+
+  const placeholders: Placeholder[] = [];
+  const semicolons: number[] = [];
+  let index = 0;
+  while (index < sql.length) {
+    if (!code[index]) {
+      index += 1;
+      continue;
+    }
+    if (sql.startsWith('{{', index)) {
+      let close = index + 2;
+      while (
+        close < sql.length &&
+        !(code[close] && sql.startsWith('}}', close))
+      ) {
+        close += 1;
+      }
+      if (close >= sql.length) {
+        throw badRequest(`${where}: unclosed {{ at offset ${index}`);
+      }
+      placeholders.push({
+        start: index,
+        end: close + 2,
+        inner: sql.slice(index + 2, close).trim(),
+      });
+      index = close + 2;
+      continue;
+    }
+    const char = sql[index];
+    if (char === '$' && /\d/.test(sql[index + 1] ?? '')) {
+      throw badRequest(
+        `${where}: positional parameters like $1 are not allowed; declare a parameter and write {{name}}`,
+      );
+    }
+    if (char === ';') semicolons.push(index);
+    index += 1;
+  }
+
+  // A semicolon is only allowed as the very last thing in the code.
+  for (const position of semicolons) {
+    for (let after = position + 1; after < sql.length; after += 1) {
+      if (code[after] && !/[\s;]/.test(sql[after])) {
+        throw badRequest(`${where}: only a single statement is allowed`);
+      }
+    }
+  }
+  return { placeholders, trailing: semicolons };
+}
+
+export async function compile(
+  sql: string,
+  definitions: ParameterDefinition[],
+  resolveFragment: ResolveFragment,
+): Promise<Compiled> {
+  const slots: Slot[] = [];
+  const slotIndex = new Map<string, number>();
+  const scope = new Map<string, ParameterDefinition>();
+  const used = new Set<string>();
+  const system = new Set<SystemParameter>();
+  const fragments: Compiled['fragments'] = [];
+  let usesClock = false;
+
+  const slot = (key: string, value: Slot): number => {
+    let position = slotIndex.get(key);
+    if (position === undefined) {
+      slots.push(value);
+      position = slots.length;
+      slotIndex.set(key, position);
+    }
+    return position;
+  };
+
+  const expand = async (
+    text: string,
+    where: string,
+    stack: string[],
+  ): Promise<string> => {
+    const { placeholders, trailing } = analyse(text, where);
+    let out = '';
+    let cursor = 0;
+    const blank = new Set(trailing);
+    const copy = (until: number) => {
+      for (let index = cursor; index < until; index += 1) {
+        out += blank.has(index) ? ' ' : text[index];
+      }
+      cursor = until;
+    };
+
+    for (const placeholder of placeholders) {
+      copy(placeholder.start);
+      cursor = placeholder.end;
+      const { inner } = placeholder;
+
+      const fragment = FRAGMENT.exec(inner);
+      if (fragment) {
+        const slug = fragment[1];
+        if (stack.includes(slug)) {
+          throw badRequest(`Fragment cycle: ${[...stack, slug].join(' → ')}`);
+        }
+        if (stack.length >= MAX_FRAGMENT_DEPTH) {
+          throw badRequest(`Fragments nest deeper than ${MAX_FRAGMENT_DEPTH}`);
+        }
+        const source = await resolveFragment(slug);
+        if (!source) throw badRequest(`Unknown fragment: ${slug}`);
+        fragments.push({ slug, versionId: source.versionId });
+        // A fragment's own declarations apply unless the query declares the
+        // same name itself, in which case the query's definition wins.
+        for (const definition of source.parameters) {
+          if (!scope.has(definition.name))
+            scope.set(definition.name, definition);
+        }
+        const body = await expand(source.sql, `Fragment ${slug}`, [
+          ...stack,
+          slug,
+        ]);
+        out += `(\n${body}\n)`;
+        continue;
+      }
+
+      const blockTime = BLOCK_TIME.exec(inner);
+      if (blockTime) {
+        const expression = blockTime[1].trim();
+        if (expression.includes('{{')) {
+          throw badRequest(
+            `${where}: block_time() cannot contain a placeholder`,
+          );
+        }
+        usesClock = true;
+        const blocks = slot('clock:blocks', { kind: 'clock', part: 'blocks' });
+        const times = slot('clock:times', { kind: 'clock', part: 'times' });
+        out +=
+          '(SELECT to_timestamp(arrakis_bt_c.t[arrakis_bt_c.i] + ' +
+          '(arrakis_bt_c.x - arrakis_bt_c.b[arrakis_bt_c.i]) * ' +
+          '(arrakis_bt_c.t[arrakis_bt_c.i + 1] - arrakis_bt_c.t[arrakis_bt_c.i])::float8 / ' +
+          'NULLIF(arrakis_bt_c.b[arrakis_bt_c.i + 1] - arrakis_bt_c.b[arrakis_bt_c.i], 0)) ' +
+          'FROM (SELECT arrakis_bt_v.x, arrakis_bt_v.b, arrakis_bt_v.t, ' +
+          'LEAST(GREATEST(width_bucket(arrakis_bt_v.x, arrakis_bt_v.b), 1), cardinality(arrakis_bt_v.b) - 1) AS i ' +
+          `FROM (SELECT (${expression})::bigint AS x, $${blocks}::bigint[] AS b, $${times}::bigint[] AS t) AS arrakis_bt_v) AS arrakis_bt_c)`;
+        continue;
+      }
+
+      if (NAME.test(inner)) {
+        if (isSystemParameter(inner)) {
+          system.add(inner);
+          const position = slot(`system:${inner}`, {
+            kind: 'system',
+            name: inner,
+          });
+          out += `$${position}::${SYSTEM_PARAMETERS[inner]}`;
+          continue;
+        }
+        // Resolved after expansion, once every fragment's declarations are in
+        // scope; the cast is filled in then.
+        used.add(inner);
+        const position = slot(`user:${inner}`, { kind: 'user', name: inner });
+        out += `$${position}::\u0000${inner}\u0000`;
+        continue;
+      }
+
+      throw badRequest(`${where}: unrecognized placeholder {{${inner}}}`);
+    }
+    copy(text.length);
+    return out.trim();
+  };
+
+  for (const definition of definitions) scope.set(definition.name, definition);
+  let text = await expand(sql, 'Query', []);
+
+  for (const name of used) {
+    const definition = scope.get(name);
+    if (!definition) {
+      throw badRequest(
+        `Parameter "${name}" is used but not declared; add it to the query's parameters`,
+      );
+    }
+    text = text.replaceAll(`\u0000${name}\u0000`, PG_TYPE[definition.type]);
+  }
+
+  return {
+    text,
+    slots,
+    parameters: [...scope.values()],
+    used: [...used],
+    system: [...system],
+    usesClock,
+    fragments,
+  };
+}
+
+export type SystemValues = {
+  network: string;
+  exits?: Buffer[];
+  clock?: { blocks: number[]; times: number[] };
+};
+
+/**
+ * Resolves every declared parameter to a value — supplied, else the default —
+ * and lays out the bind values in slot order.
+ *
+ * `resolved` holds the user parameters only: it is what identifies a result, so
+ * two runs with the same values share one, while system values are accounted
+ * for separately (see the inputs hash).
+ */
+export function bind(
+  compiled: Compiled,
+  supplied: Record<string, unknown>,
+  systemValues: SystemValues,
+): { values: BindValue[]; resolved: Record<string, BindValue> } {
+  const resolved: Record<string, BindValue> = {};
+  for (const name of Object.keys(supplied)) {
+    if (!compiled.parameters.some((definition) => definition.name === name)) {
+      throw badRequest(`Unknown parameter "${name}"`);
+    }
+  }
+  for (const definition of compiled.parameters) {
+    if (!compiled.used.includes(definition.name)) continue;
+    const raw = supplied[definition.name] ?? definition.default;
+    if (raw === undefined || raw === null) {
+      throw badRequest(`Parameter "${definition.name}" needs a value`);
+    }
+    resolved[definition.name] = coerce(definition, raw);
+  }
+
+  const values = compiled.slots.map((slot): BindValue => {
+    switch (slot.kind) {
+      case 'user':
+        return resolved[slot.name];
+      case 'system':
+        if (slot.name === 'network') return systemValues.network;
+        if (!systemValues.exits) {
+          throw new Error('exits were not resolved for a query that uses them');
+        }
+        return systemValues.exits;
+      case 'clock':
+        if (!systemValues.clock) {
+          throw new Error('the block clock was not resolved for block_time()');
+        }
+        return systemValues.clock[slot.part];
+    }
+  });
+  return { values, resolved };
+}

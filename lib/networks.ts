@@ -21,6 +21,12 @@ export type NetworkConfig = {
   id: string;
   label: string;
   databaseUrl: string;
+  /**
+   * Where saved queries run. Defaults to `databaseUrl`; point it at a read
+   * replica, or at the same database under a stricter role, to keep editor and
+   * scheduled queries off the connection the dashboard depends on.
+   */
+  queryDatabaseUrl: string;
   rpcUrl: string | null;
   /** Known exit addresses, lowercased. Empty means none were configured. */
   exits: string[];
@@ -83,6 +89,11 @@ function parseEntry(entry: unknown, index: number): NetworkConfig {
     typeof record.label === 'string' && record.label.trim()
       ? record.label.trim()
       : id;
+  const queryDatabaseUrl =
+    typeof record.queryDatabaseUrl === 'string' &&
+    record.queryDatabaseUrl.trim()
+      ? record.queryDatabaseUrl.trim()
+      : databaseUrl;
   const rpcUrl =
     typeof record.rpcUrl === 'string' && record.rpcUrl.trim()
       ? record.rpcUrl.trim()
@@ -102,7 +113,12 @@ function parseEntry(entry: unknown, index: number): NetworkConfig {
       `NETWORKS[${index}].databaseUrl must be a PostgreSQL connection string`,
     );
   }
-  return { id, label, databaseUrl, rpcUrl, exits };
+  if (!isPostgres(queryDatabaseUrl)) {
+    throw new Error(
+      `NETWORKS[${index}].queryDatabaseUrl must be a PostgreSQL connection string`,
+    );
+  }
+  return { id, label, databaseUrl, queryDatabaseUrl, rpcUrl, exits };
 }
 
 /** Exits shared by every network, unless one names its own. */
@@ -150,6 +166,7 @@ export function resolveNetworks(): NetworkConfig[] {
       id: 'default',
       label: 'Network',
       databaseUrl,
+      queryDatabaseUrl: process.env.QUERY_DATABASE_URL?.trim() || databaseUrl,
       rpcUrl: process.env.RPC_URL?.trim() || null,
       exits: defaultExits(),
     },

@@ -217,6 +217,185 @@ The fixture fabricates the finished snapshot rather than exercising the aggregat
 in `lib/analytics.ts`. It validates rendering only — never read agreement there as
 evidence that the real derivations are correct.
 
+## Query store
+
+Saved, user-editable SQL is replacing the hardcoded queries in `sql/v1`. The
+backend and the studio (the editor, below) are in place; the charts and
+dashboards built on saved queries come next, and until then the page above is
+still drawn from `sql/v1`.
+
+### Studio
+
+`/queries` lists saved queries and `/queries/<slug>` opens one; `/settings/networks`
+manages exits. Anyone can read public queries and their stored results; the
+**Unlock editing** link asks for the editor password, after which you can:
+
+- write SQL with highlighting, completion of tables, columns, fragments and
+  placeholders (type `{{` for those), Cmd/Ctrl+Enter to run, Cmd/Ctrl+S to save,
+  Cmd/Ctrl+/ to comment lines; the schema on the left inserts at the cursor;
+- run against one network or all of them, previewing up to 10,000 rows, with
+  the database's own error message when it fails;
+- declare parameters (or let it declare the `{{names}}` it finds), and give
+  values for a run;
+- save, which creates the next version with an optional note; compare any
+  version with the draft and load it back; fork; archive;
+- schedule a refresh, run and store a result now, and read the stored result
+  and its status per network, or download it as CSV;
+- add and remove exits, and see when each one last paid a relay.
+
+The editor is a highlighted `<textarea>` written for this repository rather
+than an editor package, so the Nix `npmDepsHash` is untouched.
+
+#### Trying it locally
+
+```bash
+npm run dev:db -- --demo     # a local PostgreSQL in ./.pgdata, with a demo index
+npm run hash-password        # choose a password; prints its hash
+```
+
+Put the lines `dev:db` prints, and the hash, in `.env.local`:
+
+```dotenv
+APP_DATABASE_URL=postgresql://postgres@127.0.0.1:54329/arrakis
+NETWORKS='[{"id":"demo","label":"Demo","databaseUrl":"postgresql://blokli_reader@127.0.0.1:54329/blokli_demo"}]'
+ARRAKIS_EDITOR_PASSWORD_HASH=scrypt:15:8:1:…
+```
+
+Then `npm run dev` and open <http://localhost:3000/queries>. (`dev` runs on
+webpack, like `build`: in the Nix shell `node_modules` is symlinked into the
+Nix store, outside the project, and Turbopack refuses to resolve `next` from
+there.) Leave out
+`--demo` and keep your own `NETWORKS` to query a real index instead; the role
+in its `databaseUrl` must be read-only or the studio refuses to run against it.
+`npm run dev:db -- stop` stops the database and `-- reset` deletes it.
+
+Queries are stored, versioned and run by the application, against the same
+Blokli databases, and **only ever read them**. Every query runs through one
+path (`lib/query/runner.ts`) that enforces this three times over:
+
+- **The role.** Before a network's first query, and every five minutes after,
+  its role is checked for any way to write — superuser, CREATE on the database
+  or a schema, INSERT/UPDATE/DELETE/TRUNCATE on any table. If it finds one,
+  queries on that network are refused with a message naming the privilege.
+- **The transaction.** Every run is `BEGIN READ ONLY`, with a time limit.
+- **The statement.** The SQL becomes the body of `DECLARE … CURSOR FOR`, which
+  only accepts a query, wrapped as a subquery, where a data-modifying CTE is a
+  syntax error, and sent through the extended protocol, which refuses a second
+  statement.
+
+After every run the connection is reset with `DISCARD ALL` before it returns
+to the pool, so nothing a query sets on its session — an advisory lock, a
+`set_config` — outlives it. On PostgreSQL 14 and older, `public` grants CREATE
+to everyone by default; revoke it (`REVOKE CREATE ON SCHEMA public FROM
+PUBLIC`) or the role check will refuse the network.
+
+`queryDatabaseUrl` on a network (or `QUERY_DATABASE_URL` for a single one)
+sends saved queries to a different connection — a read replica, say — and
+defaults to `databaseUrl`.
+
+### Configuration
+
+```dotenv
+APP_DATABASE_URL=postgresql://arrakis:…@app-db:5432/arrakis
+ARRAKIS_EDITOR_PASSWORD_HASH=scrypt:15:8:1:…
+```
+
+`APP_DATABASE_URL` is the application's own database, separate from every
+Blokli one. It holds the queries, their versions, the materialized results,
+exit addresses and editor sessions, and the app migrates it itself on start
+(`db/migrations`). Without it, none of this is enabled and the dashboard runs
+exactly as before.
+
+Editing is unlocked with a single password. Generate its hash with
+`npm run hash-password` and set `ARRAKIS_EDITOR_PASSWORD_HASH`; the password
+itself is never stored. Changing the variable and restarting rotates it;
+unsetting it disables editing and ends every session. Underneath, it is one
+`editor` account in a `users` table — sessions, authorship and rate limiting
+all key on a user — so more editors are more rows, not a redesign.
+
+Sessions are `HttpOnly`, `SameSite=Strict` cookies (`__Host-` and `Secure` in
+production) backed by the database, so every replica honours them. Ten failed
+logins from one address, or two hundred from everywhere, in 15 minutes locks
+logins for 15 minutes. State-changing requests from another origin are
+refused; set `ARRAKIS_ALLOWED_ORIGINS` if the editor is served from a second
+hostname.
+
+### Writing queries
+
+Saved queries are SQL with a few placeholders, only recognized outside
+strings and comments:
+
+| Placeholder | Becomes |
+|---|---|
+| `{{name}}` | A declared parameter, bound as `$n::type` — never pasted into the SQL. Types: `text`, `integer`, `number`, `boolean`, `date`, `timestamp`, `address`, `text[]`, `integer[]`, `address[]`, `enum`. |
+| `{{network}}` | The id of the network the query is running on. |
+| `{{exits}}` | The exits configured for that network, as `bytea[]`. |
+| `{{> slug}}` | Another saved query of kind `fragment`, inlined as a subquery: `FROM {{> client-channels}} AS c`, or `WITH c AS {{> client-channels}}`. |
+| `{{block_time(expr)}}` | The `timestamptz` of block `expr`, interpolated between anchor blocks timestamped over `rpcUrl` — or, without one, from the five-second cadence, in which case the result says `"timebase": "estimated"`. Sessions run in UTC, so `::date` is a UTC day. |
+
+`$1`-style parameters and a second statement are rejected before anything runs.
+
+**Versions are immutable.** Saving SQL creates the next version; nothing edits
+one in place, including a hand-written `UPDATE`, which a trigger refuses.
+Archiving a query hides it but keeps its history.
+
+**Results are materialized.** Running a saved query copies its rows into a
+table of their own in the app database, in the `results` schema. Reading a
+result never runs the query, and many charts can aggregate one result without
+touching Blokli again. A result records which fragment versions and which exit
+set produced it; when either changes, the result is reported `stale` and the
+scheduler reruns it.
+
+**Scheduling.** A query with `refreshSeconds` (60 or more) is rerun on that
+interval, and within one scheduler tick (10 s) of its inputs changing — a new
+version, a new fragment version, a different exit set. One replica leads, through an
+advisory lock in the app database; the others take over if it goes away. A
+failed run keeps the previous result serving and records the error on it.
+
+### Exits
+
+Exit addresses are configured per network through the API (a settings page
+follows) and stored in the app database. A removal is recorded rather than
+deleted, so the history of what was counted as downstream stays on record.
+Adding an address that never announced on that network is allowed, with a
+warning. Queries see them only as `{{exits}}`; with none configured, nothing is
+guessed. `EXITS` and the per-network `exits` field still feed the current page
+until it is rebuilt from saved queries, and are then removed.
+
+### API
+
+Reads are public for `public` and `unlisted` queries; `private` ones answer 404
+unless signed in. Everything that runs SQL ad hoc or changes state requires a
+session.
+
+| Route | |
+|---|---|
+| `POST /api/v1/auth/login` `{password}` · `POST /api/v1/auth/logout` · `GET /api/v1/auth/session` | Sign in and out. |
+| `GET /api/v1/networks` | Network ids and labels. |
+| `GET·POST /api/v1/networks/:id/exits` · `DELETE …/exits/:address` | Exits; reading is public. |
+| `GET /api/v1/schema?network=` | Tables and columns the role can read. |
+| `POST /api/v1/run` `{sql, parameters?, values?, network?}` | Run unsaved SQL; up to 10,000 rows, nothing stored. |
+| `GET·POST /api/v1/queries` | List, create. |
+| `GET·PATCH·DELETE /api/v1/queries/:slug` | Read, change metadata, archive. |
+| `GET·POST /api/v1/queries/:slug/versions` | History, save new SQL. |
+| `POST /api/v1/queries/:slug/fork` `{slug, title?}` | Private copy. |
+| `POST /api/v1/queries/:slug/run` `{network?, values?}` | Run now and store the result. |
+| `GET /api/v1/queries/:slug/results?network=&limit=&offset=&p.name=` | The stored result. Never runs anything. |
+
+`network=all` (the default where accepted) stacks every network's rows under a
+leading `network` column; a query with `combine: "hidden"` has no such view.
+
+### Tests
+
+```bash
+TEST_ADMIN_DATABASE_URL=postgresql://postgres:…@localhost/postgres npm test
+```
+
+The integration suite builds throwaway databases from
+[`test/fixtures/blokli.sql`](./test/fixtures/blokli.sql) using that superuser
+connection, and is skipped without it. Node 22.18 or newer runs the TypeScript
+directly; nothing else is needed.
+
 ## Metric definitions
 
 Every published figure is reconstructed from chain events. No number on the page

@@ -6,12 +6,15 @@
     "node": ">=22.13.0"
   },
   "scripts": {
-    "dev": "next dev",
-    "dev:fixtures": "DASHBOARD_FIXTURES=1 next dev",
+    "dev": "next dev --webpack",
+    "dev:fixtures": "DASHBOARD_FIXTURES=1 next dev --webpack",
+    "dev:db": "sh scripts/dev-db.sh",
     "build": "nix develop -c npm run build:nix",
     "build:nix": "next build --webpack",
     "start": "next start",
-    "lint": "oxlint app lib && stylelint 'app/**/*.css'",
+    "lint": "oxlint app lib instrumentation.ts && stylelint 'app/**/*.css'",
+    "test": "node --import ./test/loader.mjs --test 'test/**/*.test.ts'",
+    "hash-password": "node scripts/hash-password.mjs",
     "format": "oxfmt && stylelint --fix 'app/**/*.css'"
   },
   "dependencies": {

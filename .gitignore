@@ -43,6 +43,9 @@ tsconfig.tsbuildinfo
 
 .wrangler/
 
+# local PostgreSQL from `npm run dev:db`
+/.pgdata/
+
 # nix / direnv
 .direnv/
 result
