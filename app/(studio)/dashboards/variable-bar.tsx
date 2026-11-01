@@ -2,6 +2,7 @@
 
 import { X } from 'lucide-react';
 import { type DashboardVariable, type Network } from '../api';
+import { VariableSwitch } from './variable-switch';
 
 function shortValue(value: string): string {
   return /^0x[0-9a-f]{16,}$/i.test(value)
@@ -31,29 +32,27 @@ export function VariableBar({
           raw === 'all'
             ? networks[0]?.id
             : raw;
-        if (
-          variable.type === 'range' ||
-          variable.type === 'select' ||
-          variable.type === 'network'
-        ) {
-          const options =
-            variable.type === 'network'
-              ? [
-                  ...(networks.length > 1 && variable.stack !== false
-                    ? [{ value: 'all', label: 'All, stacked' }]
-                    : []),
-                  ...networks.map((network) => ({
-                    value: network.id,
-                    label: network.label,
-                  })),
-                ]
-              : (variable.options ?? []).map((option) => ({
-                  value: option,
-                  label:
-                    variable.labels?.[option] ??
-                    (option === 'all' ? 'All' : option),
-                }));
-          if (variable.type === 'network' && networks.length <= 1) return null;
+        if (variable.type === 'range' || variable.type === 'select') {
+          return (
+            <VariableSwitch
+              key={variable.name}
+              variable={variable}
+              value={value}
+              onChange={(option) => onChange(variable.name, option)}
+            />
+          );
+        }
+        if (variable.type === 'network') {
+          const options = [
+            ...(networks.length > 1 && variable.stack !== false
+              ? [{ value: 'all', label: 'All, stacked' }]
+              : []),
+            ...networks.map((network) => ({
+              value: network.id,
+              label: network.label,
+            })),
+          ];
+          if (networks.length <= 1) return null;
           return (
             <fieldset key={variable.name} className="network-switch">
               <legend className="sr-only">{variable.label}</legend>

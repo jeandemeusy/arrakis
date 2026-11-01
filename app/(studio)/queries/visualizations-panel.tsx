@@ -35,7 +35,8 @@ import { buildSql, type Step } from '@/lib/viz/transform';
 import { seriesOf } from '../../viz/series';
 import { VisualizationBody } from '../../viz/visualization';
 import { usePalette } from '../../style';
-import { api, ApiError } from '../api';
+import { api, ApiError, type ChartHost, type DashboardVariable } from '../api';
+import { VariableSwitch } from '../dashboards/variable-switch';
 import { ResultsTable } from '../results-table';
 import { BuilderForm, topValues } from './chart-builder';
 import {
@@ -119,6 +120,13 @@ const MODE_LABELS: Record<Mode, string> = {
 };
 
 const NUMERIC = ['integer', 'bigint', 'float', 'numeric'];
+
+/**
+ * Windows offered when no dashboard defines the variable: days for a time
+ * column, blocks for a number column. A dashboard's own definition wins.
+ */
+const TIME_WINDOWS = ['24h', '7d', '30d', '31d', '90d', 'all'];
+const BLOCK_WINDOWS = ['all', '10000', '100000', '500000', '2000000'];
 
 function draftOf(saved: Saved): Draft {
   return {
@@ -588,6 +596,7 @@ export function VisualizationsPanel({
   editor,
   network,
   chart,
+  hosts,
   onSaved,
   onDeleted,
 }: {
@@ -596,6 +605,8 @@ export function VisualizationsPanel({
   network: string;
   /** The chart to open, or null to start a new one from a template. */
   chart: Saved | null;
+  /** The dashboards showing this query's charts, whose variables it borrows. */
+  hosts: ChartHost[];
   onSaved: (chart: Saved) => void;
   onDeleted: (id: string) => void;
 }) {
@@ -606,7 +617,7 @@ export function VisualizationsPanel({
   const choosing = !draft;
   const [base, setBase] = useState<ScopeColumn[]>([]);
   const [baseError, setBaseError] = useState<string | null>(null);
-  const [vars, setVars] = useState<Record<string, string>>({ range: '30d' });
+  const [vars, setVars] = useState<Record<string, string>>({});
   const [preview, setPreview] = useState<PreviewData | null>(null);
   const [previewError, setPreviewError] = useState<ApiError | null>(null);
   const [showData, setShowData] = useState(false);
@@ -709,13 +720,74 @@ export function VisualizationsPanel({
       live = false;
     };
   }, [editor, filterKey, slug, network]);
+  // A window variable counts days for a time column and blocks for a number
+  // column, so the preview offers whichever the chart's range step reads.
+  const rangeUnits = ((): Record<string, 'time' | 'blocks'> => {
+    const units: Record<string, 'time' | 'blocks'> = {};
+    for (const step of activeSteps) {
+      if (step.op === 'bucket' && step.unit === 'auto')
+        units[step.var ?? 'range'] ??= 'time';
+      if (step.op !== 'range' || step.window !== undefined) continue;
+      const column = base.find((entry) => entry.name === step.column);
+      units[step.var ?? 'range'] =
+        column && NUMERIC.includes(column.type) ? 'blocks' : 'time';
+    }
+    return units;
+  })();
+  const names = draft ? variablesOf(draft.mode, activeSteps, draft.sql) : [];
+  // Each window the chart reads is offered as a dashboard offers it: from the
+  // variable that a dashboard showing this chart defines (one showing this very
+  // chart first), else from the kind of column it limits.
+  const definitions = ((): Record<string, DashboardVariable> => {
+    const ordered = [...hosts].sort(
+      (a, b) =>
+        Number(chart ? b.chartIds.includes(chart.id) : 0) -
+        Number(chart ? a.chartIds.includes(chart.id) : 0),
+    );
+    const found: Record<string, DashboardVariable> = {};
+    for (const name of names) {
+      const defined = ordered
+        .flatMap((host) => host.variables)
+        .find(
+          (entry) =>
+            entry.name === name &&
+            (entry.type === 'range' || entry.type === 'select') &&
+            entry.options?.length,
+        );
+      const unit = rangeUnits[name] ?? (name === 'range' ? 'time' : undefined);
+      if (defined) found[name] = defined;
+      else if (unit)
+        found[name] = {
+          name,
+          label: name,
+          type: 'range',
+          options: unit === 'blocks' ? BLOCK_WINDOWS : TIME_WINDOWS,
+          default: unit === 'blocks' ? 'all' : '30d',
+        };
+    }
+    return found;
+  })();
+  const definitionsKey = JSON.stringify(definitions);
   const previewVars = useMemo(() => {
     const out: Record<string, string> = { ...vars };
     for (const [name, list] of Object.entries(suggestions)) {
       if (!out[name] && list[0]) out[name] = list[0];
     }
+    // A value its definition does not offer (`30d` over blocks, a window the
+    // dashboard dropped) would only fail the step: take the default instead.
+    for (const [name, entry] of Object.entries(
+      JSON.parse(definitionsKey) as Record<string, DashboardVariable>,
+    )) {
+      const options = entry.options ?? [];
+      if (!options.includes(out[name] ?? '')) {
+        out[name] =
+          entry.default && options.includes(entry.default)
+            ? entry.default
+            : (options[0] ?? 'all');
+      }
+    }
     return out;
-  }, [vars, suggestions]);
+  }, [vars, suggestions, definitionsKey]);
 
   useEffect(() => {
     if (!config || buildError) return;
@@ -1025,22 +1097,18 @@ export function VisualizationsPanel({
                 <div className="viz-vars">
                   {variables.map((name) => (
                     <label key={name} className="studio-field compact">
-                      <span>{name}</span>
-                      {name === 'range' ? (
-                        <select
-                          value={vars.range ?? 'all'}
-                          onChange={(event) =>
-                            setVars({ ...vars, range: event.target.value })
+                      <span>
+                        {definitions[name]?.label ?? name}
+                        {rangeUnits[name] === 'blocks' ? ' (blocks)' : ''}
+                      </span>
+                      {definitions[name] ? (
+                        <VariableSwitch
+                          variable={definitions[name]}
+                          value={previewVars[name]}
+                          onChange={(value) =>
+                            setVars({ ...vars, [name]: value })
                           }
-                        >
-                          {['24h', '7d', '30d', '31d', '90d', 'all'].map(
-                            (option) => (
-                              <option key={option} value={option}>
-                                {option}
-                              </option>
-                            ),
-                          )}
-                        </select>
+                        />
                       ) : (
                         <>
                           <input

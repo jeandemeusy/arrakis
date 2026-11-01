@@ -34,6 +34,7 @@ import {
 import {
   api,
   ApiError,
+  type ChartHost,
   type Combine,
   type Dependent,
   type Kind,
@@ -185,9 +186,7 @@ export function Workbench({
   const [paramsOpen, setParamsOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [runMenu, setRunMenu] = useState(false);
-  const [dashboards, setDashboards] = useState<
-    Array<{ slug: string; title: string; charts: number }>
-  >([]);
+  const [dashboards, setDashboards] = useState<ChartHost[]>([]);
   const schemaOpen = usePreference('arrakis.workbench.schema', true);
   const aboutOpen = usePreference('arrakis.workbench.about', true);
   const [schema, setSchema] = useState<SchemaTable[]>([]);
@@ -271,9 +270,7 @@ export function Workbench({
     api<{ visualizations: Saved[] }>(`/api/v1/queries/${slug}/visualizations`)
       .then(({ visualizations }) => live && setCharts(visualizations))
       .catch(() => live && setCharts([]));
-    api<{
-      dashboards: Array<{ slug: string; title: string; charts: number }>;
-    }>(`/api/v1/queries/${slug}/dashboards`)
+    api<{ dashboards: ChartHost[] }>(`/api/v1/queries/${slug}/dashboards`)
       .then(({ dashboards: list }) => live && setDashboards(list))
       .catch(() => live && setDashboards([]));
     return () => {
@@ -1659,6 +1656,7 @@ export function Workbench({
                   editor={editor}
                   network={network}
                   chart={openChart}
+                  hosts={dashboards}
                   onSaved={savedChart}
                   onDeleted={(id) => {
                     setCharts((list) =>
@@ -1682,6 +1680,7 @@ export function Workbench({
                 editor={editor}
                 network={network}
                 chart={null}
+                hosts={dashboards}
                 onSaved={savedChart}
                 onDeleted={() => setTab('results')}
               />

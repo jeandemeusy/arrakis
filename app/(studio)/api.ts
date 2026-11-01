@@ -239,6 +239,16 @@ export type DashboardVariable = {
   stack?: boolean;
 };
 
+/** A dashboard that shows charts of one query, with the variables it offers. */
+export type ChartHost = {
+  slug: string;
+  title: string;
+  charts: number;
+  variables: DashboardVariable[];
+  /** The charts of that query it shows. */
+  chartIds: string[];
+};
+
 export type WidgetOptions = {
   title?: string;
   link?: { column: string; var: string; dashboard?: string };

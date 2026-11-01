@@ -18,7 +18,7 @@ export const TEMPORAL = ['date', 'timestamp', 'timestamptz'];
 
 export const STEP_LABELS: Record<Step['op'], string> = {
   filter: 'Filter rows',
-  range: 'Limit to the time range',
+  range: 'Limit to a range',
   bucket: 'Bucket a time',
   compute: 'Compute a column',
   window: 'Window function',
@@ -370,15 +370,40 @@ function StepFields({
           )}
         </>
       );
-    case 'range':
+    case 'range': {
+      // A date or time column is limited by days back, a number column (a
+      // block) by a count back, so the window and its anchor follow the column.
+      const picked = scope.find((column) => column.name === step.column);
+      const numeric = Boolean(picked && NUMERIC.includes(picked.type));
       return (
         <>
           <ColumnSelect
-            label="Time column"
+            label="Column"
             value={step.column}
             scope={scope}
-            filter={(column) => TEMPORAL.includes(column.type)}
-            onChange={(column) => patch({ column })}
+            filter={(column) =>
+              TEMPORAL.includes(column.type) || NUMERIC.includes(column.type)
+            }
+            onChange={(column) => {
+              const next = scope.find((entry) => entry.name === column);
+              const nextNumeric = Boolean(next && NUMERIC.includes(next.type));
+              // A window and an anchor of the other kind would only fail.
+              patch({
+                column,
+                ...(nextNumeric === numeric
+                  ? {}
+                  : {
+                      window:
+                        step.window === undefined
+                          ? undefined
+                          : nextNumeric
+                            ? '100000'
+                            : '30d',
+                      anchor: undefined,
+                      anchorColumn: undefined,
+                    }),
+              });
+            }}
           />
           <select
             className="studio-input"
@@ -386,7 +411,12 @@ function StepFields({
             value={step.window === undefined ? 'var' : 'fixed'}
             onChange={(event) =>
               patch({
-                window: event.target.value === 'fixed' ? '30d' : undefined,
+                window:
+                  event.target.value === 'fixed'
+                    ? numeric
+                      ? '100000'
+                      : '30d'
+                    : undefined,
               })
             }
           >
@@ -404,24 +434,43 @@ function StepFields({
             <input
               className="studio-input mono short"
               aria-label="Window"
-              placeholder="31d"
+              placeholder={numeric ? '100000' : '31d'}
               value={step.window}
               onChange={(event) => patch({ window: event.target.value })}
             />
           )}
-          <select
-            className="studio-input"
-            aria-label="Anchor"
-            value={step.anchor ?? 'latest'}
-            onChange={(event) =>
-              patch({ anchor: event.target.value as 'latest' | 'now' })
-            }
-          >
-            <option value="latest">back from the newest row</option>
-            <option value="now">back from now</option>
-          </select>
+          {numeric ? (
+            <>
+              <span className="studio-muted">ending at</span>
+              <ColumnSelect
+                label="Window end"
+                value={step.anchorColumn}
+                scope={scope}
+                filter={(column) =>
+                  NUMERIC.includes(column.type) && column.name !== step.column
+                }
+                allowNone
+                onChange={(column) =>
+                  patch({ anchorColumn: column || undefined })
+                }
+              />
+            </>
+          ) : (
+            <select
+              className="studio-input"
+              aria-label="Anchor"
+              value={step.anchor ?? 'latest'}
+              onChange={(event) =>
+                patch({ anchor: event.target.value as 'latest' | 'now' })
+              }
+            >
+              <option value="latest">back from the newest row</option>
+              <option value="now">back from now</option>
+            </select>
+          )}
         </>
       );
+    }
     case 'bucket':
       return (
         <>

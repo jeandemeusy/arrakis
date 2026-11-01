@@ -463,29 +463,51 @@ export async function listDashboards(
   }));
 }
 
-/** The dashboards that show at least one chart of this query, and how many. */
+/**
+ * The dashboards that show at least one chart of this query: how many, which,
+ * and the variables each offers — what the chart editor borrows its windows
+ * from.
+ */
 export async function dashboardsShowing(
   query: string,
   editor: boolean,
-): Promise<Array<{ slug: string; title: string; charts: number }>> {
+): Promise<
+  Array<{
+    slug: string;
+    title: string;
+    charts: number;
+    variables: Variable[];
+    chartIds: string[];
+  }>
+> {
   const db = await appDb();
   const { rows } = await db.query<{
     slug: string;
     title: string;
     charts: number;
+    variables: Variable[];
+    chart_ids: string[];
   }>(
-    `SELECT d.slug, d.title, count(DISTINCT w.visualization_id)::int AS charts
+    `SELECT d.slug, d.title, d.variables,
+            count(DISTINCT w.visualization_id)::int AS charts,
+            array_agg(DISTINCT w.visualization_id::text) AS chart_ids
      FROM dashboards d
      JOIN dashboard_widgets w ON w.dashboard_id = d.id
      JOIN visualizations v ON v.id = w.visualization_id
      JOIN queries q ON q.id = v.query_id
      WHERE q.slug = $1 AND d.archived_at IS NULL AND v.archived_at IS NULL
      ${editor ? '' : `AND d.visibility = 'public'`}
-     GROUP BY d.slug, d.title
+     GROUP BY d.slug, d.title, d.variables
      ORDER BY d.title`,
     [query],
   );
-  return rows;
+  return rows.map((row) => ({
+    slug: row.slug,
+    title: row.title,
+    charts: row.charts,
+    variables: row.variables,
+    chartIds: row.chart_ids,
+  }));
 }
 
 function visibility(input: unknown): Dashboard['visibility'] | undefined {

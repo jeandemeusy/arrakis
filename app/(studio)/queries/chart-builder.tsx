@@ -606,8 +606,20 @@ function WindowField({
               value={window.column}
               scope={eligible}
               onChange={(column) =>
-                // A date's `from` and a number's end column do not carry over.
-                onChange({ column, var: window.var, fixed: window.fixed })
+                // A date's `from` and a number's end column do not carry over,
+                // nor does a fixed window of the other kind (30d over blocks).
+                onChange({
+                  column,
+                  var: window.var,
+                  fixed:
+                    window.fixed === undefined ||
+                    isNumber(columns.find((entry) => entry.name === column)) ===
+                      numeric
+                      ? window.fixed
+                      : isNumber(columns.find((entry) => entry.name === column))
+                        ? '100000'
+                        : '30d',
+                })
               }
             />
           </span>
