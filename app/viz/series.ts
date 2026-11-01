@@ -179,7 +179,7 @@ export function seriesOf(
     const shaped = pivot(columns, rows, encoding, options, palette, type);
     return typeof shaped === 'string' ? [] : shaped.series;
   }
-  if (type === 'share')
+  if (type === 'share' || type === 'pie')
     return shareSeries(columns, rows, encoding, options, palette);
   return [];
 }

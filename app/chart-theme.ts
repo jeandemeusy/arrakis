@@ -24,6 +24,26 @@ export const DEFAULT_STYLE: StyleName = 'neubrutal';
 /** The key the choice is stored under, read by the pre-paint script in `layout.tsx`. */
 export const STYLE_STORAGE_KEY = 'arrakis:style';
 
+/**
+ * Light or dark, for the editorial style; the neubrutal style is always light.
+ * `system` follows the operating system's setting, and is the default.
+ */
+export const THEMES = [
+  { id: 'light', label: 'Light' },
+  { id: 'dark', label: 'Dark' },
+  { id: 'system', label: 'System' },
+] as const;
+
+export type ThemeChoice = (typeof THEMES)[number]['id'];
+export type Theme = 'light' | 'dark';
+
+export const DEFAULT_THEME: ThemeChoice = 'system';
+export const THEME_STORAGE_KEY = 'arrakis:theme';
+
+export function isThemeChoice(value: unknown): value is ThemeChoice {
+  return THEMES.some((entry) => entry.id === value);
+}
+
 export function isStyle(value: unknown): value is StyleName {
   return STYLES.some((entry) => entry.id === value);
 }
@@ -234,12 +254,71 @@ const NEUBRUTAL: Palette = {
   ],
 };
 
+/**
+ * The editorial style at night: the same marks over a near-black page, with
+ * the accents lifted so they hold their contrast. Mirrors the dark tokens in
+ * `app/globals.css`.
+ */
+const EDITORIAL_DARK: Palette = {
+  ...EDITORIAL,
+  axis: { fill: '#8f9197', fontSize: 11 },
+  grid: '#2a2c30',
+  cursor: { fill: 'rgb(236 236 234 / 0.06)' },
+  tooltip: {
+    ...EDITORIAL.tooltip,
+    background: '#1b1c1f',
+    border: '1px solid #34363b',
+    boxShadow: '0 8px 24px rgb(0 0 0 / 0.45)',
+    color: '#ececea',
+  },
+  addressTooltip: {
+    ...EDITORIAL.addressTooltip,
+    background: '#1b1c1f',
+    border: '1px solid #34363b',
+    boxShadow: '0 8px 24px rgb(0 0 0 / 0.45)',
+    color: '#ececea',
+  },
+  ink: '#ececea',
+  surface: '#1b1c1f',
+  muted: '#9a9ca2',
+  accent: '#8b8df0',
+  accent2: '#ef7a55',
+  accent3: '#7cc9b1',
+  seriesNeutral: '#6f7177',
+  seriesTotal: '#ececea',
+  heatFrom: [35, 36, 40],
+  heatTo: [139, 141, 240],
+  relayerRamp: [
+    [139, 141, 240], // periwinkle
+    [239, 122, 85], // vermilion
+    [236, 194, 84], // mustard
+    [124, 201, 177], // sea green
+    [207, 128, 194], // orchid
+    [110, 168, 228], // sky
+  ],
+  categorical: [
+    '#8b8df0',
+    '#ef7a55',
+    '#a3a6ab',
+    '#cf80c2',
+    '#ecc254',
+    '#7f95e0',
+    '#7cc9b1',
+    '#a9d870',
+    '#5fa48f',
+    '#e9a05a',
+    '#6ea8e4',
+    '#e0718f',
+  ],
+};
+
 export const PALETTES: Record<StyleName, Palette> = {
   editorial: EDITORIAL,
   neubrutal: NEUBRUTAL,
 };
 
-export function paletteOf(style: StyleName): Palette {
+export function paletteOf(style: StyleName, theme: Theme = 'light'): Palette {
+  if (style === 'editorial' && theme === 'dark') return EDITORIAL_DARK;
   return PALETTES[style] ?? EDITORIAL;
 }
 

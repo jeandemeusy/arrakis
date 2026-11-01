@@ -127,6 +127,10 @@ function allowedHosts(request: Request): Set<string> {
  */
 export function assertSameOrigin(request: Request): void {
   if (!UNSAFE_METHODS.has(request.method)) return;
+  // Browsers say where a request comes from even when they leave out Origin.
+  if (request.headers.get('sec-fetch-site') === 'cross-site') {
+    throw new HttpError(403, 'Cross-origin request refused');
+  }
   const origin = request.headers.get('origin');
   if (!origin) return;
   let host: string;

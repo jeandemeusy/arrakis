@@ -53,6 +53,8 @@ describe(
       exits: typeof import('../app/api/v1/networks/[network]/exits/route');
       exit: typeof import('../app/api/v1/networks/[network]/exits/[address]/route');
       schema: typeof import('../app/api/v1/schema/route');
+      runs: typeof import('../app/api/v1/runs/route');
+      cancel: typeof import('../app/api/v1/runs/cancel/route');
     };
     let lib: {
       app: typeof import('../lib/db/app');
@@ -103,6 +105,8 @@ describe(
         exits: await import('../app/api/v1/networks/[network]/exits/route'),
         exit: await import('../app/api/v1/networks/[network]/exits/[address]/route'),
         schema: await import('../app/api/v1/schema/route'),
+        runs: await import('../app/api/v1/runs/route'),
+        cancel: await import('../app/api/v1/runs/cancel/route'),
       };
     });
 
@@ -290,6 +294,109 @@ describe(
         }
       });
 
+      it("stops at the query's own time limit, over the default", async () => {
+        const started = Date.now();
+        const response = await adhoc('SELECT pg_sleep(3)', {
+          network: 'jura',
+          timeoutSeconds: 1,
+        });
+        assert.equal(response.status, 408);
+        assert.equal((await body(response)).timedOut, true);
+        assert.ok(Date.now() - started < 2_900);
+      });
+
+      it('lists a run in progress, and cancels it by its key', async () => {
+        const runKey = 'test-run-key-1';
+        const running = adhoc('SELECT pg_sleep(10)', {
+          network: 'jura',
+          runKey,
+        });
+        // Wait for the run to be listed: it is, once it holds a connection.
+        let listed: Array<{ kind: string; startedBy: string }> = [];
+        for (let attempt = 0; attempt < 50 && !listed.length; attempt++) {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          listed = (
+            (await body(
+              await routes.runs.GET(
+                request('GET', '/api/v1/runs', { cookie }),
+                undefined,
+              ),
+            )) as { runs: typeof listed }
+          ).runs;
+        }
+        assert.equal(listed.length, 1);
+        assert.equal(listed[0].kind, 'preview');
+        assert.equal(listed[0].startedBy, 'editor');
+
+        const started = Date.now();
+        const cancel = await routes.cancel.POST(
+          request('POST', '/api/v1/runs/cancel', {
+            cookie,
+            body: { runKey },
+          }),
+          undefined,
+        );
+        assert.equal((await body(cancel)).cancelled, 1);
+        const response = await running;
+        assert.equal(response.status, 409);
+        assert.equal((await body(response)).cancelled, true);
+        assert.ok(Date.now() - started < 3_000);
+        // And it is no longer listed.
+        const after = (await body(
+          await routes.runs.GET(
+            request('GET', '/api/v1/runs', { cookie }),
+            undefined,
+          ),
+        )) as { runs: unknown[] };
+        assert.equal(after.runs.length, 0);
+      });
+
+      it('needs an editor to list or cancel runs', async () => {
+        const list = await routes.runs.GET(
+          request('GET', '/api/v1/runs'),
+          undefined,
+        );
+        assert.equal(list.status, 401);
+        const cancel = await routes.cancel.POST(
+          request('POST', '/api/v1/runs/cancel', { body: { query: 'x' } }),
+          undefined,
+        );
+        assert.equal(cancel.status, 401);
+      });
+
+      it('explains a query instead of running it', async () => {
+        const plan = await adhoc('SELECT 1 AS one', {
+          network: 'jura',
+          explain: 'plan',
+        });
+        assert.equal(plan.status, 200);
+        const planned = (await body(plan)) as {
+          columns: Array<{ name: string }>;
+          rows: string[][];
+        };
+        assert.deepEqual(
+          planned.columns.map((column) => column.name),
+          ['QUERY PLAN'],
+        );
+        assert.ok(planned.rows.length > 0);
+        assert.ok(!planned.rows.flat().join('\n').includes('actual time'));
+
+        const measured = (await body(
+          await adhoc('SELECT 1 AS one', {
+            network: 'jura',
+            explain: 'analyze',
+          }),
+        )) as { rows: string[][] };
+        assert.ok(measured.rows.flat().join('\n').includes('actual time'));
+
+        // Only a query can be explained, and still only read.
+        const write = await adhoc('DELETE FROM account', {
+          network: 'jura',
+          explain: 'analyze',
+        });
+        assert.ok(write.status >= 400);
+      });
+
       it('refuses a network whose role can write', async () => {
         process.env.NETWORKS = networks(true);
         try {
@@ -442,6 +549,51 @@ describe(
         const first = (page.rows as unknown[][])[0];
         assert.equal(first[0], 'jura');
         assert.match(String(first[1]), /^0x[0-9a-f]{40}$/);
+      });
+
+      it("keeps no more rows than the query's own cap", async () => {
+        const patched = await routes.query.PATCH(
+          request('PATCH', '/api/v1/queries/client-redemptions', {
+            cookie,
+            body: { rowLimit: 10, timeoutSeconds: 60 },
+          }),
+          context({ slug: 'client-redemptions' }),
+        );
+        assert.equal(patched.status, 200);
+        const record = (await body(patched)).query as {
+          rowLimit: number;
+          timeoutSeconds: number;
+        };
+        assert.equal(record.rowLimit, 10);
+        assert.equal(record.timeoutSeconds, 60);
+        const response = await run('client-redemptions');
+        const { runs } = (await body(response)) as {
+          runs: Array<{ rowCount: number; truncated: boolean }>;
+        };
+        assert.deepEqual(
+          runs.map((entry) => [entry.rowCount, entry.truncated]),
+          [
+            [10, true],
+            [10, true],
+          ],
+        );
+        // Back to the defaults, and the full result, for the tests after.
+        await routes.query.PATCH(
+          request('PATCH', '/api/v1/queries/client-redemptions', {
+            cookie,
+            body: { rowLimit: null, timeoutSeconds: null },
+          }),
+          context({ slug: 'client-redemptions' }),
+        );
+        await run('client-redemptions');
+        const bad = await routes.query.PATCH(
+          request('PATCH', '/api/v1/queries/client-redemptions', {
+            cookie,
+            body: { timeoutSeconds: 0 },
+          }),
+          context({ slug: 'client-redemptions' }),
+        );
+        assert.equal(bad.status, 400);
       });
 
       it('pages through one network', async () => {
@@ -700,9 +852,9 @@ describe(
         const { rows: all } = await db.query<{ n: string }>(
           "SELECT count(*) AS n FROM pg_tables WHERE schemaname = 'results'",
         );
-        // client-redemptions ×2 networks (+1 previous on jura), client-count,
+        // client-redemptions ×2 networks (+1 previous on each), client-count,
         // accounts (+1 previous).
-        assert.equal(Number(all[0].n), 6);
+        assert.equal(Number(all[0].n), 7);
       });
 
       it('stores and serves dates as dates, whatever the server time zone', async () => {

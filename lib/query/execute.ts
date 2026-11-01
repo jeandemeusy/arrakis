@@ -14,6 +14,7 @@ import {
   type BindValue,
   type ParameterDefinition,
 } from './params';
+import { timeoutFor } from './limits';
 import { runReadOnly } from './runner';
 import { fragmentResolver } from './store';
 
@@ -139,6 +140,16 @@ export async function preview(
   supplied: Record<string, unknown>,
   targets: NetworkConfig[],
   rowLimit: number,
+  options: {
+    /** Seconds the query asks for; the preview default otherwise. */
+    timeoutSeconds?: number | null;
+    /** The page's token for this run, to cancel it by. */
+    runKey?: string;
+    query?: string;
+    startedBy?: string;
+    /** The plan rather than the rows; `analyze` runs it to measure. */
+    explain?: 'plan' | 'analyze';
+  } = {},
 ): Promise<Preview> {
   const outcomes = await Promise.allSettled(
     targets.map(async (network) => {
@@ -148,6 +159,14 @@ export async function preview(
         text: prepared.compiled.text,
         values: prepared.values,
         rowLimit,
+        timeoutMs: timeoutFor('preview', options.timeoutSeconds),
+        explain: options.explain,
+        track: {
+          kind: 'preview',
+          runKey: options.runKey,
+          query: options.query,
+          startedBy: options.startedBy,
+        },
       });
       return { network, prepared, outcome };
     }),

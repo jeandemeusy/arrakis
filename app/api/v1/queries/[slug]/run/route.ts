@@ -23,7 +23,7 @@ type Context = { params: Promise<{ slug: string }> };
  * preview and the rows come back directly.
  */
 export const POST = route(async (request: Request, context: Context) => {
-  await requireEditor(request);
+  const principal = await requireEditor(request);
   const { slug } = await context.params;
   const query = await requireQuery(slug, true);
   if (query.archivedAt) throw badRequest(`Query "${slug}" is archived`);
@@ -36,13 +36,23 @@ export const POST = route(async (request: Request, context: Context) => {
 
   if (query.kind === 'fragment') {
     return noStore(request, {
-      preview: await preview(query.current, supplied, targets, 10_000),
+      preview: await preview(query.current, supplied, targets, 10_000, {
+        timeoutSeconds: query.timeoutSeconds,
+        query: slug,
+        startedBy: principal.username,
+      }),
     });
   }
 
   const outcomes = await Promise.allSettled(
     targets.map((network) =>
-      materialize({ query, network, supplied, trigger: 'editor' }),
+      materialize({
+        query,
+        network,
+        supplied,
+        trigger: 'editor',
+        startedBy: principal.username,
+      }),
     ),
   );
   if (targets.length === 1 && outcomes[0].status === 'rejected') {

@@ -51,6 +51,7 @@ describe(
       widgets: typeof import('../app/api/v1/dashboards/[slug]/widgets/route');
       dashboardData: typeof import('../app/api/v1/dashboards/[slug]/data/route');
       dashboardStatus: typeof import('../app/api/v1/dashboards/[slug]/status/route');
+      lineage: typeof import('../app/api/v1/lineage/route');
     };
     let lib: {
       app: typeof import('../lib/db/app');
@@ -107,6 +108,7 @@ describe(
           await import('../app/api/v1/dashboards/[slug]/data/route'),
         dashboardStatus:
           await import('../app/api/v1/dashboards/[slug]/status/route'),
+        lineage: await import('../app/api/v1/lineage/route'),
       };
       const login = await routes.login.POST(
         request('POST', '/api/v1/auth/login', { body: { password: PASSWORD } }),
@@ -540,7 +542,7 @@ describe(
         const response = await routes.queryVisualizations.POST(
           request('POST', '/api/v1/queries/timed/visualizations', {
             cookie,
-            body: { title: 'x', type: 'pie', config: {} },
+            body: { title: 'x', type: 'radar', config: {} },
           }),
           context({ slug: 'timed' }),
         );
@@ -788,6 +790,78 @@ describe(
           ),
         );
         assert.equal(dashboard.widgets.length, 2);
+      });
+
+      it('traces tables to queries, charts and dashboards', async () => {
+        for (const [slug, kind, sql] of [
+          ['one', 'fragment', 'SELECT 1 AS one'],
+          [
+            'uses-one',
+            'query',
+            'SELECT * FROM {{> one}} AS o -- not FROM account',
+          ],
+        ]) {
+          const created = await routes.queries.POST(
+            request('POST', '/api/v1/queries', {
+              cookie,
+              body: { slug, kind, title: slug, sql },
+            }),
+            undefined,
+          );
+          assert.equal(created.status, 201);
+        }
+        type Graph = {
+          nodes: Array<{ id: string; href: string }>;
+          edges: Array<{ from: string; to: string }>;
+        };
+        const read = async (signedIn: boolean) =>
+          body<Graph>(
+            await routes.lineage.GET(
+              request(
+                'GET',
+                '/api/v1/lineage',
+                signedIn ? { cookie } : undefined,
+              ),
+              undefined,
+            ),
+          );
+        const has = (graph: Graph, from: string, to: string) =>
+          graph.edges.some((edge) => edge.from === from && edge.to === to);
+
+        const editor = await read(true);
+        const ids = new Set(editor.nodes.map((node) => node.id));
+        assert.ok(ids.has('fragment:one') && ids.has('query:uses-one'));
+        assert.ok(has(editor, 'fragment:one', 'query:uses-one'));
+        // A table named only in a comment is not read.
+        assert.ok(
+          !editor.edges.some(
+            (edge) =>
+              edge.to === 'query:uses-one' && edge.from.startsWith('table:'),
+          ),
+        );
+        // The redemptions query reads tables of the index.
+        assert.ok(
+          editor.edges.some(
+            (edge) =>
+              edge.to === 'query:timed' && edge.from.startsWith('table:'),
+          ),
+        );
+        assert.ok(has(editor, 'query:timed', `chart:${daily}`));
+        assert.ok(has(editor, `chart:${daily}`, 'dashboard:usage'));
+        assert.ok(ids.has('dashboard:drafts'));
+        assert.equal(
+          editor.nodes.find((node) => node.id === `chart:${daily}`)?.href,
+          `/queries/timed?tab=charts&chart=${daily}`,
+        );
+
+        // Readers see what is public, and no tables.
+        const reader = await read(false);
+        const seen = new Set(reader.nodes.map((node) => node.id));
+        assert.ok(seen.has('query:timed') && seen.has('dashboard:usage'));
+        assert.ok(!seen.has('fragment:one') && !seen.has('query:uses-one'));
+        assert.ok(!seen.has('dashboard:drafts'));
+        assert.ok(![...seen].some((id) => id.startsWith('table:')));
+        assert.ok(has(reader, `chart:${daily}`, 'dashboard:usage'));
       });
 
       it('reports a query with nothing stored yet as pending', async () => {

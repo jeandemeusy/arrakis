@@ -1,7 +1,14 @@
 import type { Metadata } from 'next';
 import './globals.css';
 
-import { DEFAULT_STYLE, STYLE_STORAGE_KEY, STYLES } from './chart-theme';
+import {
+  DEFAULT_STYLE,
+  DEFAULT_THEME,
+  STYLE_STORAGE_KEY,
+  STYLES,
+  THEME_STORAGE_KEY,
+  THEMES,
+} from './chart-theme';
 
 export const metadata: Metadata = {
   title: 'Arrakis',
@@ -41,17 +48,36 @@ const STYLE_BOOTSTRAP = `try{var s=localStorage.getItem(${JSON.stringify(
   DEFAULT_STYLE,
 )}}`;
 
+/**
+ * Light or dark, the same way: the remembered choice, `system` by default,
+ * resolved against the system's setting before the first paint.
+ */
+const THEME_BOOTSTRAP = `try{var t=localStorage.getItem(${JSON.stringify(
+  THEME_STORAGE_KEY,
+)});if(${JSON.stringify(
+  THEMES.map((entry) => entry.id),
+)}.indexOf(t)<0)t=${JSON.stringify(
+  DEFAULT_THEME,
+)};var d=t==='dark'||(t==='system'&&window.matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.dataset.themeChoice=t;document.documentElement.dataset.theme=d?'dark':'light'}catch(e){document.documentElement.dataset.theme='light'}`;
+
 export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     // The script below may restyle <html> before React hydrates it, on
     // purpose; only this element's own attributes are exempt from the check.
-    <html lang="en" data-style={DEFAULT_STYLE} suppressHydrationWarning>
+    <html
+      lang="en"
+      data-style={DEFAULT_STYLE}
+      data-theme="light"
+      suppressHydrationWarning
+    >
       <head>
         <script
           // oxlint-disable-next-line react/no-danger -- a literal built from constants above
-          dangerouslySetInnerHTML={{ __html: STYLE_BOOTSTRAP }}
+          dangerouslySetInnerHTML={{
+            __html: STYLE_BOOTSTRAP + THEME_BOOTSTRAP,
+          }}
         />
       </head>
       <body>{children}</body>

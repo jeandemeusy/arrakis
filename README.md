@@ -232,6 +232,33 @@ you scroll — Queries, and Settings (Exits; Bundled dashboards for editors),
 plus the style switch and the editing lock. It folds to icons (remembered per
 browser) and becomes a drawer on narrow screens. `/dashboards` redirects home.
 
+**Share** (on every dashboard and query) gives the link and says who it
+opens for. That is the item's visibility made plain: *editors only*
+(private), *anyone with the link* (unlisted) or *everyone* (public). An editor
+changes it there and then. The link can carry the view on screen: a
+dashboard's filters, or the chart open on a query.
+
+**Light and dark.** The Editorial style has a dark variant, which follows the
+system by default. A Light / Dark / System switch sits beside the style switch;
+the choice is remembered per browser and applied before the first paint, like
+the style. Dark is a second block of the same tokens in `app/globals.css`
+(`:root[data-theme='dark']`), mirrored for the plots by a dark palette in
+`app/chart-theme.ts`. The Neubrutal style has no dark variant.
+
+**Search** (the field at the top of the sidebar, Cmd/Ctrl+K anywhere, or `/`
+when not typing) finds any dashboard, query, chart, fragment or table, the
+studio's pages and the guide's sections, matched in the browser as you type.
+**Lineage** (`/lineage`) lays out tables, fragments, queries, charts and
+dashboards as columns in the direction data flows; picking one lights up what
+it is made from and what would change with it (`?focus=query:<slug>` opens on
+one; each query's About panel links there). Both read
+`GET /api/v1/lineage`: tables are matched by name in each query's own SQL,
+outside comments and strings, and listed for editors only. The **Guide**
+(`/guide`) explains the model, the placeholders, charts, dashboards and run
+limits, with a FAQ; the **?** beside the editor, parameters, run limits,
+fragments, stored results, chart modes and dashboard variables shows a short
+explanation and links to its section.
+
 Two visual styles: **Editorial**, the default — a calm page of white cards with
 thin borders and the system's sans, after Dune — and **Neubrutal**, outlined
 and loud. Every colour, face and shape is a token in `app/globals.css`, with
@@ -267,6 +294,14 @@ editing** link asks for the editor password, after which you can:
 - write SQL with highlighting, completion of tables, columns, fragments and
   placeholders (type `{{` for those), Cmd/Ctrl+Enter to run, Cmd/Ctrl+S to save,
   Cmd/Ctrl+/ to comment lines; the schema on the left inserts at the cursor;
+- format the SQL (the wand, or Shift+Alt+F) with a formatter written for this
+  repository ([`app/(studio)/sql-format.ts`](./app/(studio)/sql-format.ts)):
+  a clause per line, one select item per line, subqueries indented, keywords in
+  capitals. It changes only whitespace and the case of keywords, never a
+  string, quoted name, comment or placeholder, and is undone in one step;
+- run only the selected SQL (**Run selection**), or **Explain** it — the plan,
+  without running — or **Explain and measure** (`EXPLAIN ANALYZE`, inside the
+  same read-only transaction and time limit);
 - run against one network or all of them, previewing up to 10,000 rows, with
   the database's own error message when it fails;
 - declare parameters (or let it declare the `{{names}}` it finds), and give
@@ -361,6 +396,33 @@ logins for 15 minutes. State-changing requests from another origin are
 refused; set `ARRAKIS_ALLOWED_ORIGINS` if the editor is served from a second
 hostname.
 
+Every response carries a Content Security Policy (scripts, styles, images and
+requests from the app's own origin only; no framing), `nosniff`,
+`X-Frame-Options: DENY`, a strict referrer policy, `Cross-Origin-Opener-Policy`
+and, in production, HSTS. They are set in `next.config.ts`.
+
+#### Run limits
+
+| Variable | Default | |
+|---|---|---|
+| `ARRAKIS_QUERY_TIMEOUT_MS` | `30000` | Time limit of a preview (an unsaved run). |
+| `ARRAKIS_MATERIALIZE_TIMEOUT_MS` | `120000` | Time limit of a stored run, by hand or scheduled. |
+| `ARRAKIS_QUERY_TIMEOUT_MAX_MS` | `600000` | Ceiling on any query's own time limit. |
+| `ARRAKIS_RESULT_ROW_LIMIT` | `5000000` | Most rows a stored result keeps; past it the result is marked cut. |
+| `ARRAKIS_SCHEDULER_CONCURRENCY` | `2` | Scheduled refreshes running at once, across every data source. |
+
+A query can set its own time limit and row cap under *Run limits* in its About
+panel; the server's ceilings above still apply. A run past its limit answers
+`408` with `details.timedOut`.
+
+Every run holding a connection to a data source is listed in `active_runs`
+with its backend pid, and shown under **Settings → Running now**, where an
+editor can cancel it. Cancelling calls `pg_cancel_backend` with the same
+read-only role, so it stops in the database at once, from any replica; the
+cancelled run answers `409` with `details.cancelled`. The workbench's *Run*
+button turns into *Cancel* while a preview runs, and *Run and store* into
+*Cancel run*. Rows left behind by a crashed process are pruned after two hours.
+
 ### Writing queries
 
 Saved queries are SQL with a few placeholders, only recognized outside
@@ -434,7 +496,9 @@ the same names, colours and hiding.
 
 **New chart** offers starting points built from the query's own columns —
 trend over time, single number, top 10, breakdown over time, hour × weekday,
-table of rows. What a chart shows is described in one of three ways:
+table of rows, a donut of a category, and *columns and a line* (a count as
+columns, a sum or distinct count as a line on the right axis). What a chart
+shows is described in one of three ways:
 
 - **Simple**, as a sentence: *show* a count, sum, average or distinct count,
   *over* a column (a time column by hour, day, week, month, or day or week
@@ -470,7 +534,8 @@ bound, never pasted into the SQL. Charts are cached for a minute, keyed by the
 result tables they read, so a refresh shows straight away.
 
 Chart types: number, line, area, bar (stacked or not, split by a column),
-share, heatmap (hour × weekday fills every slot), cohort grid, and table. They
+share, pie (or a donut with the total in its middle; past ten slices the rest
+fold into one), heatmap (hour × weekday fills every slot), cohort grid, and table. They
 draw with the dashboard's own tiles and palettes, in both visual styles. A
 tile names the chart and, muted beside it, the query it comes from; a number
 sizes itself to the tile; and its footer says how fresh the stored result is
@@ -610,7 +675,9 @@ session.
 | `GET /api/v1/networks` | Network ids and labels. |
 | `GET·POST /api/v1/networks/:id/exits` · `DELETE …/exits/:address` | Exits; reading is public. |
 | `GET /api/v1/schema?network=` | Tables and columns the role can read. |
-| `POST /api/v1/run` `{sql, parameters?, values?, network?}` | Run unsaved SQL; up to 10,000 rows, nothing stored. |
+| `POST /api/v1/run` `{sql, parameters?, values?, network?, timeoutSeconds?, runKey?, explain?}` | Run unsaved SQL; up to 10,000 rows, nothing stored. `runKey` lets it be cancelled; `explain: "plan" \| "analyze"` returns the query plan instead. |
+| `GET /api/v1/runs` · `POST /api/v1/runs/cancel` `{id \| runKey \| query}` | Runs in progress; cancel one, or every run of a query. |
+| `GET /api/v1/lineage` | Tables (editors only), fragments, queries, charts and dashboards, and what reads what. |
 | `GET·POST /api/v1/queries` | List, create. |
 | `GET·PATCH·DELETE /api/v1/queries/:slug` | Read, change metadata, archive. |
 | `GET·POST /api/v1/queries/:slug/versions` | History, save new SQL. |

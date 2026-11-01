@@ -220,7 +220,24 @@ export function ChartPanel({
           )}
         </>
       )}
-      {(cartesian || type === 'share') && (
+      {type === 'pie' && (
+        <>
+          <Check
+            label="Draw as a ring"
+            checked={Boolean(options.donut)}
+            hint="A donut, with the total in its middle."
+            onChange={(donut) => set({ donut: donut || undefined })}
+          />
+          <Check
+            label="Label slices with their share"
+            checked={Boolean(options.dataLabels)}
+            onChange={(dataLabels) =>
+              set({ dataLabels: dataLabels || undefined })
+            }
+          />
+        </>
+      )}
+      {(cartesian || type === 'share' || type === 'pie') && (
         <Check
           label="Keep series colours stable"
           checked={Boolean(options.stableColors)}

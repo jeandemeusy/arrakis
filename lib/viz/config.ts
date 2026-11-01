@@ -16,6 +16,7 @@ export const VISUALIZATION_TYPES = [
   'area',
   'bar',
   'share',
+  'pie',
   'heatmap',
   'cohort',
   'table',
@@ -81,8 +82,10 @@ export type Options = {
   tooltipTotal?: boolean;
   /** Stacks every point to 100%, so the chart shows shares rather than amounts. */
   normalize?: boolean;
-  /** The value written on each bar or point. */
+  /** The value written on each bar or point; a pie's slices, their share. */
   dataLabels?: boolean;
+  /** Pie: a ring with the total in its middle, rather than a full disc. */
+  donut?: boolean;
   /**
    * Colours by series name rather than by position, so a series — a relay —
    * keeps its colour across charts and as others come and go.
@@ -206,6 +209,7 @@ function parseDrawing(raw: Record<string, unknown>, options: Options) {
     'normalize',
     'dataLabels',
     'stableColors',
+    'donut',
   ] as const) {
     const value = flag(raw[key]);
     if (value !== undefined) options[key] = value;

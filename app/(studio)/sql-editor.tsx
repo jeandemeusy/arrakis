@@ -46,6 +46,8 @@ export type SqlEditorHandle = {
   insert: (text: string) => void;
   /** The selected text and where it is; empty text when nothing is. */
   selection: () => { start: number; end: number; text: string };
+  /** Replaces the whole text, as one step that Cmd/Ctrl+Z undoes. */
+  replace: (text: string) => void;
 };
 
 type Props = {
@@ -54,6 +56,10 @@ type Props = {
   onChange: (value: string) => void;
   onRun?: () => void;
   onSave?: () => void;
+  /** Shift+Alt+F. */
+  onFormat?: () => void;
+  /** The selected text as it changes; empty when nothing is selected. */
+  onSelectionChange?: (text: string) => void;
   readOnly?: boolean;
   completions?: Completion[];
   /** Columns per table name, for completion after `table.`. */
@@ -97,6 +103,8 @@ export function SqlEditor({
   onChange,
   onRun,
   onSave,
+  onFormat,
+  onSelectionChange,
   readOnly = false,
   completions = [],
   columns,
@@ -312,6 +320,12 @@ export function SqlEditor({
         const { selectionStart: start, selectionEnd: end } = field;
         return { start, end, text: value.slice(start, end) };
       },
+      replace(text: string) {
+        if (readOnly || text === value) return;
+        const field = textarea.current;
+        const caret = Math.min(field?.selectionStart ?? 0, text.length);
+        edit(text, caret, caret, false);
+      },
     }),
     [edit, readOnly, value],
   );
@@ -351,6 +365,11 @@ export function SqlEditor({
     if (mod && event.key.toLowerCase() === 's') {
       event.preventDefault();
       onSave?.();
+      return;
+    }
+    if (event.shiftKey && event.altKey && event.code === 'KeyF') {
+      event.preventDefault();
+      if (!readOnly) onFormat?.();
       return;
     }
     if (readOnly) return;
@@ -500,6 +519,12 @@ export function SqlEditor({
           }}
           onBlur={() => setMenu(null)}
           onClick={() => setMenu(null)}
+          onSelect={(event) => {
+            const field = event.currentTarget;
+            onSelectionChange?.(
+              field.value.slice(field.selectionStart, field.selectionEnd),
+            );
+          }}
           readOnly={readOnly}
           spellCheck={false}
           autoCapitalize="off"

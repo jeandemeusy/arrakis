@@ -40,6 +40,10 @@ export type QueryRecord = {
   official: boolean;
   combine: Combine;
   refreshSeconds: number | null;
+  /** How long a run may take; null takes the server's default. */
+  timeoutSeconds: number | null;
+  /** How many rows a stored result keeps; null takes the server's default. */
+  rowLimit: number | null;
   forkedFrom: string | null;
   createdBy: string | null;
   createdAt: string;
@@ -61,6 +65,8 @@ type Row = {
   official: boolean;
   combine: Combine;
   refresh_seconds: number | null;
+  timeout_seconds: number | null;
+  row_limit: string | null;
   forked_from: string | null;
   created_by: string | null;
   created_at: Date;
@@ -77,7 +83,8 @@ type Row = {
 
 const SELECT = `
   SELECT q.id, q.slug, q.title, q.description, q.kind, q.visibility, q.official,
-         q.combine, q.refresh_seconds, parent.slug AS forked_from,
+         q.combine, q.refresh_seconds, q.timeout_seconds, q.row_limit,
+         parent.slug AS forked_from,
          author.username AS created_by, q.created_at, q.updated_at, q.archived_at,
          v.id AS v_id, v.version AS v_version, v.sql AS v_sql,
          v.parameters AS v_parameters, v.note AS v_note,
@@ -100,6 +107,8 @@ function toRecord(row: Row): QueryRecord {
     official: row.official,
     combine: row.combine,
     refreshSeconds: row.refresh_seconds,
+    timeoutSeconds: row.timeout_seconds,
+    rowLimit: row.row_limit === null ? null : Number(row.row_limit),
     forkedFrom: row.forked_from,
     createdBy: row.created_by,
     createdAt: row.created_at.toISOString(),
@@ -243,6 +252,32 @@ function refresh(input: Record<string, unknown>): number | null | undefined {
   return value;
 }
 
+/** A whole number from `min` to `max`, null to clear it, or undefined when absent. */
+function bounded(
+  input: Record<string, unknown>,
+  key: string,
+  min: number,
+  max: number,
+): number | null | undefined {
+  if (!(key in input)) return undefined;
+  const value = input[key];
+  if (value === null) return null;
+  if (
+    typeof value !== 'number' ||
+    !Number.isInteger(value) ||
+    value < min ||
+    value > max
+  ) {
+    throw badRequest(`${key} must be null or an integer from ${min} to ${max}`);
+  }
+  return value;
+}
+
+const limitsOf = (input: Record<string, unknown>) => ({
+  timeoutSeconds: bounded(input, 'timeoutSeconds', 1, 3_600),
+  rowLimit: bounded(input, 'rowLimit', 1, 1_000_000_000),
+});
+
 /**
  * Parses SQL and parameters, and proves the template compiles — every
  * placeholder known, every fragment present, no cycle — before it is stored.
@@ -314,6 +349,7 @@ export async function createQuery(
   if (!title) throw badRequest('title must not be empty');
   const kind = oneOf(input, 'kind', ['query', 'fragment'] as const) ?? 'query';
   const refreshSeconds = refresh(input) ?? null;
+  const limits = limitsOf(input);
   if (kind === 'fragment' && refreshSeconds !== null) {
     throw badRequest(
       'A fragment is not run on a schedule; omit refreshSeconds',
@@ -328,8 +364,9 @@ export async function createQuery(
     try {
       const { rows } = await client.query<{ id: string }>(
         `INSERT INTO queries
-           (slug, title, description, kind, visibility, combine, refresh_seconds, forked_from, created_by)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+           (slug, title, description, kind, visibility, combine, refresh_seconds,
+            forked_from, created_by, timeout_seconds, row_limit)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
          RETURNING id`,
         [
           slug,
@@ -345,6 +382,8 @@ export async function createQuery(
           refreshSeconds,
           forkedFrom ?? null,
           principal.userId,
+          limits.timeoutSeconds ?? null,
+          limits.rowLimit ?? null,
         ],
       );
       id = rows[0].id;
@@ -431,6 +470,10 @@ export async function updateQuery(
   if (combine) set('combine', combine);
   const refreshSeconds = refresh(input);
   if (refreshSeconds !== undefined) set('refresh_seconds', refreshSeconds);
+  const limits = limitsOf(input);
+  if (limits.timeoutSeconds !== undefined)
+    set('timeout_seconds', limits.timeoutSeconds);
+  if (limits.rowLimit !== undefined) set('row_limit', limits.rowLimit);
   if ('official' in input) {
     if (typeof input.official !== 'boolean') {
       throw badRequest('official must be a boolean');

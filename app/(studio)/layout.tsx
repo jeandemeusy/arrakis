@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 
 import { NavProvider } from './nav';
+import { SearchPalette } from './search';
 import { SessionProvider } from './session';
 import { Sidebar, StudioBanner } from './sidebar';
 import './studio.css';
@@ -33,6 +34,7 @@ export default function StudioLayout({
               {children}
             </div>
           </div>
+          <SearchPalette />
         </div>
       </NavProvider>
     </SessionProvider>

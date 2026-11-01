@@ -9,6 +9,8 @@ import {
   ComposedChart,
   LabelList,
   Line,
+  Pie,
+  PieChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -595,6 +597,223 @@ function Share({
   );
 }
 
+/** Slices past this are folded into one, so a pie stays readable. */
+const PIE_SLICES = 10;
+
+type Slice = {
+  key: string;
+  label: string;
+  value: number;
+  color: string;
+  /** The row it came from, for click-through; none for the folded rest. */
+  row: unknown[] | null;
+};
+
+/**
+ * Each label's share of the total as a pie, or a ring with the total in its
+ * middle. Labels are series, as in a share chart: they take the same names,
+ * colours and hiding, and the legend hides one for the moment.
+ */
+function PieView({
+  encoding,
+  options,
+  columns,
+  rows,
+  height,
+  onSelect,
+}: VisualizationProps) {
+  const palette = usePalette();
+  const [off, setOff] = useState<Set<string>>(() => new Set());
+  const xAt = index(columns, encoding.x);
+  const yAt = index(columns, encoding.y?.[0] ?? encoding.value);
+  if (xAt < 0 || yAt < 0) {
+    return (
+      <Missing
+        message="Choose a label column (x) and a value column (y)."
+        height={height}
+      />
+    );
+  }
+  const styles = new Map(
+    shareSeries(columns, rows, encoding, options, palette).map((entry) => [
+      entry.key,
+      entry,
+    ]),
+  );
+  const byKey = new Map<string, Slice>();
+  for (const row of rows) {
+    const key = asText(row[xAt] ?? 'null');
+    const style = styles.get(key);
+    if (!style || style.hidden) continue;
+    const value = toNumber(row[yAt]) ?? 0;
+    const known = byKey.get(key);
+    if (known) known.value += value;
+    else
+      byKey.set(key, {
+        key,
+        label: style.label,
+        value,
+        // Picked or stable colours stand; the rest are dealt below.
+        color: style.picked || options.stableColors ? style.color : '',
+        row,
+      });
+  }
+  let slices = [...byKey.values()]
+    .filter((slice) => slice.value > 0)
+    .sort((a, b) => b.value - a.value);
+  // Few slices, each its own colour: the style's distinct swatches in turn,
+  // rather than a ramp spread over every label the result has.
+  slices.forEach((slice, at) => {
+    slice.color ||= palette.categorical[at % palette.categorical.length];
+  });
+  if (slices.length > PIE_SLICES) {
+    const rest = slices.slice(PIE_SLICES - 1);
+    slices = [
+      ...slices.slice(0, PIE_SLICES - 1),
+      {
+        key: '\u0000others',
+        label: `${rest.length} others`,
+        value: rest.reduce((sum, slice) => sum + slice.value, 0),
+        color: palette.seriesNeutral,
+        row: null,
+      },
+    ];
+  }
+  if (!slices.length)
+    return <Missing message="Nothing to share out." height={height} />;
+  const shown = slices.filter((slice) => !off.has(slice.key));
+  const total = shown.reduce((sum, slice) => sum + slice.value, 0);
+  const share = (value: number) =>
+    formatValue(total > 0 ? value / total : 0, 'percent');
+  const donut = Boolean(options.donut);
+  const labels = Boolean(options.dataLabels);
+  const select = (slice: Slice | undefined) => {
+    if (!onSelect || !slice?.row) return;
+    const row = slice.row;
+    onSelect(
+      Object.fromEntries(columns.map((column, i) => [column.name, row[i]])),
+    );
+  };
+
+  const chart = (
+    <div className="viz-pie" style={{ height }}>
+      <ResponsiveContainer width="100%" height={height}>
+        <PieChart>
+          <Pie
+            // Each slice carries its own fill.
+            data={shown.map((slice) => ({ ...slice, fill: slice.color }))}
+            className={onSelect ? 'viz-pie-linked' : undefined}
+            dataKey="value"
+            nameKey="label"
+            innerRadius={donut ? '60%' : 0}
+            outerRadius={labels ? '76%' : '90%'}
+            paddingAngle={donut && shown.length > 1 ? 1.5 : 0}
+            stroke={palette.barStroke ?? palette.surface}
+            strokeWidth={palette.barStroke ? palette.barStrokeWidth : 1}
+            isAnimationActive={false}
+            labelLine={false}
+            label={
+              labels
+                ? (props: {
+                    cx: number;
+                    cy: number;
+                    midAngle?: number;
+                    outerRadius: number;
+                    percent?: number;
+                  }) => {
+                    const percent = props.percent ?? 0;
+                    if (percent < 0.03) return null;
+                    const angle = (-(props.midAngle ?? 0) * Math.PI) / 180;
+                    const radius = props.outerRadius + 14;
+                    const x = props.cx + radius * Math.cos(angle);
+                    const y = props.cy + radius * Math.sin(angle);
+                    return (
+                      <text
+                        x={x}
+                        y={y}
+                        fill={palette.axis.fill}
+                        fontSize={11}
+                        fontWeight={palette.axis.fontWeight}
+                        textAnchor={x > props.cx ? 'start' : 'end'}
+                        dominantBaseline="central"
+                      >
+                        {formatValue(percent, 'percent')}
+                      </text>
+                    );
+                  }
+                : false
+            }
+            onClick={(_, at) => select(shown[at])}
+          />
+          <Tooltip
+            content={({ active, payload }) => {
+              const slice = active
+                ? (payload?.[0]?.payload as Slice | undefined)
+                : undefined;
+              if (!slice) return null;
+              return (
+                <div className="viz-tip" style={palette.tooltip}>
+                  <ul>
+                    <li>
+                      <i style={{ background: slice.color }} />
+                      <span>{slice.label}</span>
+                      <b>{formatValue(slice.value, options.format)}</b>
+                    </li>
+                    <li className="viz-tip-total">
+                      <i />
+                      <span>Share</span>
+                      <b>{share(slice.value)}</b>
+                    </li>
+                  </ul>
+                </div>
+              );
+            }}
+          />
+        </PieChart>
+      </ResponsiveContainer>
+      {donut && (
+        <div className="viz-pie-centre" aria-hidden="true">
+          <strong>{formatValue(total, options.format ?? 'compact')}</strong>
+          <span>total</span>
+        </div>
+      )}
+    </div>
+  );
+
+  if (slices.length < 2) return chart;
+  return (
+    <div
+      className="viz-cartesian"
+      style={{ '--viz-height': `${height}px` } as React.CSSProperties}
+    >
+      <div className="viz-cartesian-body">
+        <div className="viz-plot">{chart}</div>
+        <ul className="viz-legend viz-pie-legend" aria-label="Slices">
+          {slices.map((slice) => (
+            <li key={slice.key}>
+              <button
+                type="button"
+                aria-pressed={!off.has(slice.key)}
+                title={slice.label}
+                onClick={() => {
+                  const next = new Set(off);
+                  if (next.has(slice.key)) next.delete(slice.key);
+                  else next.add(slice.key);
+                  setOff(next);
+                }}
+              >
+                <i style={{ background: slice.color }} />
+                <span>{slice.label}</span>
+                {!off.has(slice.key) && <small>{share(slice.value)}</small>}
+              </button>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
 type Hover = { x: number; y: number; label: string; value: string };
 
 /** A shaded grid: rows × columns, darker where the value is larger. */
@@ -944,6 +1163,8 @@ export function VisualizationBody(props: VisualizationProps) {
       return <Cartesian {...props} />;
     case 'share':
       return <Share {...props} />;
+    case 'pie':
+      return <PieView {...props} />;
     case 'heatmap':
       return <Grid {...props} cohort={false} />;
     case 'cohort':

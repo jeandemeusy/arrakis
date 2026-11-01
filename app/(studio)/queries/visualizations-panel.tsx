@@ -5,6 +5,7 @@ import {
   ChartArea,
   ChartColumn,
   ChartLine,
+  ChartBarDecreasing,
   ChartPie,
   Code2,
   Grid3x3,
@@ -46,6 +47,7 @@ import {
 } from './chart-options';
 import { adaptBuilder, templates, type Template } from './chart-templates';
 import { StepList, type ScopeColumn } from './step-editor';
+import { HelpTip } from '../help-tip';
 
 /**
  * The charts built on one query's stored result, and the editor for them.
@@ -92,6 +94,7 @@ const TYPE_LABELS: Record<VisualizationType, string> = {
   area: 'Area',
   bar: 'Bar',
   share: 'Share',
+  pie: 'Pie',
   heatmap: 'Heatmap',
   cohort: 'Cohort grid',
   table: 'Table',
@@ -102,7 +105,8 @@ export const TYPE_ICONS: Record<VisualizationType, LucideIcon> = {
   line: ChartLine,
   area: ChartArea,
   bar: ChartColumn,
-  share: ChartPie,
+  share: ChartBarDecreasing,
+  pie: ChartPie,
   heatmap: Grid3x3,
   cohort: Rows3,
   table: Table2,
@@ -328,8 +332,9 @@ function EncodingFields({
       {(type === 'line' ||
         type === 'area' ||
         type === 'bar' ||
-        type === 'share') && (
-        <Field label={type === 'share' ? 'Label' : 'X axis'}>
+        type === 'share' ||
+        type === 'pie') && (
+        <Field label={type === 'share' || type === 'pie' ? 'Label' : 'X axis'}>
           <Pick
             value={encoding.x}
             columns={columns}
@@ -389,7 +394,7 @@ function EncodingFields({
           </Field>
         </>
       )}
-      {(type === 'number' || type === 'share') && (
+      {(type === 'number' || type === 'share' || type === 'pie') && (
         <Field label="Value">
           <Pick
             value={y[0]}
@@ -987,6 +992,7 @@ export function VisualizationsPanel({
                   </button>
                 ))}
               </fieldset>
+              <HelpTip topic="charts" />
             </div>
           )}
           {switching && switching !== draft.mode && (

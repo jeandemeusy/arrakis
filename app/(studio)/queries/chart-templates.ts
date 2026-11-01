@@ -106,6 +106,50 @@ export function templates(columns: ScopeColumn[]): Template[] {
       },
     });
   }
+  if (category) {
+    out.push({
+      id: 'donut',
+      title: 'Share as a donut',
+      description: `How rows split by ${category.name}, as a ring.`,
+      type: 'pie',
+      builder: {
+        ...(time ? { window: { column: time.name } } : {}),
+        groups: [{ column: category.name }],
+        measures: [COUNT],
+        top: { n: 7 },
+      },
+      options: { donut: true },
+    });
+  }
+  const amount = numberColumn(columns);
+  const second = amount
+    ? { fn: 'sum' as const, columns: [amount.name], as: `total_${amount.name}` }
+    : category
+      ? {
+          fn: 'count_distinct' as const,
+          columns: [category.name],
+          as: `distinct_${category.name}`,
+        }
+      : null;
+  if (time && second) {
+    out.push({
+      id: 'combo',
+      title: 'Columns and a line',
+      description: `Rows per day as columns, and ${
+        amount ? `the sum of ${amount.name}` : `distinct ${category!.name}`
+      } as a line on its own axis.`,
+      type: 'bar',
+      builder: {
+        window: { column: time.name },
+        groups: [{ column: time.name, unit: 'auto' }],
+        measures: [COUNT, second],
+      },
+      options: {
+        legend: true,
+        series: { [second.as]: { mark: 'line', axis: 'right' } },
+      },
+    });
+  }
   if (time && category) {
     out.push({
       id: 'breakdown',
@@ -181,6 +225,7 @@ export function adaptBuilder(
       break;
     }
     case 'share':
+    case 'pie':
       if (!groups.length || groups[0].unit) {
         if (category) next.groups = [{ column: category.name }];
       }

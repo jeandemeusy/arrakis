@@ -31,6 +31,7 @@ yarn-error.log*
 # The direnv entrypoint is shared tooling, not local config; secrets live in .env.local.
 !.envrc
 .pre-commit-config.yaml
+"Claude outputs"/*
 
 # deployment and generated files
 .vercel
@@ -50,3 +51,4 @@ tsconfig.tsbuildinfo
 .direnv/
 result
 result-*
+

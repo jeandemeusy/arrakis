@@ -368,3 +368,42 @@
   border-top: 1px solid var(--line-soft);
   color: var(--ink);
 }
+
+/* Pie and donut. */
+.viz-pie {
+  position: relative;
+}
+
+.viz-pie-centre {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  pointer-events: none;
+  text-align: center;
+}
+
+.viz-pie-centre strong {
+  color: var(--ink);
+  font-family: var(--font-display);
+  font-size: clamp(16px, 4cqi, 26px);
+  font-weight: var(--display-weight);
+  line-height: 1.1;
+}
+
+.viz-pie-centre span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.viz-pie-legend small {
+  margin-left: auto;
+  padding-left: 6px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.viz-pie-linked {
+  cursor: pointer;
+}

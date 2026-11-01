@@ -1,0 +1,155 @@
+'use client';
+
+import { useState } from 'react';
+import { Plus, Trash2 } from 'lucide-react';
+import { type DashboardVariable } from '../api';
+
+/**
+ * A variable's choices as one line, `value` or `value=Label` separated by
+ * commas: `7d=Last 7 days, 31d=Last 30 days, all`. Kept as typed until the
+ * field loses focus, so a half-written entry is not tidied away mid-word.
+ */
+function OptionsInput({
+  variable,
+  onChange,
+}: {
+  variable: DashboardVariable;
+  onChange: (options: string[], labels?: Record<string, string>) => void;
+}) {
+  const written = (variable.options ?? [])
+    .map((option) =>
+      variable.labels?.[option]
+        ? `${option}=${variable.labels[option]}`
+        : option,
+    )
+    .join(', ');
+  const [draft, setDraft] = useState<string | null>(null);
+  return (
+    <input
+      className="studio-input"
+      aria-label="Options"
+      placeholder="7d=Last 7 days, 30d, all"
+      value={draft ?? written}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={() => {
+        if (draft === null) return;
+        const options: string[] = [];
+        const labels: Record<string, string> = {};
+        for (const entry of draft.split(',')) {
+          const [value, ...rest] = entry.split('=');
+          const option = value.trim();
+          if (!option) continue;
+          options.push(option);
+          const label = rest.join('=').trim();
+          if (label) labels[option] = label;
+        }
+        setDraft(null);
+        onChange(options, Object.keys(labels).length ? labels : undefined);
+      }}
+    />
+  );
+}
+
+export function VariablesEditor({
+  variables,
+  onChange,
+}: {
+  variables: DashboardVariable[];
+  onChange: (variables: DashboardVariable[]) => void;
+}) {
+  const set = (at: number, patch: Partial<DashboardVariable>) =>
+    onChange(
+      variables.map((variable, index) =>
+        index === at ? { ...variable, ...patch } : variable,
+      ),
+    );
+  return (
+    <div className="variables-editor">
+      {variables.map((variable, at) => (
+        <div className="variable-row" key={at}>
+          <input
+            className="studio-input mono"
+            aria-label="Variable name"
+            value={variable.name}
+            onChange={(event) => set(at, { name: event.target.value })}
+          />
+          <input
+            className="studio-input"
+            aria-label="Label"
+            value={variable.label}
+            onChange={(event) => set(at, { label: event.target.value })}
+          />
+          <select
+            className="studio-input"
+            aria-label="Type"
+            value={variable.type}
+            onChange={(event) => {
+              const type = event.target.value as DashboardVariable['type'];
+              set(at, {
+                type,
+                options:
+                  type === 'range'
+                    ? ['7d', '30d', '90d', 'all']
+                    : type === 'select'
+                      ? (variable.options ?? ['a', 'b'])
+                      : undefined,
+                default:
+                  type === 'network'
+                    ? 'all'
+                    : type === 'range'
+                      ? '30d'
+                      : variable.default,
+              });
+            }}
+          >
+            <option value="range">time range</option>
+            <option value="network">network</option>
+            <option value="text">text (set by clicks)</option>
+            <option value="select">select</option>
+          </select>
+          {(variable.type === 'range' || variable.type === 'select') && (
+            <OptionsInput
+              variable={variable}
+              onChange={(options, labels) => set(at, { options, labels })}
+            />
+          )}
+          <input
+            className="studio-input"
+            aria-label="Default"
+            placeholder="default"
+            value={variable.default ?? ''}
+            onChange={(event) =>
+              set(at, { default: event.target.value || undefined })
+            }
+          />
+          <button
+            type="button"
+            className="studio-icon-button"
+            aria-label={`Remove ${variable.name}`}
+            onClick={() =>
+              onChange(variables.filter((_, index) => index !== at))
+            }
+          >
+            <Trash2 size={13} aria-hidden="true" />
+          </button>
+        </div>
+      ))}
+      <button
+        type="button"
+        className="studio-button"
+        onClick={() =>
+          onChange([
+            ...variables,
+            {
+              name: `var_${variables.length + 1}`,
+              label: 'Selection',
+              type: 'text',
+            },
+          ])
+        }
+      >
+        <Plus size={12} aria-hidden="true" /> Variable
+      </button>
+    </div>
+  );
+}

@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { ArrowRight, PackageOpen, Waypoints } from 'lucide-react';
+import { Activity, ArrowRight, PackageOpen, Waypoints } from 'lucide-react';
 
 export const metadata: Metadata = {
   title: 'Settings',
@@ -19,6 +19,12 @@ const PAGES = [
     icon: PackageOpen,
     title: 'Bundled dashboards',
     text: 'Dashboards that ship with arrakis, ready to install as saved queries and charts, or to bring back to their bundled version. Editors only.',
+  },
+  {
+    href: '/settings/runs',
+    icon: Activity,
+    title: 'Running now',
+    text: 'Every query running at this moment — previews, stored runs and scheduled refreshes — with a way to cancel any of them. Editors only.',
   },
 ];
 

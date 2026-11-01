@@ -14,6 +14,7 @@ import {
 } from './columns';
 import { compile } from './compile';
 import { inputsFingerprint, parameterKey, prepare } from './execute';
+import { rowLimitFor, timeoutFor } from './limits';
 import { runReadOnly, TYPES } from './runner';
 import { fragmentResolver, type QueryRecord, type QueryVersion } from './store';
 
@@ -33,11 +34,6 @@ import { fragmentResolver, type QueryRecord, type QueryVersion } from './store';
 
 const RESULTS_SCHEMA = 'results';
 const TABLE = /^r_[0-9a-z]+_[0-9a-f]{8}$/;
-
-function rowLimit(): number {
-  const value = Number.parseInt(process.env.ARRAKIS_RESULT_ROW_LIMIT ?? '', 10);
-  return Number.isFinite(value) && value > 0 ? value : 5_000_000;
-}
 
 export function quote(identifier: string): string {
   return `"${identifier.replaceAll('"', '""')}"`;
@@ -78,6 +74,8 @@ export async function materialize(options: {
   network: NetworkConfig;
   supplied: Record<string, unknown>;
   trigger: RunTrigger;
+  /** Who asked for it, shown among the runs in progress. */
+  startedBy?: string;
 }): Promise<StoredResult> {
   const { query, network, supplied, trigger } = options;
   const version = options.version ?? query.current;
@@ -126,10 +124,15 @@ export async function materialize(options: {
       network,
       text: prepared.compiled.text,
       values: prepared.values,
-      rowLimit: rowLimit(),
-      // Generous next to an editor preview: a scheduled refresh of the heavy
-      // redemption history is exactly what this path exists for.
-      timeoutMs: Number(process.env.ARRAKIS_MATERIALIZE_TIMEOUT_MS) || 120_000,
+      rowLimit: rowLimitFor(query.rowLimit),
+      // Generous next to an editor preview by default: a scheduled refresh of
+      // a heavy history is exactly what this path exists for.
+      timeoutMs: timeoutFor('store', query.timeoutSeconds),
+      track: {
+        kind: trigger === 'schedule' ? 'schedule' : 'store',
+        query: query.slug,
+        startedBy: options.startedBy,
+      },
       onBatch: async (rows, fields) => {
         if (!created) {
           if (!fields.length) throw badRequest('The query returns no columns');

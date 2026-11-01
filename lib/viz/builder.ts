@@ -133,6 +133,7 @@ export function shapeOf(type: VisualizationType): {
     case 'bar':
       return { groups: 1, split: true, measures: 'many' };
     case 'share':
+    case 'pie':
       return { groups: 1, split: false, measures: 'one' };
     case 'heatmap':
       return { groups: 2, split: false, measures: 'one' };
@@ -318,6 +319,7 @@ export function compileBuilder(
       };
       break;
     case 'share':
+    case 'pie':
       encoding = { x: names[0], y: plotted ? [plotted] : [] };
       break;
     case 'heatmap':

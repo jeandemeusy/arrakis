@@ -168,6 +168,24 @@ export type RunRequest = {
    * call, which may carry zero rows.
    */
   onBatch?: (rows: unknown[][], columns: Column[]) => Promise<void>;
+  /**
+   * Lists the run among those in progress while it lasts, so it can be seen
+   * and cancelled from any replica. Left out for the server's own lookups.
+   */
+  track?: RunTracking;
+  /**
+   * Returns the plan instead of the rows, one line per row. `analyze` runs the
+   * query to measure it, inside the same read-only transaction and time limit.
+   */
+  explain?: 'plan' | 'analyze';
+};
+
+export type RunTracking = {
+  kind: 'preview' | 'store' | 'schedule';
+  query?: string;
+  /** A preview's token, chosen by the page that started it. */
+  runKey?: string;
+  startedBy?: string;
 };
 
 export type RunOutcome = {
@@ -191,9 +209,16 @@ function explain(error: unknown, timeoutMs: number): unknown {
   const pg = error as PgError;
   if (typeof pg?.code !== 'string') return error;
   if (pg.code === '57014') {
+    // Someone stopped it, rather than the clock.
+    if (/user request/i.test(pg.message)) {
+      return new HttpError(409, 'Query cancelled', {
+        details: { cancelled: true },
+      });
+    }
     return new HttpError(
       408,
-      `Query cancelled after ${Math.round(timeoutMs / 1000)} s`,
+      `Query stopped after ${Math.round(timeoutMs / 1000)} s, its time limit. Make it lighter, or raise the limit under Run limits.`,
+      { details: { timedOut: true } },
     );
   }
   // Classes 08 (connection), 53 (resources), 57 (operator intervention) and
@@ -234,6 +259,9 @@ export async function runReadOnly(request: RunRequest): Promise<RunOutcome> {
   }
 
   let broken = false;
+  const tracked = request.track
+    ? await startTracking(network.id, client, request.track)
+    : null;
   try {
     await assertReadOnlyRole(network, client);
     await client.query('BEGIN READ ONLY ISOLATION LEVEL REPEATABLE READ');
@@ -247,6 +275,26 @@ export async function runReadOnly(request: RunRequest): Promise<RunOutcome> {
     );
     // Day buckets and ::date casts mean the same thing on every server.
     await client.query("SET LOCAL TimeZone = 'UTC'");
+
+    // The plan of the same wrapped statement a run would fetch from, so
+    // only a query can be explained, never anything else.
+    if (request.explain) {
+      const plan: QueryConfig<BindValue[]> & { queryMode: 'extended' } = {
+        text: `EXPLAIN (${request.explain === 'analyze' ? 'ANALYZE, BUFFERS, ' : ''}FORMAT TEXT) SELECT * FROM (\n${text}\n) AS arrakis_query`,
+        values,
+        queryMode: 'extended',
+      };
+      const result = await client.query<Record<string, string>>(plan);
+      await client.query('COMMIT');
+      const rows = result.rows.map((row) => [Object.values(row)[0]]);
+      return {
+        columns: [{ name: 'QUERY PLAN', type: 'text' }],
+        rows,
+        rowCount: rows.length,
+        truncated: false,
+        durationMs: Date.now() - started,
+      };
+    }
 
     // `queryMode` is honoured by pg but missing from its type definitions.
     // Extended mode even without values: the simple protocol would accept a
@@ -321,6 +369,48 @@ export async function runReadOnly(request: RunRequest): Promise<RunOutcome> {
       });
     }
     client.release(broken);
+    if (tracked) await stopTracking(tracked);
+  }
+}
+
+/** Records a run as in progress; null when the app database is not there. */
+async function startTracking(
+  network: string,
+  client: PoolClient,
+  track: RunTracking,
+): Promise<string | null> {
+  // The backend serving this run: what pg_cancel_backend is given to stop it.
+  const pid = (client as PoolClient & { processID?: number }).processID;
+  if (!pid || !process.env.APP_DATABASE_URL?.trim()) return null;
+  try {
+    const { appDb } = await import('../db/app');
+    const db = await appDb();
+    const { rows } = await db.query<{ id: string }>(
+      `INSERT INTO active_runs (network, pid, kind, query_slug, run_key, started_by)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+      [
+        network,
+        pid,
+        track.kind,
+        track.query ?? null,
+        track.runKey ?? null,
+        track.startedBy ?? null,
+      ],
+    );
+    return rows[0]?.id ?? null;
+  } catch (error) {
+    // Not being cancellable is no reason not to run.
+    console.error('Could not record a run:', (error as Error).message);
+    return null;
+  }
+}
+
+async function stopTracking(id: string): Promise<void> {
+  try {
+    const { appDb } = await import('../db/app');
+    await (await appDb()).query('DELETE FROM active_runs WHERE id = $1', [id]);
+  } catch {
+    // Pruned later if it stays behind.
   }
 }
 

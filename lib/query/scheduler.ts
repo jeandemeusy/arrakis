@@ -7,6 +7,8 @@ import { appDb } from '../db/app';
 import { resolveNetworks, type NetworkConfig } from '../networks';
 import { compile } from './compile';
 import { inputsFingerprint, parameterKey } from './execute';
+import { pruneActiveRuns } from './cancel';
+import { limits } from './limits';
 import { materialize, pruneResults } from './results';
 import { fragmentResolver, listQueries, type QueryRecord } from './store';
 
@@ -143,9 +145,11 @@ async function runDue(): Promise<void> {
     return;
   }
   const jobs = await dueJobs(networks);
-  // One scheduled run per network at a time, networks in parallel: refreshes
-  // never take more than one of a network's query connections, leaving the rest
-  // to editors.
+  // One scheduled run per data source at a time, sources in parallel but at
+  // most ARRAKIS_SCHEDULER_CONCURRENCY at once overall: refreshes never take
+  // more than one of a source's query connections, leaving the rest to
+  // editors, and many sources do not mean many heavy runs together.
+  const slots = semaphore(limits().schedulerConcurrency);
   const byNetwork = new Map<string, Job[]>();
   for (const job of jobs) {
     const list = byNetwork.get(job.network.id) ?? [];
@@ -155,12 +159,14 @@ async function runDue(): Promise<void> {
   await Promise.all(
     [...byNetwork.values()].map(async (list) => {
       for (const job of list) {
+        const release = await slots();
         try {
           await materialize({
             query: job.query,
             network: job.network,
             supplied: {},
             trigger: 'schedule',
+            startedBy: 'scheduler',
           });
         } catch (error) {
           // Already recorded on the result row, where an editor will see it.
@@ -168,10 +174,30 @@ async function runDue(): Promise<void> {
             `Scheduled run of ${job.query.slug} on ${job.network.id} failed:`,
             (error as Error).message,
           );
+        } finally {
+          release();
         }
       }
     }),
   );
+}
+
+/** At most `size` holders at once; `acquire()` resolves with the release. */
+function semaphore(size: number): () => Promise<() => void> {
+  let free = Math.max(1, size);
+  const waiting: Array<() => void> = [];
+  return async () => {
+    if (free > 0) free -= 1;
+    else await new Promise<void>((resolve) => waiting.push(resolve));
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      const next = waiting.shift();
+      if (next) next();
+      else free += 1;
+    };
+  };
 }
 
 async function tick(): Promise<void> {
@@ -190,6 +216,7 @@ async function tick(): Promise<void> {
         lastPrune = Date.now();
         await pruneAuthState();
         await pruneResults();
+        await pruneActiveRuns();
       }
     } while (again);
   } catch (error) {

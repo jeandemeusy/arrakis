@@ -137,6 +137,10 @@ export type QueryRecord = {
   official: boolean;
   combine: Combine;
   refreshSeconds: number | null;
+  /** How long a run may take; null takes the server's default. */
+  timeoutSeconds: number | null;
+  /** How many rows a stored result keeps; null takes the server's default. */
+  rowLimit: number | null;
   forkedFrom: string | null;
   createdBy: string | null;
   createdAt: string;
@@ -276,4 +280,25 @@ export type DashboardRecord = {
   updatedAt: string;
   archivedAt: string | null;
   widgets: DashboardWidget[];
+};
+
+export type LineageKind =
+  | 'table'
+  | 'fragment'
+  | 'query'
+  | 'chart'
+  | 'dashboard';
+
+export type LineageNode = {
+  id: string;
+  kind: LineageKind;
+  label: string;
+  detail: string;
+  description: string;
+  href: string;
+};
+
+export type Lineage = {
+  nodes: LineageNode[];
+  edges: Array<{ from: string; to: string }>;
 };

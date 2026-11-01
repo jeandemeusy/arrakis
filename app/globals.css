@@ -134,6 +134,57 @@
   --grid-gap: 14px;
 }
 
+/*
+ * Dark: the editorial style at night, as the visitor or the system chose.
+ * The same tokens over a near-black page; the accents are lifted to keep
+ * their contrast. Mirrored for the plots in `app/chart-theme.ts`. The
+ * neubrutal style has no dark: it stays as it is.
+ */
+:root[data-theme='dark']:not([data-style='neubrutal']) {
+  color-scheme: dark;
+
+  --paper: #121315;
+  --surface: #1b1c1f;
+  --surface-alt: #232428;
+  --surface-veil: rgb(27 28 31 / 0.85);
+  --on-ink: #121315;
+  --ink: #ececea;
+  --ink-soft: #cfd0d3;
+  --muted: #9a9ca2;
+  --muted-2: #b3b5ba;
+  --muted-3: #6f7177;
+  --footer-muted: #7f828a;
+  --yellow: #e8c547;
+  --accent-2: #ef7a55;
+  --accent-3: #7cc9b1;
+  --line: #2e3034;
+  --line-soft: #26282b;
+  --line-strong: #44474c;
+  --swatch-unknown: #55585e;
+  --rule-strong: rgb(255 255 255 / 0.3);
+  --rule: rgb(255 255 255 / 0.22);
+  --rule-soft: rgb(255 255 255 / 0.1);
+  --rule-text: rgb(255 255 255 / 0.4);
+  --ok: #3ccf82;
+  --ok-halo: rgb(60 207 130 / 0.14);
+  --warn: #e3b52a;
+  --warn-halo: rgb(227 181 42 / 0.14);
+  --warn-ink: #f0d27a;
+  --danger: #e5675a;
+  --good: #3ccf82;
+  --good-ink: #7fe2ad;
+  --bad: #e5675a;
+  --overlay: rgb(0 0 0 / 0.55);
+  --tile-shadow: 0 1px 2px rgb(0 0 0 / 0.4);
+  --shadow-pop:
+    0 12px 32px rgb(0 0 0 / 0.45),
+    0 1px 2px rgb(0 0 0 / 0.3);
+}
+
+:root[data-theme='dark']:not([data-style='neubrutal']) .studio {
+  --sql-placeholder-bg: rgb(232 197 71 / 0.22);
+}
+
 * {
   box-sizing: border-box;
 }
@@ -319,6 +370,43 @@ main {
 }
 
 .style-switch button.active {
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.08),
+    0 0 0 1px var(--line);
+}
+
+/* Light, dark or the system's: three icons beside the style switch. */
+.theme-switch {
+  display: inline-flex;
+  gap: 2px;
+  margin: 0;
+  padding: 3px;
+  min-inline-size: 0;
+  border: var(--control-border) solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--surface-alt);
+}
+
+.theme-switch button {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.theme-switch button:hover {
+  color: var(--ink);
+}
+
+.theme-switch button[aria-pressed='true'] {
   background: var(--surface);
   color: var(--ink);
   box-shadow:

@@ -13,7 +13,6 @@ import {
   Globe,
   History,
   Layers,
-  LayoutDashboard,
   Lock,
   MoreHorizontal,
   PanelLeft,
@@ -22,25 +21,23 @@ import {
   Plus,
   Puzzle,
   RefreshCw,
+  Route,
   Save,
   Settings2,
   Shapes,
+  Square,
   Table2,
   Timer,
-  Trash2,
   Wand2,
+  WandSparkles,
 } from 'lucide-react';
-
 import {
   api,
   ApiError,
-  PARAMETER_TYPES,
   type Combine,
   type Dependent,
   type Kind,
   type Network,
-  type ParameterDefinition,
-  type ParameterType,
   type Preview,
   type QueryRecord,
   type QuerySummary,
@@ -49,7 +46,6 @@ import {
   type SchemaTable,
   type Visibility,
 } from '../api';
-import { diffLines } from '../diff';
 import { ResultsTable } from '../results-table';
 import { useSession } from '../session';
 import { setPreference, usePreference } from '../preference';
@@ -64,8 +60,25 @@ import {
   type SqlEditorHandle,
 } from '../sql-editor';
 import { FUNCTIONS, KEYWORDS } from '../sql-highlight';
-import { isRelation, segments } from '@/lib/query/scan';
 import { ago, took } from '../time';
+import {
+  type Draft,
+  emptyDraft,
+  draftOf,
+  slugify,
+  when,
+  codeOf,
+  undeclared,
+} from './workbench-draft';
+import { AboutPanel } from './about-panel';
+import { SchemaPanel } from './schema-panel';
+import { ExtractForm } from './extract-form';
+import { ParametersPanel } from './parameters-panel';
+import { VersionsPanel } from './versions-panel';
+import { HelpTip } from '../help-tip';
+import { formatSql } from '../sql-format';
+import { ShareButton } from '../share';
+import { asText } from '@/lib/viz/text';
 
 /**
  * Where a query is written, run, saved and read back.
@@ -75,20 +88,9 @@ import { ago, took } from '../time';
  * controls are shown; the SQL, results and history read the same way for all.
  */
 
-type Draft = {
-  slug: string;
-  title: string;
-  description: string;
-  kind: Kind;
-  visibility: Visibility;
-  combine: Combine;
-  refreshSeconds: number | null;
-  sql: string;
-  parameters: ParameterDefinition[];
-};
-
 /** `results`, `versions`, `new` (a new chart) or `chart:<id>`. */
 type Tab = string;
+
 type ResultMode = 'stored' | 'preview';
 
 const REFRESH_OPTIONS: Array<{ label: string; value: number | null }> = [
@@ -100,87 +102,6 @@ const REFRESH_OPTIONS: Array<{ label: string; value: number | null }> = [
   { label: 'Every 6 hours', value: 21_600 },
   { label: 'Daily', value: 86_400 },
 ];
-
-const SYSTEM_NAMES = new Set(['network', 'exits']);
-
-const STARTER_SQL = `-- Each run reads one network, or every network with "All".
--- {{network}} and {{exits}} are filled in for you; {{> slug}} inlines a fragment.
-SELECT
-  account.chain_key AS address,
-  account.published_block,
-  {{block_time(account.published_block)}} AS deployed_at
-FROM account
-ORDER BY account.published_block DESC
-LIMIT 100`;
-
-function emptyDraft(): Draft {
-  return {
-    slug: '',
-    title: '',
-    description: '',
-    kind: 'query',
-    visibility: 'private',
-    combine: 'concat',
-    refreshSeconds: null,
-    sql: STARTER_SQL,
-    parameters: [],
-  };
-}
-
-function draftOf(query: QueryRecord): Draft {
-  return {
-    slug: query.slug,
-    title: query.title,
-    description: query.description,
-    kind: query.kind,
-    visibility: query.visibility,
-    combine: query.combine,
-    refreshSeconds: query.refreshSeconds,
-    sql: query.current?.sql ?? '',
-    parameters: query.current?.parameters ?? [],
-  };
-}
-
-function slugify(title: string): string {
-  return title
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 80);
-}
-
-function when(iso: string | null): string {
-  if (!iso) return '—';
-  return new Date(iso).toLocaleString(undefined, {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  });
-}
-
-/** The SQL outside comments and strings. */
-function codeOf(sql: string): string {
-  return segments(sql)
-    .filter((segment) => segment.code)
-    .map((segment) => segment.text)
-    .join(' ');
-}
-
-/** `{{name}}` placeholders in code that are neither declared nor built in. */
-function undeclared(sql: string, declared: ParameterDefinition[]): string[] {
-  const known = new Set(declared.map((parameter) => parameter.name));
-  const found = new Set<string>();
-  // Comments and strings are stripped first so a commented-out placeholder
-  // does not become a parameter.
-  const code = sql
-    .replace(/--[^\n]*/g, '')
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/'(?:[^']|'')*'/g, "''");
-  for (const match of code.matchAll(/\{\{\s*([a-z_][a-z0-9_]*)\s*\}\}/g)) {
-    const name = match[1];
-    if (!known.has(name) && !SYSTEM_NAMES.has(name)) found.add(name);
-  }
-  return [...found];
-}
 
 function ErrorBox({ error }: { error: ApiError | null }) {
   if (!error) return null;
@@ -240,6 +161,16 @@ export function Workbench({
   const [stored, setStored] = useState<ResultPage | null>(null);
   const [storedError, setStoredError] = useState<ApiError | null>(null);
   const [storing, setStoring] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelled, setCancelled] = useState(false);
+  /** The SQL selected in the editor: Run runs only it. */
+  const [selection, setSelection] = useState('');
+  /** What the preview on screen is: rows or a plan, of the whole or a part. */
+  const [previewOf, setPreviewOf] = useState<{
+    explain: 'plan' | 'analyze' | null;
+    selection: boolean;
+  }>({ explain: null, selection: false });
+  const runKeyRef = useRef<string | null>(null);
   const [storeError, setStoreError] = useState<ApiError | null>(null);
   const [saveError, setSaveError] = useState<ApiError | null>(null);
   const [saving, setSaving] = useState(false);
@@ -260,7 +191,6 @@ export function Workbench({
   const schemaOpen = usePreference('arrakis.workbench.schema', true);
   const aboutOpen = usePreference('arrakis.workbench.about', true);
   const [schema, setSchema] = useState<SchemaTable[]>([]);
-  const [schemaFilter, setSchemaFilter] = useState('');
   const [fragments, setFragments] = useState<QuerySummary[]>([]);
   const [versions, setVersions] = useState<QueryVersion[]>([]);
   const [selectedVersion, setSelectedVersion] = useState<number | null>(null);
@@ -469,7 +399,9 @@ export function Workbench({
       draft.description !== query.description ||
       draft.visibility !== query.visibility ||
       draft.combine !== query.combine ||
-      draft.refreshSeconds !== query.refreshSeconds);
+      draft.refreshSeconds !== query.refreshSeconds ||
+      draft.timeoutSeconds !== query.timeoutSeconds ||
+      draft.rowLimit !== query.rowLimit);
   const dirty = creating || sqlDirty || metaDirty;
 
   const supplied = useMemo(() => {
@@ -481,32 +413,84 @@ export function Workbench({
     return out;
   }, [draft.parameters, values]);
 
-  const run = useCallback(async () => {
-    if (!editor || running) return;
-    setRunning(true);
-    if (tab === 'versions' || tab.startsWith('chart:') || tab === 'new')
-      setTab('results');
-    setResultMode('preview');
-    setPreviewError(null);
+  const run = useCallback(
+    async (explain?: 'plan' | 'analyze') => {
+      if (!editor || running) return;
+      // A selection runs on its own, with the query's parameters.
+      const part = selection.trim();
+      // This run's own token: Cancel stops exactly it, on whichever server.
+      const runKey = crypto.randomUUID();
+      runKeyRef.current = runKey;
+      setRunning(true);
+      setCancelled(false);
+      if (tab === 'versions' || tab.startsWith('chart:') || tab === 'new')
+        setTab('results');
+      setResultMode('preview');
+      setPreviewError(null);
+      try {
+        setPreview(
+          await api<Preview>('/api/v1/run', {
+            method: 'POST',
+            body: {
+              sql: part || draft.sql,
+              parameters: draft.parameters,
+              values: supplied,
+              network,
+              runKey,
+              timeoutSeconds: draft.timeoutSeconds,
+              query: slug ?? undefined,
+              ...(explain ? { explain } : {}),
+            },
+          }),
+        );
+        setPreviewOf({ explain: explain ?? null, selection: Boolean(part) });
+      } catch (error) {
+        setPreview(null);
+        if ((error as ApiError).details?.cancelled) setCancelled(true);
+        else setPreviewError(error as ApiError);
+      } finally {
+        runKeyRef.current = null;
+        setRunning(false);
+      }
+    },
+    [
+      draft.parameters,
+      draft.sql,
+      draft.timeoutSeconds,
+      editor,
+      network,
+      running,
+      selection,
+      slug,
+      supplied,
+      tab,
+    ],
+  );
+
+  /** Formats the SQL in place, as one step Cmd/Ctrl+Z undoes. */
+  const format = useCallback(() => {
+    // The editor refuses to replace read-only text itself.
+    sqlEditor.current?.replace(formatSql(draft.sql));
+  }, [draft.sql]);
+
+  /** Stops the preview this page started, or every stored run of the query. */
+  const cancelRun = async (scope: 'preview' | 'stored') => {
+    setCancelling(true);
     try {
-      setPreview(
-        await api<Preview>('/api/v1/run', {
-          method: 'POST',
-          body: {
-            sql: draft.sql,
-            parameters: draft.parameters,
-            values: supplied,
-            network,
-          },
-        }),
-      );
-    } catch (error) {
-      setPreview(null);
-      setPreviewError(error as ApiError);
+      await api('/api/v1/runs/cancel', {
+        method: 'POST',
+        body:
+          scope === 'preview'
+            ? { runKey: runKeyRef.current ?? '' }
+            : { query: slug ?? '' },
+      });
+    } catch {
+      // Nothing was running any more: the run finished as it was cancelled.
     } finally {
-      setRunning(false);
+      setCancelling(false);
+      if (scope === 'stored') setStoredRevision((value) => value + 1);
     }
-  }, [draft.parameters, draft.sql, editor, network, running, supplied, tab]);
+  };
 
   const save = useCallback(async () => {
     if (!editor || saving || !dirty) return;
@@ -532,8 +516,12 @@ export function Workbench({
             description: draft.description,
             visibility: draft.visibility,
             combine: draft.combine,
+            timeoutSeconds: draft.timeoutSeconds,
             ...(draft.kind === 'query'
-              ? { refreshSeconds: draft.refreshSeconds }
+              ? {
+                  refreshSeconds: draft.refreshSeconds,
+                  rowLimit: draft.rowLimit,
+                }
               : {}),
           },
         });
@@ -575,7 +563,8 @@ export function Workbench({
         body: { network, values: supplied },
       });
     } catch (error) {
-      setStoreError(error as ApiError);
+      if (!(error as ApiError).details?.cancelled)
+        setStoreError(error as ApiError);
     } finally {
       setStoring(false);
       setStoredRevision((value) => value + 1);
@@ -736,18 +725,6 @@ export function Workbench({
     [schema],
   );
 
-  const visibleTables = useMemo(() => {
-    const needle = schemaFilter.trim().toLowerCase();
-    if (!needle) return schema;
-    return schema.filter(
-      (table) =>
-        table.name.toLowerCase().includes(needle) ||
-        table.columns.some((column) =>
-          column.name.toLowerCase().includes(needle),
-        ),
-    );
-  }, [schema, schemaFilter]);
-
   if (loadError) {
     return (
       <main className="studio-page">
@@ -783,6 +760,10 @@ export function Workbench({
   const publicUrl = slug ? `/api/v1/queries/${slug}/results` : null;
 
   const hasStored = !creating && draft.kind === 'query';
+  // A run of this query in progress elsewhere — the scheduler's, say.
+  const storedRunning = Boolean(
+    stored?.networks.some((entry) => entry.lastAttempt?.status === 'running'),
+  );
   const lastRun = stored?.networks
     .filter((entry) => entry.finishedAt)
     .sort((a, b) => (b.finishedAt ?? '').localeCompare(a.finishedAt ?? ''))[0];
@@ -823,94 +804,11 @@ export function Workbench({
       ].join(' ')}
     >
       {editor && schemaOpen && (
-        <aside className="workbench-side" aria-label="Schema">
-          <h2>Schema</h2>
-          <input
-            className="studio-input"
-            type="search"
-            placeholder="Filter tables and columns"
-            value={schemaFilter}
-            onChange={(event) => setSchemaFilter(event.target.value)}
-            aria-label="Filter tables and columns"
-          />
-          <div className="schema-list">
-            {visibleTables.map((table) => (
-              <details
-                key={`${table.schema}.${table.name}`}
-                open={Boolean(schemaFilter.trim())}
-              >
-                <summary>
-                  <button
-                    type="button"
-                    className="schema-name"
-                    onClick={() => sqlEditor.current?.insert(table.name)}
-                    title="Insert at cursor"
-                  >
-                    {table.name}
-                  </button>
-                  {table.kind === 'view' && <small>view</small>}
-                </summary>
-                <ul>
-                  {table.columns.map((column) => (
-                    <li key={column.name}>
-                      <button
-                        type="button"
-                        onClick={() => sqlEditor.current?.insert(column.name)}
-                        title="Insert at cursor"
-                      >
-                        {column.name}
-                      </button>
-                      <small>{column.type}</small>
-                    </li>
-                  ))}
-                </ul>
-              </details>
-            ))}
-            {!schema.length && (
-              <p className="studio-muted">Loading the schema…</p>
-            )}
-          </div>
-          <h2>Fragments</h2>
-          <ul className="fragment-list">
-            {fragments.map((fragment) => {
-              const call = fragment.arguments?.length
-                ? `{{> ${fragment.slug}(${fragment.arguments.join(', ')})}}`
-                : `{{> ${fragment.slug}}}`;
-              return (
-                <li key={fragment.slug}>
-                  <button
-                    type="button"
-                    onClick={() => sqlEditor.current?.insert(call)}
-                    title={`${fragment.title}${fragment.expression ? ' — a value: use it where an expression goes' : ' — a table: use it after FROM or JOIN'}`}
-                  >
-                    {call}
-                  </button>
-                  {fragment.expression && <small>value</small>}
-                </li>
-              );
-            })}
-            {!fragments.length && (
-              <li className="studio-muted">
-                None yet. Save a query as a fragment to reuse it.
-              </li>
-            )}
-          </ul>
-          <h2>Built in</h2>
-          <ul className="fragment-list">
-            {['{{network}}', '{{exits}}', '{{block_time(block)}}'].map(
-              (text) => (
-                <li key={text}>
-                  <button
-                    type="button"
-                    onClick={() => sqlEditor.current?.insert(text)}
-                  >
-                    {text}
-                  </button>
-                </li>
-              ),
-            )}
-          </ul>
-        </aside>
+        <SchemaPanel
+          schema={schema}
+          fragments={fragments}
+          onInsert={(text) => sqlEditor.current?.insert(text)}
+        />
       )}
 
       <section className="workbench-main">
@@ -1075,6 +973,32 @@ export function Workbench({
             </div>
           </div>
           <div className="workbench-actions">
+            {query && slug && (
+              <ShareButton
+                what="query"
+                visibility={query.visibility}
+                plainPath={`/queries/${slug}`}
+                path={() =>
+                  openChart
+                    ? `/queries/${slug}?tab=charts&chart=${openChart.id}`
+                    : `/queries/${slug}`
+                }
+                viewLabel={
+                  openChart ? `the chart “${openChart.title}” open` : undefined
+                }
+                canEdit={editor && !query.archivedAt}
+                onVisibility={async (visibility) => {
+                  const { query: updated } = await api<{
+                    query: QueryRecord;
+                  }>(`/api/v1/queries/${slug}`, {
+                    method: 'PATCH',
+                    body: { visibility },
+                  });
+                  setQuery(updated);
+                  setDraft((current) => ({ ...current, visibility }));
+                }}
+              />
+            )}
             {editor && !query?.archivedAt && (
               <>
                 {dirty && !creating && (
@@ -1191,7 +1115,9 @@ export function Workbench({
 
         <section className="card editor-card" aria-label="Query editor">
           <header className="card-head">
-            <h2>Query editor</h2>
+            <h2>
+              Query editor <HelpTip topic="templates" />
+            </h2>
             <div className="card-tools">
               {editor && (
                 <button
@@ -1205,6 +1131,17 @@ export function Workbench({
                   }
                 >
                   <PanelLeft size={15} aria-hidden="true" />
+                </button>
+              )}
+              {editor && !readOnly && (
+                <button
+                  type="button"
+                  className="tool"
+                  onClick={format}
+                  title="Format SQL (Shift+Alt+F)"
+                  aria-label="Format SQL"
+                >
+                  <WandSparkles size={15} aria-hidden="true" />
                 </button>
               )}
               {editor && !readOnly && (
@@ -1235,50 +1172,16 @@ export function Workbench({
             <p className="studio-muted extract-hint">{extractHint}</p>
           )}
           {extracting && (
-            <form
-              className="extract-form"
+            <ExtractForm
+              text={extracting.text}
+              slug={extractSlug}
+              title={extractTitle}
+              error={extractError}
+              onSlug={setExtractSlug}
+              onTitle={setExtractTitle}
               onSubmit={(event) => void extract(event)}
-            >
-              <p>
-                Save the selection as a fragment, used here as{' '}
-                <code>{`{{> ${extractSlug || 'slug'}}}`}</code>.{' '}
-                {isRelation(extracting.text)
-                  ? 'It is a query, so it stands in for a table.'
-                  : 'It is an expression, so it stands in for a value; write {{$name}} in it for each argument.'}
-              </p>
-              <pre>
-                {extracting.text.trim().split('\n').slice(0, 6).join('\n')}
-              </pre>
-              <div className="extract-fields">
-                <input
-                  className="studio-input mono"
-                  aria-label="Fragment slug"
-                  placeholder="slug, e.g. vpn-clients"
-                  pattern="[a-z0-9][a-z0-9\-]*"
-                  required
-                  value={extractSlug}
-                  onChange={(event) => setExtractSlug(event.target.value)}
-                />
-                <input
-                  className="studio-input"
-                  aria-label="Fragment title"
-                  placeholder="Title (optional)"
-                  value={extractTitle}
-                  onChange={(event) => setExtractTitle(event.target.value)}
-                />
-                <button type="submit" className="studio-button primary">
-                  Save fragment
-                </button>
-                <button
-                  type="button"
-                  className="studio-button"
-                  onClick={() => setExtracting(null)}
-                >
-                  Cancel
-                </button>
-              </div>
-              {extractError && <p className="studio-error">{extractError}</p>}
-            </form>
+              onCancel={() => setExtracting(null)}
+            />
           )}
 
           <SqlEditor
@@ -1288,6 +1191,8 @@ export function Workbench({
             onChange={(sql) => update('sql', sql)}
             onRun={() => void run()}
             onSave={() => void save()}
+            onFormat={format}
+            onSelectionChange={setSelection}
             readOnly={readOnly}
             completions={completions}
             columns={columnsByTable}
@@ -1373,17 +1278,33 @@ export function Workbench({
             <span className="results-spacer" />
             {editor && (
               <div className="split-button menu-anchor">
-                <button
-                  type="button"
-                  className="studio-button primary"
-                  onClick={() => void run()}
-                  disabled={running}
-                  title="Run and preview, storing nothing (Cmd/Ctrl+Enter)"
-                >
-                  <Play size={14} aria-hidden="true" />
-                  {running ? 'Running…' : 'Run'}
-                </button>
-                {hasStored && !query?.archivedAt && (
+                {running ? (
+                  <button
+                    type="button"
+                    className="studio-button primary cancel-run"
+                    onClick={() => void cancelRun('preview')}
+                    disabled={cancelling}
+                    title="Stop this run"
+                  >
+                    <Square size={12} aria-hidden="true" fill="currentColor" />
+                    {cancelling ? 'Cancelling…' : 'Cancel'}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="studio-button primary"
+                    onClick={() => void run()}
+                    title={
+                      selection.trim()
+                        ? 'Run only the selected SQL, storing nothing (Cmd/Ctrl+Enter)'
+                        : 'Run and preview, storing nothing (Cmd/Ctrl+Enter)'
+                    }
+                  >
+                    <Play size={14} aria-hidden="true" />
+                    {selection.trim() ? 'Run selection' : 'Run'}
+                  </button>
+                )}
+                {!running && (
                   <button
                     type="button"
                     className="studio-button primary caret"
@@ -1405,222 +1326,77 @@ export function Workbench({
                     >
                       <Play size={13} aria-hidden="true" />
                       <span>
-                        Run
+                        {selection.trim() ? 'Run selection' : 'Run'}
                         <small>Preview up to 10,000 rows; nothing stored</small>
                       </span>
                     </button>
                     <button
                       type="button"
-                      disabled={storing || sqlDirty}
                       onClick={() => {
                         setRunMenu(false);
-                        setTab('results');
-                        setResultMode('stored');
-                        void store();
+                        void run('plan');
                       }}
                     >
-                      <Database size={13} aria-hidden="true" />
+                      <Route size={13} aria-hidden="true" />
                       <span>
-                        Run and store
+                        Explain
                         <small>
-                          {sqlDirty
-                            ? 'Save first: stored results come from saved versions'
-                            : 'Replace the stored result its charts are drawn from'}
+                          How the database would run it, without running it
                         </small>
                       </span>
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setRunMenu(false);
+                        void run('analyze');
+                      }}
+                    >
+                      <Timer size={13} aria-hidden="true" />
+                      <span>
+                        Explain and measure
+                        <small>
+                          Runs it, and says where the time went (EXPLAIN
+                          ANALYZE)
+                        </small>
+                      </span>
+                    </button>
+                    {hasStored && !query?.archivedAt && (
+                      <button
+                        type="button"
+                        disabled={storing || sqlDirty}
+                        onClick={() => {
+                          setRunMenu(false);
+                          setTab('results');
+                          setResultMode('stored');
+                          void store();
+                        }}
+                      >
+                        <Database size={13} aria-hidden="true" />
+                        <span>
+                          Run and store
+                          <small>
+                            {sqlDirty
+                              ? 'Save first: stored results come from saved versions'
+                              : 'Replace the stored result its charts are drawn from'}
+                          </small>
+                        </span>
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
             )}
           </div>
           {paramsOpen && (
-            <section className="parameters" aria-label="Parameters">
-              <div className="parameters-head">
-                <h3>Parameters</h3>
-                {!readOnly && missing.length > 0 && (
-                  <button
-                    type="button"
-                    className="studio-button"
-                    onClick={() =>
-                      update('parameters', [
-                        ...draft.parameters,
-                        ...missing.map((name) => ({
-                          name,
-                          type: 'text' as ParameterType,
-                        })),
-                      ])
-                    }
-                  >
-                    <Wand2 size={13} aria-hidden="true" /> Declare{' '}
-                    {missing.map((name) => `{{${name}}}`).join(', ')}
-                  </button>
-                )}
-                {!readOnly && (
-                  <button
-                    type="button"
-                    className="studio-button"
-                    onClick={() =>
-                      update('parameters', [
-                        ...draft.parameters,
-                        {
-                          name: `param_${draft.parameters.length + 1}`,
-                          type: 'text',
-                        },
-                      ])
-                    }
-                  >
-                    <Plus size={13} aria-hidden="true" /> Add
-                  </button>
-                )}
-              </div>
-              {draft.parameters.length === 0 ? (
-                <p className="studio-muted">
-                  None. Write <code>{'{{name}}'}</code> in the SQL to add one.
-                </p>
-              ) : (
-                <table className="parameter-table">
-                  <thead>
-                    <tr>
-                      <th scope="col">Name</th>
-                      <th scope="col">Type</th>
-                      <th scope="col">Default</th>
-                      <th scope="col">Value for this run</th>
-                      {!readOnly && (
-                        <th scope="col">
-                          <span className="sr-only">Remove</span>
-                        </th>
-                      )}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {draft.parameters.map((parameter, index) => {
-                      const change = (patch: Partial<ParameterDefinition>) =>
-                        update(
-                          'parameters',
-                          draft.parameters.map((entry, at) =>
-                            at === index ? { ...entry, ...patch } : entry,
-                          ),
-                        );
-                      return (
-                        <tr key={index}>
-                          <td>
-                            <input
-                              className="studio-input mono"
-                              value={parameter.name}
-                              disabled={readOnly}
-                              aria-label="Parameter name"
-                              onChange={(event) =>
-                                change({ name: event.target.value })
-                              }
-                            />
-                          </td>
-                          <td>
-                            <select
-                              className="studio-input"
-                              value={parameter.type}
-                              disabled={readOnly}
-                              aria-label="Parameter type"
-                              onChange={(event) =>
-                                change({
-                                  type: event.target.value as ParameterType,
-                                })
-                              }
-                            >
-                              {PARAMETER_TYPES.map((type) => (
-                                <option key={type} value={type}>
-                                  {type}
-                                </option>
-                              ))}
-                            </select>
-                            {parameter.type === 'enum' && (
-                              <input
-                                className="studio-input"
-                                placeholder="option, option"
-                                value={(parameter.options ?? []).join(', ')}
-                                disabled={readOnly}
-                                aria-label="Enum options"
-                                onChange={(event) =>
-                                  change({
-                                    options: event.target.value
-                                      .split(',')
-                                      .map((option) => option.trim())
-                                      .filter(Boolean),
-                                  })
-                                }
-                              />
-                            )}
-                          </td>
-                          <td>
-                            <input
-                              className="studio-input"
-                              value={
-                                parameter.default === undefined ||
-                                parameter.default === null
-                                  ? ''
-                                  : String(parameter.default as string)
-                              }
-                              disabled={readOnly}
-                              placeholder="none"
-                              aria-label="Parameter default"
-                              onChange={(event) => {
-                                const { default: _, ...rest } = parameter;
-                                update(
-                                  'parameters',
-                                  draft.parameters.map((entry, at) =>
-                                    at === index
-                                      ? event.target.value === ''
-                                        ? rest
-                                        : {
-                                            ...rest,
-                                            default: event.target.value,
-                                          }
-                                      : entry,
-                                  ),
-                                );
-                              }}
-                            />
-                          </td>
-                          <td>
-                            <input
-                              className="studio-input"
-                              value={values[parameter.name] ?? ''}
-                              placeholder="default"
-                              aria-label={`Value of ${parameter.name}`}
-                              onChange={(event) =>
-                                setValues((current) => ({
-                                  ...current,
-                                  [parameter.name]: event.target.value,
-                                }))
-                              }
-                            />
-                          </td>
-                          {!readOnly && (
-                            <td>
-                              <button
-                                type="button"
-                                className="studio-icon-button"
-                                aria-label={`Remove ${parameter.name}`}
-                                onClick={() =>
-                                  update(
-                                    'parameters',
-                                    draft.parameters.filter(
-                                      (_, at) => at !== index,
-                                    ),
-                                  )
-                                }
-                              >
-                                <Trash2 size={14} aria-hidden="true" />
-                              </button>
-                            </td>
-                          )}
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              )}
-            </section>
+            <ParametersPanel
+              parameters={draft.parameters}
+              onChange={(parameters) => update('parameters', parameters)}
+              readOnly={readOnly}
+              missing={missing}
+              values={values}
+              onValues={setValues}
+            />
           )}
         </section>
 
@@ -1678,23 +1454,26 @@ export function Workbench({
             {tab === 'results' && (
               <>
                 {hasStored && (
-                  <fieldset className="segmented">
-                    <legend className="sr-only">Which result</legend>
-                    <button
-                      type="button"
-                      aria-pressed={resultMode === 'stored'}
-                      onClick={() => setResultMode('stored')}
-                    >
-                      Stored result
-                    </button>
-                    <button
-                      type="button"
-                      aria-pressed={resultMode === 'preview'}
-                      onClick={() => setResultMode('preview')}
-                    >
-                      Preview
-                    </button>
-                  </fieldset>
+                  <div className="result-mode">
+                    <fieldset className="segmented">
+                      <legend className="sr-only">Which result</legend>
+                      <button
+                        type="button"
+                        aria-pressed={resultMode === 'stored'}
+                        onClick={() => setResultMode('stored')}
+                      >
+                        Stored result
+                      </button>
+                      <button
+                        type="button"
+                        aria-pressed={resultMode === 'preview'}
+                        onClick={() => setResultMode('preview')}
+                      >
+                        Preview
+                      </button>
+                    </fieldset>
+                    <HelpTip topic="results" />
+                  </div>
                 )}
                 {hasStored && resultMode === 'stored' ? (
                   <>
@@ -1723,22 +1502,39 @@ export function Workbench({
                       >
                         <RefreshCw size={13} aria-hidden="true" /> Reload
                       </button>
-                      {editor && !query?.archivedAt && (
-                        <button
-                          type="button"
-                          className="studio-button primary"
-                          disabled={storing || sqlDirty}
-                          title={
-                            sqlDirty
-                              ? 'Save first: stored results come from saved versions'
-                              : undefined
-                          }
-                          onClick={() => void store()}
-                        >
-                          <Play size={13} aria-hidden="true" />
-                          {storing ? 'Running…' : 'Run and store now'}
-                        </button>
-                      )}
+                      {editor &&
+                        !query?.archivedAt &&
+                        (storing || storedRunning ? (
+                          <button
+                            type="button"
+                            className="studio-button cancel-run"
+                            disabled={cancelling}
+                            title="Stop every run of this query in progress"
+                            onClick={() => void cancelRun('stored')}
+                          >
+                            <Square
+                              size={11}
+                              aria-hidden="true"
+                              fill="currentColor"
+                            />
+                            {cancelling ? 'Cancelling…' : 'Cancel run'}
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="studio-button primary"
+                            disabled={sqlDirty}
+                            title={
+                              sqlDirty
+                                ? 'Save first: stored results come from saved versions'
+                                : undefined
+                            }
+                            onClick={() => void store()}
+                          >
+                            <Play size={13} aria-hidden="true" />
+                            Run and store now
+                          </button>
+                        ))}
                     </div>
                     {stored?.networks.some(
                       (entry) => entry.lastAttempt?.error,
@@ -1796,13 +1592,23 @@ export function Workbench({
                 ) : (
                   <>
                     <ErrorBox error={previewError} />
-                    {preview && (
+                    {preview && previewOf.explain && (
+                      <QueryPlan
+                        preview={preview}
+                        analyze={previewOf.explain === 'analyze'}
+                        selection={previewOf.selection}
+                      />
+                    )}
+                    {preview && !previewOf.explain && (
                       <ResultsTable
                         columns={preview.columns}
                         rows={preview.rows}
                         name={draft.slug || 'preview'}
                         footer={
                           <>
+                            {previewOf.selection && (
+                              <span className="badge">Selection only</span>
+                            )}
                             {preview.truncated && (
                               <span className="badge warn">
                                 First {preview.rowCount.toLocaleString()} rows
@@ -1830,7 +1636,9 @@ export function Workbench({
                       <p className="studio-muted">
                         {running
                           ? 'Running…'
-                          : 'Run the SQL to preview up to 10,000 rows. Nothing is stored.'}
+                          : cancelled
+                            ? 'Run cancelled.'
+                            : 'Run the SQL to preview up to 10,000 rows. Nothing is stored.'}
                       </p>
                     )}
                   </>
@@ -1876,199 +1684,83 @@ export function Workbench({
             )}
 
             {tab === 'versions' && (
-              <div className="versions">
-                <ol className="version-list">
-                  {versions.map((version) => (
-                    <li key={version.id}>
-                      <button
-                        type="button"
-                        aria-pressed={selectedVersion === version.version}
-                        onClick={() =>
-                          setSelectedVersion(
-                            selectedVersion === version.version
-                              ? null
-                              : version.version,
-                          )
-                        }
-                      >
-                        <strong>v{version.version}</strong>
-                        <span>{version.note || 'No note'}</span>
-                        <small>
-                          {version.createdBy ?? 'unknown'} ·{' '}
-                          {when(version.createdAt)}
-                        </small>
-                      </button>
-                    </li>
-                  ))}
-                </ol>
-                {selected && (
-                  <div className="version-diff">
-                    <div className="version-diff-head">
-                      <span>
-                        v{selected.version} →{' '}
-                        {sqlDirty ? 'your draft' : 'current'}
-                      </span>
-                      {!readOnly && (
-                        <button
-                          type="button"
-                          className="studio-button"
-                          onClick={() => {
-                            update('sql', selected.sql);
-                            update('parameters', selected.parameters);
-                          }}
-                        >
-                          Load into editor
-                        </button>
-                      )}
-                    </div>
-                    <pre className="diff">
-                      {diffLines(selected.sql, draft.sql).map((line, index) => (
-                        <span key={index} className={`diff-${line.kind}`}>
-                          {line.kind === 'added'
-                            ? '+ '
-                            : line.kind === 'removed'
-                              ? '- '
-                              : '  '}
-                          {line.text}
-                          {'\n'}
-                        </span>
-                      ))}
-                    </pre>
-                  </div>
-                )}
-              </div>
+              <VersionsPanel
+                versions={versions}
+                selected={selected}
+                onSelect={setSelectedVersion}
+                draftSql={draft.sql}
+                sqlDirty={sqlDirty}
+                readOnly={readOnly}
+                onLoad={(version) => {
+                  update('sql', version.sql);
+                  update('parameters', version.parameters);
+                }}
+              />
             )}
           </div>
         </section>
       </section>
 
       {aboutOpen && !creating && (
-        <aside className="workbench-about" aria-label="About this query">
-          <h2>About this query</h2>
-          <section>
-            <h3>Description</h3>
-            {readOnly ? (
-              <p className={draft.description ? '' : 'studio-muted'}>
-                {draft.description || 'No description.'}
-              </p>
-            ) : (
-              <textarea
-                className="studio-input"
-                rows={3}
-                value={draft.description}
-                placeholder="What this query answers"
-                onChange={(event) => update('description', event.target.value)}
-              />
-            )}
-          </section>
-          <section>
-            <h3>
-              Data sources{' '}
-              <span className="count">
-                {tables.length + usedFragments.length}
-              </span>
-            </h3>
-            <ul className="about-list">
-              {tables.map((name) => (
-                <li key={name}>
-                  <Table2 size={13} aria-hidden="true" />
-                  <code>{name}</code>
-                </li>
-              ))}
-              {usedFragments.map((name) => (
-                <li key={name}>
-                  <Puzzle size={13} aria-hidden="true" />
-                  <Link href={`/queries/${name}`}>
-                    <code>{name}</code>
-                  </Link>
-                </li>
-              ))}
-              {!tables.length && !usedFragments.length && (
-                <li className="studio-muted">
-                  {editor ? 'No tables named yet.' : 'Listed for editors.'}
-                </li>
-              )}
-            </ul>
-          </section>
-          {isFragment && dependents && (
-            <section>
-              <h3>
-                Used by <span className="count">{dependents.length}</span>
-              </h3>
-              <ul className="about-list">
-                {dependents.map((entry) => (
-                  <li key={entry.slug}>
-                    {entry.kind === 'fragment' ? (
-                      <Puzzle size={13} aria-hidden="true" />
-                    ) : (
-                      <Database size={13} aria-hidden="true" />
-                    )}
-                    <Link href={`/queries/${entry.slug}`}>{entry.slug}</Link>
-                    <small>
-                      {entry.direct ? '' : 'through a fragment'}
-                      {entry.charts > 0 &&
-                        `${entry.direct ? '' : ' · '}${entry.charts} chart${entry.charts === 1 ? '' : 's'}`}
-                    </small>
-                  </li>
-                ))}
-                {!dependents.length && (
-                  <li className="studio-muted">Not used by any query yet.</li>
-                )}
-              </ul>
-            </section>
-          )}
-          {hasStored && (
-            <section>
-              <h3>
-                Dashboards <span className="count">{dashboards.length}</span>
-              </h3>
-              <ul className="about-list">
-                {dashboards.map((entry) => (
-                  <li key={entry.slug}>
-                    <LayoutDashboard size={13} aria-hidden="true" />
-                    <Link href={`/dashboards/${entry.slug}`}>
-                      {entry.title}
-                    </Link>
-                    <small>
-                      {entry.charts} chart{entry.charts === 1 ? '' : 's'}
-                    </small>
-                  </li>
-                ))}
-                {!dashboards.length && (
-                  <li className="studio-muted">On no dashboard yet.</li>
-                )}
-              </ul>
-            </section>
-          )}
-          {versions.length > 0 && (
-            <section>
-              <h3>
-                History <span className="count">{versions.length}</span>
-              </h3>
-              <ol className="about-list">
-                {versions.slice(0, 5).map((version) => (
-                  <li key={version.id}>
-                    <button
-                      type="button"
-                      className="studio-link"
-                      onClick={() => {
-                        setTab('versions');
-                        setSelectedVersion(version.version);
-                      }}
-                    >
-                      v{version.version}
-                    </button>
-                    <span className="about-note">
-                      {version.note || 'No note'}
-                    </span>
-                    <small>{ago(version.createdAt)}</small>
-                  </li>
-                ))}
-              </ol>
-            </section>
-          )}
-        </aside>
+        <AboutPanel
+          draft={draft}
+          readOnly={readOnly}
+          editor={editor}
+          onUpdate={update}
+          tables={tables}
+          usedFragments={usedFragments}
+          dependents={isFragment ? dependents : null}
+          dashboards={hasStored ? dashboards : null}
+          versions={versions}
+          onOpenVersion={(version) => {
+            setTab('versions');
+            setSelectedVersion(version);
+          }}
+        />
       )}
     </main>
+  );
+}
+
+/** A plan, as Postgres writes it: one block per data source. */
+function QueryPlan({
+  preview,
+  analyze,
+  selection,
+}: {
+  preview: Preview;
+  analyze: boolean;
+  selection: boolean;
+}) {
+  const stacked = preview.columns[0]?.name === 'network';
+  const blocks = new Map<string, string[]>();
+  for (const row of preview.rows) {
+    const key = stacked ? asText(row[0]) : '';
+    const text = asText(row[stacked ? 1 : 0] ?? '');
+    blocks.set(key, [...(blocks.get(key) ?? []), text]);
+  }
+  return (
+    <div className="query-plan">
+      <p className="studio-muted">
+        {analyze
+          ? 'The plan, with what each step took when the query ran.'
+          : 'How the database would run the query; nothing was run.'}{' '}
+        Read it from the most indented line outwards.
+        {selection && ' Of the selection only.'}
+      </p>
+      {[...blocks].map(([network, lines]) => (
+        <section key={network}>
+          {network && <h4>{network}</h4>}
+          <pre>{lines.join('\n')}</pre>
+        </section>
+      ))}
+      {preview.networks
+        .filter((entry) => entry.error)
+        .map((entry) => (
+          <p key={entry.id} className="studio-error">
+            {entry.id}: {entry.error}
+          </p>
+        ))}
+    </div>
   );
 }

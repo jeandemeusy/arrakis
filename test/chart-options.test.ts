@@ -211,6 +211,38 @@ describe('series', () => {
       ['downstream', 'upstream'],
     );
   });
+
+  it('draws a pie from one label and one value, as a share is', () => {
+    const { encoding, options } = finalizeConfig(
+      'pie',
+      parseConfig({
+        builder: {
+          groups: [{ column: 'direction' }],
+          measures: [{ fn: 'count', as: 'n' }],
+        },
+        options: { donut: true },
+      }),
+    );
+    assert.deepEqual(encoding, { x: 'direction', y: ['n'] });
+    assert.equal(options.donut, true);
+    assert.deepEqual(
+      seriesOf('pie', encoding, options, columns, rows, palette).map(
+        (entry) => entry.key,
+      ),
+      ['downstream', 'upstream'],
+    );
+  });
+});
+
+describe('palettes', () => {
+  it('has a dark editorial palette, and keeps neubrutal light', () => {
+    assert.notEqual(
+      paletteOf('editorial', 'dark').surface,
+      paletteOf('editorial').surface,
+    );
+    assert.equal(paletteOf('editorial', 'light'), paletteOf('editorial'));
+    assert.equal(paletteOf('neubrutal', 'dark'), paletteOf('neubrutal'));
+  });
 });
 
 describe('the variables a chart reads', () => {

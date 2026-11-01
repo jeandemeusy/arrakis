@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import {
+  BookOpen,
   Database,
   House,
   LayoutDashboard,
@@ -12,16 +13,19 @@ import {
   LogOut,
   Menu,
   PackageOpen,
+  Activity,
   PanelLeftClose,
   PanelLeftOpen,
   Route,
   Settings,
+  Workflow,
   X,
   type LucideIcon,
 } from 'lucide-react';
 
-import { StyleSwitch } from '../style';
+import { StyleSwitch, ThemeSwitch } from '../style';
 import { api } from './api';
+import { SearchButton } from './search';
 import { setFolded, useFolded, useNav } from './nav';
 import { useSession } from './session';
 
@@ -170,6 +174,8 @@ export function Sidebar() {
           </button>
         </div>
 
+        <SearchButton onOpen={close} />
+
         <nav className="sidebar-nav" aria-label="Main">
           <ul>
             <li>
@@ -250,6 +256,15 @@ export function Sidebar() {
                 onNavigate={close}
               />
             </li>
+            <li>
+              <NavLink
+                href="/lineage"
+                icon={Workflow}
+                label="Lineage"
+                active={within('/lineage')}
+                onNavigate={close}
+              />
+            </li>
             <li className="nav-group">
               <NavLink
                 href="/settings"
@@ -279,13 +294,36 @@ export function Sidebar() {
                     />
                   </li>
                 )}
+                {user && (
+                  <li>
+                    <NavLink
+                      href="/settings/runs"
+                      icon={Activity}
+                      label="Running now"
+                      active={within('/settings/runs')}
+                      onNavigate={close}
+                    />
+                  </li>
+                )}
               </ul>
+            </li>
+            <li>
+              <NavLink
+                href="/guide"
+                icon={BookOpen}
+                label="Guide"
+                active={within('/guide')}
+                onNavigate={close}
+              />
             </li>
           </ul>
         </nav>
 
         <div className="sidebar-foot">
-          <StyleSwitch />
+          <div className="appearance">
+            <StyleSwitch />
+            <ThemeSwitch />
+          </div>
           {user === undefined ? null : user ? (
             <button
               type="button"

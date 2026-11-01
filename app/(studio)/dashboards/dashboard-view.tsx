@@ -3,7 +3,6 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
-  memo,
   startTransition,
   useCallback,
   useEffect,
@@ -13,37 +12,47 @@ import {
 } from 'react';
 import {
   Globe,
-  GripVertical,
   LayoutGrid,
   Lock,
   Pencil,
   Plus,
   Save,
-  Search,
   Settings2,
   SlidersHorizontal,
-  Trash2,
   Type,
   X,
 } from 'lucide-react';
-
 import { asText } from '@/lib/viz/text';
-import { variablesOf } from '@/lib/viz/config';
-
-import { WidgetTile, type WidgetPayload } from '../../viz/widget-tile';
+import { type WidgetPayload } from '../../viz/widget-tile';
 import {
   api,
   ApiError,
   type DashboardRecord,
   type DashboardVariable,
-  type DashboardWidget,
   type Network,
   type SavedVisualization,
   type Visibility,
 } from '../api';
 import { sectionIds, useDashboardSections, useNav } from '../nav';
 import { useSession } from '../session';
-import { TYPE_ICONS } from '../queries/visualizations-panel';
+import { ResizeHandles } from './resize-handles';
+import {
+  type DataResponse,
+  type RunState,
+  LOADING,
+  payloads,
+  keepUnchanged,
+  readsOf,
+  type DraftWidget,
+} from './widget-data';
+import { VariableBar } from './variable-bar';
+import { type TileLink, VisualizationWidget } from './visualization-widget';
+import { TileSettings } from './tile-settings';
+import { TileToolbar } from './tile-toolbar';
+import { ChartPicker } from './chart-picker';
+import { VariablesEditor } from './variables-editor';
+import { HelpTip } from '../help-tip';
+import { ShareButton } from '../share';
 
 /**
  * A dashboard: its variables across the top, its widgets on the grid below.
@@ -53,909 +62,6 @@ import { TYPE_ICONS } from '../queries/visualizations-panel';
  * editor can switch to the layout editor: add charts from any query, reorder,
  * resize, link a chart's clicks to a variable, and save.
  */
-
-/** Heights snap to this, in pixels, from 80 to 1200 (what the store accepts). */
-const HEIGHT_STEP = 40;
-const MIN_HEIGHT = 80;
-const MAX_HEIGHT = 1200;
-
-const snapHeight = (height: number) =>
-  Math.min(
-    MAX_HEIGHT,
-    Math.max(MIN_HEIGHT, Math.round(height / HEIGHT_STEP) * HEIGHT_STEP),
-  );
-
-type Edge = 'corner' | 'right' | 'bottom';
-
-/**
- * Grips on a tile being edited: drag the corner to resize both ways, an edge
- * for one. The width snaps to twelfths of the grid, the height to 40px; the
- * tile follows live, with its size shown while dragging.
- */
-function ResizeHandles({
-  width,
-  height,
-  onResize,
-}: {
-  width: number;
-  height: number;
-  onResize: (size: { width: number; height: number }) => void;
-}) {
-  const grip = useRef<HTMLDivElement>(null);
-  const [dragging, setDragging] = useState<Edge | null>(null);
-  const start = useRef<{
-    x: number;
-    y: number;
-    height: number;
-    left: number;
-    column: number;
-    gap: number;
-  } | null>(null);
-
-  const begin = (edge: Edge) => (event: React.PointerEvent) => {
-    const cell = grip.current?.closest<HTMLElement>('.dashboard-cell');
-    const grid = cell?.parentElement;
-    if (!cell || !grid) return;
-    event.preventDefault();
-    (event.target as Element).setPointerCapture(event.pointerId);
-    const gap = parseFloat(getComputedStyle(grid).columnGap) || 0;
-    const box = grid.getBoundingClientRect();
-    start.current = {
-      x: event.clientX,
-      y: event.clientY,
-      height,
-      left: cell.getBoundingClientRect().left,
-      column: (box.width - gap * 11) / 12,
-      gap,
-    };
-    setDragging(edge);
-  };
-
-  const move = (event: React.PointerEvent) => {
-    const from = start.current;
-    if (!dragging || !from) return;
-    let next = { width, height };
-    if (dragging !== 'bottom') {
-      // As many columns as reach the pointer, counting the gaps between them.
-      const span = Math.round(
-        (event.clientX - from.left + from.gap) / (from.column + from.gap),
-      );
-      next = { ...next, width: Math.min(12, Math.max(1, span)) };
-    }
-    if (dragging !== 'right') {
-      next = {
-        ...next,
-        height: snapHeight(from.height + event.clientY - from.y),
-      };
-    }
-    if (next.width !== width || next.height !== height) onResize(next);
-  };
-
-  const end = () => {
-    start.current = null;
-    setDragging(null);
-  };
-
-  const keys = (edge: Edge) => (event: React.KeyboardEvent) => {
-    const step: Record<string, [number, number]> = {
-      ArrowLeft: [-1, 0],
-      ArrowRight: [1, 0],
-      ArrowUp: [0, -HEIGHT_STEP],
-      ArrowDown: [0, HEIGHT_STEP],
-    };
-    const delta = step[event.key];
-    if (!delta) return;
-    event.preventDefault();
-    onResize({
-      width:
-        edge === 'bottom' ? width : Math.min(12, Math.max(1, width + delta[0])),
-      height: edge === 'right' ? height : snapHeight(height + delta[1]),
-    });
-  };
-
-  const handle = (edge: Edge, label: string) => (
-    <button
-      type="button"
-      className={`resize-handle ${edge}`}
-      aria-label={`${label} (${width}/12 wide, ${height}px high)`}
-      title={label}
-      onPointerDown={begin(edge)}
-      onPointerMove={move}
-      onPointerUp={end}
-      onPointerCancel={end}
-      onKeyDown={keys(edge)}
-    />
-  );
-
-  return (
-    <div className={`resize-grips ${dragging ? 'dragging' : ''}`} ref={grip}>
-      {handle('right', 'Width: drag, or arrow keys')}
-      {handle('bottom', 'Height: drag, or arrow keys')}
-      {handle('corner', 'Size: drag, or arrow keys')}
-      {dragging && (
-        <output className="resize-size">
-          {width}/12 · {height}px
-        </output>
-      )}
-    </div>
-  );
-}
-
-type DataResponse = {
-  vars: Record<string, string | undefined>;
-  widgets: Array<
-    | {
-        id: string;
-        state: 'ok';
-        data: Extract<WidgetPayload, { state: 'ok' }>['data'];
-      }
-    | { id: string; state: 'hidden' | 'text' }
-    | { id: string; state: 'error'; error: { status: number; message: string } }
-  >;
-};
-
-type RunState = {
-  query: string;
-  running: boolean;
-  finishedAt: string | null;
-  failed: boolean;
-};
-
-const LOADING: WidgetPayload = { state: 'loading' };
-
-/**
- * One payload object per data entry, so an unchanged chart is handed the very
- * same props and is not redrawn. Entries are never reused across dashboards,
- * so a module-wide map is safe, and it lets go of them with the data.
- */
-const payloads = new WeakMap<object, WidgetPayload>();
-
-/**
- * The new response, with every widget whose data did not change kept as the
- * very object already on screen — so its tile is not redrawn.
- */
-function keepUnchanged(
-  previous: DataResponse | null,
-  next: DataResponse,
-): DataResponse {
-  if (!previous) return next;
-  const before = new Map(previous.widgets.map((entry) => [entry.id, entry]));
-  return {
-    ...next,
-    widgets: next.widgets.map((entry) => {
-      const old = before.get(entry.id);
-      return old && JSON.stringify(old) === JSON.stringify(entry) ? old : entry;
-    }),
-  };
-}
-
-/** The variables a chart reads, worked out once per chart. */
-const reads = new WeakMap<object, Set<string>>();
-function readsOf(visualization: SavedVisualization): Set<string> {
-  let names = reads.get(visualization);
-  if (!names) {
-    names = variablesOf(visualization.config);
-    reads.set(visualization, names);
-  }
-  return names;
-}
-
-/** A widget being edited: saved ones keep their id, new ones get a local one. */
-type DraftWidget = DashboardWidget & { local?: boolean };
-
-function shortValue(value: string): string {
-  return /^0x[0-9a-f]{16,}$/i.test(value)
-    ? `${value.slice(0, 6)}…${value.slice(-4)}`
-    : value;
-}
-
-function VariableBar({
-  variables,
-  vars,
-  networks,
-  onChange,
-}: {
-  variables: DashboardVariable[];
-  vars: Record<string, string | undefined>;
-  networks: Network[];
-  onChange: (name: string, value: string | undefined) => void;
-}) {
-  return (
-    <div className="dashboard-vars">
-      {variables.map((variable) => {
-        const value = vars[variable.name];
-        if (
-          variable.type === 'range' ||
-          variable.type === 'select' ||
-          variable.type === 'network'
-        ) {
-          const options =
-            variable.type === 'network'
-              ? [
-                  ...(networks.length > 1
-                    ? [{ value: 'all', label: 'All networks' }]
-                    : []),
-                  ...networks.map((network) => ({
-                    value: network.id,
-                    label: network.label,
-                  })),
-                ]
-              : (variable.options ?? []).map((option) => ({
-                  value: option,
-                  label:
-                    variable.labels?.[option] ??
-                    (option === 'all' ? 'All' : option),
-                }));
-          if (variable.type === 'network' && networks.length <= 1) return null;
-          return (
-            <fieldset key={variable.name} className="network-switch">
-              <legend className="sr-only">{variable.label}</legend>
-              {options.map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  aria-pressed={value === option.value}
-                  className={value === option.value ? 'active' : ''}
-                  onClick={() => onChange(variable.name, option.value)}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </fieldset>
-          );
-        }
-        return value ? (
-          <span key={variable.name} className="var-chip">
-            <span>{variable.label}</span>
-            <code title={value}>{shortValue(value)}</code>
-            <button
-              type="button"
-              aria-label={`Clear ${variable.label}`}
-              onClick={() => onChange(variable.name, undefined)}
-            >
-              <X size={12} aria-hidden="true" />
-            </button>
-          </span>
-        ) : (
-          <label key={variable.name} className="var-input">
-            <span>{variable.label}</span>
-            <input
-              className="studio-input mono"
-              placeholder="any"
-              onKeyDown={(event) => {
-                if (event.key === 'Enter')
-                  onChange(
-                    variable.name,
-                    event.currentTarget.value || undefined,
-                  );
-              }}
-              onBlur={(event) =>
-                event.currentTarget.value &&
-                onChange(variable.name, event.currentTarget.value)
-              }
-            />
-          </label>
-        );
-      })}
-    </div>
-  );
-}
-
-/** One widget's data, fetched on its own: for widgets added while editing. */
-function useWidgetData(
-  id: string | null,
-  network: string,
-  vars: Record<string, string | undefined>,
-  skip: boolean,
-): WidgetPayload {
-  const [payload, setPayload] = useState<WidgetPayload>({ state: 'loading' });
-  const search = useMemo(() => {
-    const params = new URLSearchParams({ network });
-    for (const [key, value] of Object.entries(vars))
-      if (value) params.set(`v.${key}`, value);
-    return params.toString();
-  }, [network, vars]);
-  useEffect(() => {
-    if (skip || !id) return;
-    let live = true;
-    api<Extract<WidgetPayload, { state: 'ok' }>['data']>(
-      `/api/v1/visualizations/${id}/data?${search}`,
-    )
-      .then((data) => live && setPayload({ state: 'ok', data }))
-      .catch(
-        (error: ApiError) =>
-          live &&
-          setPayload({
-            state: 'error',
-            error: { status: error.status, message: error.message },
-          }),
-      );
-    return () => {
-      live = false;
-    };
-  }, [id, search, skip]);
-  return payload;
-}
-
-type Link = NonNullable<DashboardWidget['options']['link']>;
-
-type VisualizationWidgetProps = {
-  widget: DraftWidget;
-  payload: WidgetPayload | null;
-  network: string;
-  vars: Record<string, string | undefined>;
-  expanded: string | null;
-  onExpand: (id: string | null) => void;
-  /** Follows the widget's link with a clicked row; stable across renders. */
-  onLink?: (link: Link, row: Record<string, unknown>) => void;
-  /** Its query is being run, or its chart recomputed for new variables. */
-  busy?: 'running' | 'updating';
-};
-
-/**
- * A chart tile on the dashboard. Memoised: a tile redraws only when its own
- * data, its widget or its busy state changes, so switching a variable that
- * three charts read redraws three charts, not thirty.
- */
-const VisualizationWidget = memo(
-  VisualizationWidgetTile,
-  (before, after) =>
-    before.widget === after.widget &&
-    before.payload === after.payload &&
-    before.network === after.network &&
-    before.busy === after.busy &&
-    Boolean(before.onLink) === Boolean(after.onLink) &&
-    (before.expanded === before.widget.id) ===
-      (after.expanded === after.widget.id) &&
-    // Only a tile fetching its own data (while editing) reads the variables.
-    (after.payload !== null || before.vars === after.vars),
-);
-
-function VisualizationWidgetTile({
-  widget,
-  payload,
-  network,
-  vars,
-  expanded,
-  onExpand,
-  onLink,
-  busy,
-}: VisualizationWidgetProps) {
-  const link = widget.options.link;
-  const onSelect =
-    link && onLink
-      ? (row: Record<string, unknown>) => onLink(link, row)
-      : undefined;
-  const own = useWidgetData(
-    widget.visualization?.id ?? null,
-    network,
-    vars,
-    payload !== null,
-  );
-  const { user } = useSession();
-  const visualization = widget.visualization;
-  if (!visualization) {
-    return (
-      <WidgetTile
-        id={widget.id}
-        title={widget.options.title ?? 'Removed chart'}
-        spec={{ type: 'table', encoding: {}, options: {} }}
-        payload={{
-          state: 'error',
-          error: { status: 404, message: 'This chart was removed.' },
-        }}
-        width={12}
-        height={widget.height}
-        expanded={expanded}
-        onExpand={onExpand}
-      />
-    );
-  }
-  return (
-    <WidgetTile
-      id={widget.id}
-      title={widget.options.title ?? visualization.title}
-      spec={{
-        type: visualization.type,
-        encoding: visualization.config.encoding,
-        options: visualization.config.options,
-      }}
-      payload={payload ?? own}
-      subtitle={visualization.queryTitle}
-      busy={busy}
-      width={12}
-      height={widget.height}
-      note={widget.options.note}
-      expanded={expanded}
-      onExpand={onExpand}
-      onSelect={onSelect}
-      // Every figure leads to the query it is computed from — unless that
-      // query is private and the viewer could not open it anyway.
-      source={
-        visualization.queryVisibility !== 'private' || user
-          ? {
-              href: `/queries/${visualization.query}?tab=charts&chart=${visualization.id}`,
-              label: `Open the query behind this: ${visualization.queryTitle}`,
-            }
-          : undefined
-      }
-    />
-  );
-}
-
-/**
- * What a tile shows beyond its chart: a title and note of its own, what a
- * click on it sets, and when it is shown at all. Edited in the side drawer.
- */
-function TileSettings({
-  widget,
-  variables,
-  onChange,
-  onRemove,
-}: {
-  widget: DraftWidget;
-  variables: DashboardVariable[];
-  onChange: (widget: DraftWidget) => void;
-  onRemove: () => void;
-}) {
-  const textVars = variables.filter(
-    (variable) => variable.type === 'text' || variable.type === 'select',
-  );
-  const options = widget.options;
-  const set = (patch: Partial<DraftWidget['options']>) => {
-    const next = { ...options, ...patch };
-    for (const key of Object.keys(next) as Array<keyof typeof next>) {
-      if (next[key] === undefined || next[key] === '') delete next[key];
-    }
-    onChange({ ...widget, options: next });
-  };
-  const columns = widget.visualization?.config.encoding
-    ? [
-        ...new Set(
-          [
-            widget.visualization.config.encoding.x,
-            widget.visualization.config.encoding.series,
-            widget.visualization.config.encoding.row,
-            ...(widget.visualization.config.options.columns ?? []),
-          ].filter((name): name is string => Boolean(name)),
-        ),
-      ]
-    : [];
-
-  return (
-    <div className="drawer-body">
-      {widget.visualization && (
-        <p className="drawer-source">
-          <span>
-            {widget.visualization.title}
-            <small>{widget.visualization.queryTitle}</small>
-          </span>
-          <Link
-            href={`/queries/${widget.visualization.query}?tab=charts&chart=${widget.visualization.id}`}
-          >
-            Open chart
-          </Link>
-        </p>
-      )}
-      <p className="drawer-size">
-        {widget.width}/12 wide · {widget.height}px high
-        <small>Drag the tile&apos;s corner to resize it.</small>
-      </p>
-      <label className="studio-field">
-        <span>Title (defaults to the chart&apos;s)</span>
-        <input
-          value={options.title ?? ''}
-          placeholder={widget.visualization?.title}
-          onChange={(event) => set({ title: event.target.value })}
-        />
-      </label>
-      <label className="studio-field">
-        <span>Note under the chart</span>
-        <input
-          value={options.note ?? ''}
-          onChange={(event) => set({ note: event.target.value })}
-        />
-      </label>
-      <fieldset className="link-fields">
-        <legend>Clicking a row or bar sets</legend>
-        <select
-          className="studio-input"
-          aria-label="Variable to set"
-          value={options.link?.var ?? ''}
-          onChange={(event) =>
-            set({
-              link: event.target.value
-                ? {
-                    column: options.link?.column ?? columns[0] ?? '',
-                    var: event.target.value,
-                    dashboard: options.link?.dashboard,
-                  }
-                : undefined,
-            })
-          }
-        >
-          <option value="">nothing</option>
-          {textVars.map((variable) => (
-            <option key={variable.name} value={variable.name}>
-              {variable.label}
-            </option>
-          ))}
-        </select>
-        {options.link && (
-          <>
-            <span>to its</span>
-            <input
-              aria-label="Column"
-              className="studio-input mono"
-              list={`columns-${widget.id}`}
-              value={options.link.column}
-              onChange={(event) =>
-                options.link &&
-                set({
-                  link: { ...options.link, column: event.target.value },
-                })
-              }
-            />
-            <datalist id={`columns-${widget.id}`}>
-              {columns.map((column) => (
-                <option key={column} value={column}>
-                  {column}
-                </option>
-              ))}
-            </datalist>
-            <span>on dashboard</span>
-            <input
-              aria-label="Target dashboard"
-              className="studio-input mono"
-              placeholder="this one"
-              value={options.link.dashboard ?? ''}
-              onChange={(event) =>
-                options.link &&
-                set({
-                  link: {
-                    ...options.link,
-                    dashboard: event.target.value || undefined,
-                  },
-                })
-              }
-            />
-          </>
-        )}
-      </fieldset>
-      <label className="studio-field">
-        <span>Only show when this variable is set</span>
-        <select
-          value={options.requires ?? ''}
-          onChange={(event) =>
-            set({ requires: event.target.value || undefined })
-          }
-        >
-          <option value="">always show</option>
-          {variables.map((variable) => (
-            <option key={variable.name} value={variable.name}>
-              {variable.label}
-            </option>
-          ))}
-        </select>
-      </label>
-      <button type="button" className="studio-button danger" onClick={onRemove}>
-        <Trash2 size={13} aria-hidden="true" /> Remove from dashboard
-      </button>
-    </div>
-  );
-}
-
-/**
- * The few controls a tile has while editing, floating over its top-right
- * corner: a grip to drag it elsewhere (or move it with the arrow keys), its
- * settings, and remove.
- */
-function TileToolbar({
-  label,
-  selected,
-  onDragStart,
-  onDragEnd,
-  onMove,
-  onSettings,
-  onRemove,
-}: {
-  label: string;
-  selected: boolean;
-  onDragStart: () => void;
-  onDragEnd: () => void;
-  onMove?: (by: -1 | 1) => void;
-  onSettings?: () => void;
-  onRemove: () => void;
-}) {
-  return (
-    <div className="tile-toolbar">
-      <button
-        type="button"
-        className="tile-tool grip"
-        draggable
-        aria-label={`Move ${label}: drag, or use the arrow keys`}
-        title="Drag to move"
-        onDragStart={(event) => {
-          event.dataTransfer.effectAllowed = 'move';
-          event.dataTransfer.setData('text/plain', label);
-          const cell = (event.target as Element).closest(
-            '.dashboard-cell, .dashboard-heading',
-          );
-          if (cell) event.dataTransfer.setDragImage(cell, 24, 24);
-          onDragStart();
-        }}
-        onDragEnd={onDragEnd}
-        onKeyDown={(event) => {
-          if (!onMove) return;
-          if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
-            event.preventDefault();
-            onMove(-1);
-          } else if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
-            event.preventDefault();
-            onMove(1);
-          }
-        }}
-      >
-        <GripVertical size={14} aria-hidden="true" />
-      </button>
-      {onSettings && (
-        <button
-          type="button"
-          className="tile-tool"
-          aria-label={`Settings of ${label}`}
-          aria-pressed={selected}
-          title="Settings"
-          onClick={onSettings}
-        >
-          <Settings2 size={14} aria-hidden="true" />
-        </button>
-      )}
-      <button
-        type="button"
-        className="tile-tool danger"
-        aria-label={`Remove ${label}`}
-        title="Remove"
-        onClick={onRemove}
-      >
-        <Trash2 size={14} aria-hidden="true" />
-      </button>
-    </div>
-  );
-}
-
-/** Adding a chart: every saved chart, by query, found as you type. */
-function ChartPicker({
-  catalog,
-  onPick,
-  onClose,
-}: {
-  catalog: SavedVisualization[];
-  onPick: (visualization: SavedVisualization) => void;
-  onClose: () => void;
-}) {
-  const [search, setSearch] = useState('');
-  const frame = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const close = (event: Event) => {
-      if (event instanceof KeyboardEvent) {
-        if (event.key === 'Escape') onClose();
-      } else if (!frame.current?.contains(event.target as Node)) onClose();
-    };
-    document.addEventListener('mousedown', close);
-    document.addEventListener('keydown', close);
-    return () => {
-      document.removeEventListener('mousedown', close);
-      document.removeEventListener('keydown', close);
-    };
-  }, [onClose]);
-  const needle = search.trim().toLowerCase();
-  const groups = new Map<string, SavedVisualization[]>();
-  for (const visualization of catalog) {
-    if (
-      needle &&
-      !`${visualization.title} ${visualization.queryTitle} ${visualization.type}`
-        .toLowerCase()
-        .includes(needle)
-    )
-      continue;
-    const list = groups.get(visualization.queryTitle) ?? [];
-    list.push(visualization);
-    groups.set(visualization.queryTitle, list);
-  }
-  return (
-    <div className="chart-picker" ref={frame}>
-      <label className="chart-picker-search">
-        <Search size={14} aria-hidden="true" />
-        <input
-          // oxlint-disable-next-line jsx-a11y/no-autofocus -- the picker opens to be typed into
-          autoFocus
-          placeholder="Find a chart or query…"
-          aria-label="Find a chart"
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-        />
-      </label>
-      <div className="chart-picker-list">
-        {[...groups.entries()].map(([query, list]) => (
-          <section key={query}>
-            <h4>{query}</h4>
-            {list.map((visualization) => {
-              const Icon = TYPE_ICONS[visualization.type];
-              return (
-                <button
-                  key={visualization.id}
-                  type="button"
-                  onClick={() => onPick(visualization)}
-                >
-                  <Icon size={14} aria-hidden="true" />
-                  <span>{visualization.title}</span>
-                  <small>{visualization.type}</small>
-                </button>
-              );
-            })}
-          </section>
-        ))}
-        {!groups.size && (
-          <p className="studio-muted">
-            {catalog.length
-              ? 'No chart matches.'
-              : 'No charts yet: make one on a query first.'}
-          </p>
-        )}
-      </div>
-    </div>
-  );
-}
-
-/**
- * A variable's choices as one line, `value` or `value=Label` separated by
- * commas: `7d=Last 7 days, 31d=Last 30 days, all`. Kept as typed until the
- * field loses focus, so a half-written entry is not tidied away mid-word.
- */
-function OptionsInput({
-  variable,
-  onChange,
-}: {
-  variable: DashboardVariable;
-  onChange: (options: string[], labels?: Record<string, string>) => void;
-}) {
-  const written = (variable.options ?? [])
-    .map((option) =>
-      variable.labels?.[option]
-        ? `${option}=${variable.labels[option]}`
-        : option,
-    )
-    .join(', ');
-  const [draft, setDraft] = useState<string | null>(null);
-  return (
-    <input
-      className="studio-input"
-      aria-label="Options"
-      placeholder="7d=Last 7 days, 30d, all"
-      value={draft ?? written}
-      onChange={(event) => setDraft(event.target.value)}
-      onBlur={() => {
-        if (draft === null) return;
-        const options: string[] = [];
-        const labels: Record<string, string> = {};
-        for (const entry of draft.split(',')) {
-          const [value, ...rest] = entry.split('=');
-          const option = value.trim();
-          if (!option) continue;
-          options.push(option);
-          const label = rest.join('=').trim();
-          if (label) labels[option] = label;
-        }
-        setDraft(null);
-        onChange(options, Object.keys(labels).length ? labels : undefined);
-      }}
-    />
-  );
-}
-
-function VariablesEditor({
-  variables,
-  onChange,
-}: {
-  variables: DashboardVariable[];
-  onChange: (variables: DashboardVariable[]) => void;
-}) {
-  const set = (at: number, patch: Partial<DashboardVariable>) =>
-    onChange(
-      variables.map((variable, index) =>
-        index === at ? { ...variable, ...patch } : variable,
-      ),
-    );
-  return (
-    <div className="variables-editor">
-      {variables.map((variable, at) => (
-        <div className="variable-row" key={at}>
-          <input
-            className="studio-input mono"
-            aria-label="Variable name"
-            value={variable.name}
-            onChange={(event) => set(at, { name: event.target.value })}
-          />
-          <input
-            className="studio-input"
-            aria-label="Label"
-            value={variable.label}
-            onChange={(event) => set(at, { label: event.target.value })}
-          />
-          <select
-            className="studio-input"
-            aria-label="Type"
-            value={variable.type}
-            onChange={(event) => {
-              const type = event.target.value as DashboardVariable['type'];
-              set(at, {
-                type,
-                options:
-                  type === 'range'
-                    ? ['7d', '30d', '90d', 'all']
-                    : type === 'select'
-                      ? (variable.options ?? ['a', 'b'])
-                      : undefined,
-                default:
-                  type === 'network'
-                    ? 'all'
-                    : type === 'range'
-                      ? '30d'
-                      : variable.default,
-              });
-            }}
-          >
-            <option value="range">time range</option>
-            <option value="network">network</option>
-            <option value="text">text (set by clicks)</option>
-            <option value="select">select</option>
-          </select>
-          {(variable.type === 'range' || variable.type === 'select') && (
-            <OptionsInput
-              variable={variable}
-              onChange={(options, labels) => set(at, { options, labels })}
-            />
-          )}
-          <input
-            className="studio-input"
-            aria-label="Default"
-            placeholder="default"
-            value={variable.default ?? ''}
-            onChange={(event) =>
-              set(at, { default: event.target.value || undefined })
-            }
-          />
-          <button
-            type="button"
-            className="studio-icon-button"
-            aria-label={`Remove ${variable.name}`}
-            onClick={() =>
-              onChange(variables.filter((_, index) => index !== at))
-            }
-          >
-            <Trash2 size={13} aria-hidden="true" />
-          </button>
-        </div>
-      ))}
-      <button
-        type="button"
-        className="studio-button"
-        onClick={() =>
-          onChange([
-            ...variables,
-            {
-              name: `var_${variables.length + 1}`,
-              label: 'Selection',
-              type: 'text',
-            },
-          ])
-        }
-      >
-        <Plus size={12} aria-hidden="true" /> Variable
-      </button>
-    </div>
-  );
-}
 
 export function DashboardView({
   slug,
@@ -1161,7 +267,7 @@ export function DashboardView({
     [router, slug],
   );
   const followLink = useCallback(
-    (link: Link, row: Record<string, unknown>) => {
+    (link: TileLink, row: Record<string, unknown>) => {
       const value = row[link.column];
       if (value !== null && value !== undefined)
         setVar(link.var, asText(value), link.dashboard);
@@ -1587,15 +693,34 @@ export function DashboardView({
             </>
           )}
         </div>
-        {user && !editing && (
+        {!editing && (
           <div className="workbench-actions">
-            <button
-              type="button"
-              className="studio-button"
-              onClick={startEditing}
-            >
-              <Pencil size={13} aria-hidden="true" /> Edit
-            </button>
+            <ShareButton
+              what="dashboard"
+              visibility={dashboard.visibility}
+              plainPath={`/dashboards/${slug}`}
+              path={() => window.location.pathname + window.location.search}
+              viewLabel="the filters as they are now"
+              canEdit={Boolean(user)}
+              onVisibility={async (visibility) => {
+                await api(`/api/v1/dashboards/${slug}`, {
+                  method: 'PATCH',
+                  body: { visibility },
+                });
+                setDashboard((current) =>
+                  current ? { ...current, visibility } : current,
+                );
+              }}
+            />
+            {user && (
+              <button
+                type="button"
+                className="studio-button"
+                onClick={startEditing}
+              >
+                <Pencil size={13} aria-hidden="true" /> Edit
+              </button>
+            )}
           </div>
         )}
       </header>
@@ -1804,7 +929,7 @@ export function DashboardView({
                 What viewers change. Charts read them through their steps: a
                 range step reads <code>range</code>, a filter can read any
                 variable. A text variable is usually set by clicking a linked
-                chart.
+                chart. <HelpTip topic="dashboards" />
               </p>
               <VariablesEditor
                 variables={settings.variables}

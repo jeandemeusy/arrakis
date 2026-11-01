@@ -570,6 +570,7 @@ const GROUP_TITLES: Partial<Record<VisualizationType, string[]>> = {
   area: ['X axis'],
   bar: ['X axis'],
   share: ['Slices'],
+  pie: ['Slices'],
   heatmap: ['Columns', 'Rows'],
 };
 
@@ -668,7 +669,9 @@ export function BuilderForm({
       </Section>
 
       {type !== 'number' && type !== 'table' && type !== 'cohort' && (
-        <Section title={type === 'share' ? 'Split into' : 'Over'}>
+        <Section
+          title={type === 'share' || type === 'pie' ? 'Split into' : 'Over'}
+        >
           {(GROUP_TITLES[type] ?? ['Group']).map((label, at) =>
             shape.groups > 1 ? (
               <div key={label} className="builder-labelled">
