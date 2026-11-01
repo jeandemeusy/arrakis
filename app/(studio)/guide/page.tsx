@@ -376,10 +376,11 @@ export default function GuidePage() {
           <Section id="dashboards">
             <p>
               A dashboard&apos;s <strong>variables</strong> are the controls
-              across its top: a time range, a data source, or a text value such
-              as a selected account. A chart reads them through its filters and
-              range step, so changing one redraws only the charts that read it.
-              Variables travel in the address, so any view can be linked to.
+              across its top: a time range (or a range of blocks, over a block
+              column), a data source, or a text value such as a selected
+              account. A chart reads them through its filters and range step, so
+              changing one redraws only the charts that read it. Variables
+              travel in the address, so any view can be linked to.
             </p>
             <p>
               <strong>Edit</strong> turns the page into its own editor: add
@@ -407,6 +408,14 @@ export default function GuidePage() {
               same name that came from elsewhere is only overwritten when you
               say so. The queries then run on your data sources, so they must
               find the tables they expect there.
+            </p>
+            <p>
+              <strong>Remove…</strong> beside an imported bundle archives what
+              it created, and a newer file archives what it dropped. Anything
+              still used from outside the bundle — a fragment one of your
+              queries reads, a chart on one of your dashboards — is kept, and
+              the list says why. Nothing is deleted: importing the bundle again
+              brings it all back.
             </p>
           </Section>
 

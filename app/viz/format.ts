@@ -83,5 +83,8 @@ export function formatCategory(value: unknown, type?: string): string {
   }
   if (/^0x[0-9a-f]{16,}$/i.test(text))
     return `${text.slice(0, 6)}…${text.slice(-4)}`;
+  // Whole numbers on an axis, block numbers say, read better grouped.
+  if ((type === 'bigint' || type === 'integer') && /^-?\d+$/.test(text))
+    return INTEGER.format(Number(text));
   return text;
 }

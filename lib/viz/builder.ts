@@ -32,8 +32,13 @@ export type Unit =
 
 export type Dimension = {
   column: string;
-  /** For a time column: how to bucket it. Absent uses the values as they are. */
+  /**
+   * For a time column: how to bucket it; for a number column, `auto` bins it
+   * to suit the window. Absent uses the values as they are.
+   */
   unit?: Unit;
+  /** A number column's bin width, instead of `auto`. */
+  size?: number;
   /** The output column's name; defaults from the unit (`day`, `weekday`…). */
   as?: string;
 };
@@ -54,10 +59,19 @@ export type BuilderMeasure = Measure & {
 export type Builder = {
   filters?: BuilderFilter[];
   /**
-   * The time window. `var` names the dashboard range variable (default
-   * `range`); `fixed` pins one (`31d`, `90d`); `from` never goes before a date.
+   * The window. `var` names the dashboard range variable (default `range`);
+   * `fixed` pins one (`31d`, `90d`, or `500000` over a number column);
+   * `from` never goes before a date. Over a number column such as a block,
+   * `anchor` names the column holding where the window ends (the head block);
+   * without it, the window ends at the newest value.
    */
-  window?: { column: string; var?: string; fixed?: string; from?: string };
+  window?: {
+    column: string;
+    var?: string;
+    fixed?: string;
+    from?: string;
+    anchor?: string;
+  };
   /** x first; a heatmap's rows second; a table may group by several. */
   groups?: Dimension[];
   /** Lines, areas and bars: one series per value of this column. */
@@ -100,7 +114,7 @@ const UNIT_NAMES: Record<Unit, string> = {
 };
 
 export const UNIT_LABELS: Record<Unit, string> = {
-  auto: 'Day or week, by range',
+  auto: 'By range: day or week, or bins of a number',
   hour: 'Hour',
   day: 'Day',
   week: 'Week',
@@ -112,8 +126,8 @@ export const UNIT_LABELS: Record<Unit, string> = {
 /** The output name a dimension gets. */
 export function dimensionName(dimension: Dimension): string {
   if (dimension.as) return dimension.as;
-  if (!dimension.unit) return dimension.column;
-  const name = UNIT_NAMES[dimension.unit];
+  if (!dimension.unit && dimension.size === undefined) return dimension.column;
+  const name = UNIT_NAMES[dimension.unit ?? 'auto'];
   return name === dimension.column
     ? `${dimension.column}_${dimension.unit}`
     : name;
@@ -175,6 +189,7 @@ export function compileBuilder(
     op: 'range',
     column,
     anchor: 'now',
+    ...(window?.anchor ? { anchorColumn: window.anchor } : {}),
     ...(window?.fixed
       ? { window: window.fixed }
       : { var: window?.var ?? 'range' }),
@@ -192,13 +207,17 @@ export function compileBuilder(
     if (window.from) steps.push(from(window.column));
   }
   for (const dimension of [...dims, ...(split ? [split] : [])]) {
-    if (!dimension.unit) continue;
+    if (!dimension.unit && dimension.size === undefined) continue;
     steps.push({
       op: 'bucket',
       column: dimension.column,
-      unit: dimension.unit,
+      unit: dimension.unit ?? 'auto',
       as: dimensionName(dimension),
+      ...(dimension.size !== undefined ? { size: dimension.size } : {}),
       ...(dimension.unit === 'auto' && window?.var ? { var: window.var } : {}),
+      ...(dimension.unit === 'auto' && window?.fixed
+        ? { window: window.fixed }
+        : {}),
     });
   }
   const plain: Measure[] = measures.map(({ fn, columns, as }) => ({
@@ -281,6 +300,7 @@ export function compileBuilder(
   const timeLike =
     Boolean(rolling) ||
     Boolean(dims[0]?.unit) ||
+    dims[0]?.size !== undefined ||
     (dims[0] !== undefined && dims[0].column === window?.column);
   let sort = builder.sort?.length ? builder.sort : undefined;
   if (!sort && rankName) sort = [{ column: rankName }];
@@ -395,9 +415,16 @@ function dimension(input: unknown, where: string): Dimension {
     throw badRequest(`${where}.unit must be one of ${UNITS.join(', ')}`);
   }
   const as = text(raw.as, `${where}.as`, false);
+  let size: number | undefined;
+  if (raw.size !== undefined && raw.size !== null && raw.size !== '') {
+    size = Number(raw.size);
+    if (!(size > 0) || !Number.isFinite(size))
+      throw badRequest(`${where}.size must be a positive number`);
+  }
   return {
     column: text(raw.column, `${where}.column`) ?? '',
     ...(unit ? { unit } : {}),
+    ...(size !== undefined ? { size } : {}),
     ...(as ? { as } : {}),
   };
 }
@@ -435,8 +462,10 @@ export function parseBuilder(input: unknown): Builder {
     const name = text(window.var, 'builder.window.var', false);
     const fixed = text(window.fixed, 'builder.window.fixed', false);
     const since = text(window.from, 'builder.window.from', false);
+    const anchor = text(window.anchor, 'builder.window.anchor', false);
     if (name) out.window.var = name;
     if (fixed) out.window.fixed = fixed;
+    if (anchor) out.window.anchor = anchor;
     if (since) {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(since))
         throw badRequest('builder.window.from must be a date, YYYY-MM-DD');

@@ -6,7 +6,12 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { buildSql, rangeDays } from '../lib/viz/transform';
+import {
+  buildSql,
+  niceSize,
+  rangeCount,
+  rangeDays,
+} from '../lib/viz/transform';
 import { parseVariables } from '../lib/viz/store';
 
 const base = {
@@ -54,6 +59,69 @@ describe('range and bucket steps', () => {
     assert.equal(rangeDays('2w'), 14);
     assert.equal(rangeDays('12h'), 0.5);
     assert.equal(rangeDays('all'), null);
+  });
+});
+
+describe('windows and bins over a number column', () => {
+  const blocks = {
+    sql: 'SELECT * FROM t',
+    columns: [
+      { name: 'block', type: 'bigint' as const },
+      { name: 'head', type: 'bigint' as const },
+      { name: 'gigabytes', type: 'float' as const },
+    ],
+  };
+
+  it('counts a window back from the newest value, or from an anchor column', () => {
+    const latest = buildSql(blocks, [{ op: 'range', column: 'block' }], {
+      range: '500000',
+    });
+    assert.match(latest.sql, /"block" > \(SELECT max\("block"\)/);
+    assert.deepEqual(latest.values, [500000]);
+    const anchored = buildSql(
+      blocks,
+      [{ op: 'range', column: 'block', window: '1000', anchorColumn: 'head' }],
+      {},
+    );
+    assert.match(anchored.sql, /"block" > "head" - \$1::numeric/);
+    assert.deepEqual(anchored.values, [1000]);
+  });
+
+  it('refuses a date window over a number column', () => {
+    assert.throws(
+      () =>
+        buildSql(blocks, [{ op: 'range', column: 'block' }], { range: '7d' }),
+      /whole count/,
+    );
+  });
+
+  it('bins to about forty round widths over the window, or a fixed size', () => {
+    const width = (range: string) =>
+      buildSql(
+        blocks,
+        [{ op: 'bucket', column: 'block', unit: 'auto', as: 'period' }],
+        { range },
+      ).values[0];
+    assert.equal(width('100000'), 5000);
+    assert.equal(width('500000'), 20000);
+    assert.equal(width('2000000'), 50000);
+    const fixed = buildSql(
+      blocks,
+      [{ op: 'bucket', column: 'block', unit: 'auto', size: 100, as: 'bin' }],
+      {},
+    );
+    assert.deepEqual(fixed.values, [100]);
+    assert.match(fixed.sql, /::bigint AS "bin"/);
+  });
+
+  it('reads counts and rounds widths', () => {
+    assert.equal(rangeCount('all'), null);
+    assert.equal(rangeCount('500000'), 500000);
+    assert.throws(() => rangeCount('31d'));
+    assert.equal(niceSize(12_500), 20_000);
+    assert.equal(niceSize(2_500), 5_000);
+    assert.equal(niceSize(2_000), 2_000);
+    assert.equal(niceSize(0.3), 1);
   });
 });
 

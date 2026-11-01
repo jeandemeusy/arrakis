@@ -51,19 +51,30 @@ export type Step =
   | {
       op: 'range';
       column: string;
-      /** The variable holding the window, `7d`, `30d`, `12h`, `6m` or `all`. */
+      /**
+       * The variable holding the window: `7d`, `30d`, `12h`, `6m` or `all` for
+       * a date or time column; a count such as `500000` for a number column
+       * (the last 500,000 blocks).
+       */
       var?: string;
       /** A fixed window instead of a variable's, e.g. `31d` for a monthly figure. */
       window?: string;
-      /** Count back from the newest row (default) or from now. */
+      /**
+       * Count back from the newest row (default) or from now. A number column
+       * has no now: it counts back from its newest value, or from the value in
+       * `anchorColumn` — the chain's head block, say, carried on every row.
+       */
       anchor?: 'latest' | 'now';
+      anchorColumn?: string;
     }
   | {
       op: 'bucket';
       column: string;
       /**
        * `auto` is by day for a range variable of up to 31 days and by week
-       * beyond, so one chart reads well at every range a dashboard offers.
+       * beyond, so one chart reads well at every range a dashboard offers. On
+       * a number column it bins: `size` wide, or for `auto` about forty bins
+       * over the window (a round 1, 2 or 5 × 10ⁿ), each named by its start.
        */
       unit:
         | 'auto'
@@ -76,6 +87,10 @@ export type Step =
       as: string;
       /** The range variable `auto` reads; `range` when unset. */
       var?: string;
+      /** A fixed window `auto` reads instead of the variable. */
+      window?: string;
+      /** A number column's bin width. */
+      size?: number;
     }
   | {
       op: 'compute';
@@ -150,6 +165,39 @@ export function rangeDays(value: unknown): number | null {
   return { h: amount / 24, d: amount, w: amount * 7, m: amount * 31 }[
     match[2] as 'h' | 'd' | 'w' | 'm'
   ];
+}
+
+const COUNT = /^\d{1,15}$/;
+
+/**
+ * Parses a range variable over a number column — how many units back, e.g.
+ * `500000` blocks — or null for `all`.
+ */
+export function rangeCount(value: unknown): number | null {
+  if (
+    value === undefined ||
+    value === null ||
+    value === '' ||
+    value === 'all'
+  ) {
+    return null;
+  }
+  const text = asText(value).trim();
+  if (!COUNT.test(text) || Number(text) < 1)
+    throw badRequest(
+      `A range over a number column must be a whole count, like 500000, or all; got ${text}`,
+    );
+  return Number(text);
+}
+
+/** The smallest round width (1, 2 or 5 × 10ⁿ) at least `raw`. */
+export function niceSize(raw: number): number {
+  if (!(raw > 1)) return 1;
+  const power = 10 ** Math.floor(Math.log10(raw));
+  for (const step of [1, 2, 5, 10]) {
+    if (step * power >= raw) return step * power;
+  }
+  return 10 * power;
 }
 
 /** Parses a range variable into a PostgreSQL interval, or null for `all`. */
@@ -411,16 +459,30 @@ export function buildSql(
 
       case 'range': {
         const column = find(scope, step.column, where);
+        const col = quote(column.name);
+        if (NUMERIC.includes(column.type)) {
+          const count = rangeCount(step.window ?? vars[step.var ?? 'range']);
+          if (count === null) return;
+          const anchor = step.anchorColumn
+            ? quote(find(scope, step.anchorColumn, where).name)
+            : `(SELECT max(${col}) FROM ${current})`;
+          // The newest value and the count-1 before it: 10 blocks back from
+          // 100 is 91 to 100.
+          add(
+            `SELECT * FROM ${current} WHERE ${col} > ${anchor} - ${bind(count, 'numeric')}`,
+            scope,
+          );
+          return;
+        }
         if (!TEMPORAL.includes(column.type)) {
           throw badRequest(
-            `${where}: "${column.name}" is ${column.type}, not a date or time`,
+            `${where}: "${column.name}" is ${column.type}, not a date, a time or a number`,
           );
         }
         const interval = rangeInterval(
           step.window ?? vars[step.var ?? 'range'],
         );
         if (!interval) return;
-        const col = quote(column.name);
         const anchor =
           step.anchor === 'now'
             ? column.type === 'date'
@@ -439,19 +501,55 @@ export function buildSql(
 
       case 'bucket': {
         const column = find(scope, step.column, where);
-        if (!TEMPORAL.includes(column.type)) {
-          throw badRequest(
-            `${where}: "${column.name}" is ${column.type}, not a date or time`,
-          );
-        }
         const as = fresh(scope, step.as, where);
         const col = quote(column.name);
+        if (NUMERIC.includes(column.type)) {
+          let width: string;
+          if (step.size !== undefined) {
+            const size = Number(step.size);
+            if (!(size > 0) || !Number.isFinite(size))
+              throw badRequest(`${where}: size must be a positive number`);
+            width = bind(size, 'numeric');
+          } else if (step.unit === 'auto') {
+            const count = rangeCount(step.window ?? vars[step.var ?? 'range']);
+            // Without a window, about forty bins over whatever the rows span.
+            width =
+              count !== null
+                ? bind(niceSize(count / 40), 'numeric')
+                : `(SELECT CASE
+                       WHEN span <= 40 THEN 1
+                       ELSE p * CASE
+                         WHEN span / 40 <= p THEN 1
+                         WHEN span / 40 <= 2 * p THEN 2
+                         WHEN span / 40 <= 5 * p THEN 5
+                         ELSE 10 END
+                     END
+                   FROM (SELECT span, power(10, floor(log(10, GREATEST(span / 40, 1)))) AS p
+                         FROM (SELECT (max(${col}) - min(${col}))::numeric AS span FROM ${current}) AS r) AS w)`;
+          } else {
+            throw badRequest(
+              `${where}: a number column bins by size or auto, not ${String(step.unit)}`,
+            );
+          }
+          const whole = column.type === 'integer' || column.type === 'bigint';
+          add(
+            `SELECT *, (floor(${col}::numeric / ${width}) * ${width})${whole ? '::bigint' : ''} AS ${quote(as)} FROM ${current}`,
+            [...scope, { name: as, type: whole ? 'bigint' : 'numeric' }],
+          );
+          return;
+        }
+        if (!TEMPORAL.includes(column.type)) {
+          throw badRequest(
+            `${where}: "${column.name}" is ${column.type}, not a date, a time or a number`,
+          );
+        }
         const ts = column.type === 'date' ? `${col}::timestamp` : col;
         let expression: string;
         let type: ColumnType;
         const unit =
           step.unit === 'auto'
-            ? (rangeDays(vars[step.var ?? 'range']) ?? Infinity) <= 31
+            ? (rangeDays(step.window ?? vars[step.var ?? 'range']) ??
+                Infinity) <= 31
               ? 'day'
               : 'week'
             : step.unit;

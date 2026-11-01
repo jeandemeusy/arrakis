@@ -32,7 +32,7 @@ whoever deploys and develops it.
 
 ```bash
 npm ci
-npm run dev:db -- --demo     # a local PostgreSQL, with a made-up shop to query
+npm run dev:db -- --blokli   # a local PostgreSQL, with a made-up Blokli index to query
 npm run hash-password        # choose the editor password; prints its hash
 ```
 
@@ -40,14 +40,16 @@ Put what `dev:db` prints, and the hash, in `.env.local`:
 
 ```dotenv
 APP_DATABASE_URL=postgresql://postgres@127.0.0.1:54329/arrakis
-DATA_SOURCES='[{"id":"demo","label":"Demo shop","databaseUrl":"postgresql://demo_reader@127.0.0.1:54329/demo"}]'
+DATA_SOURCES='[{"id":"demo","label":"Demo","databaseUrl":"postgresql://blokli_reader@127.0.0.1:54329/blokli_demo"}]'
 ARRAKIS_EDITOR_PASSWORD_HASH=scrypt:15:8:1:…
 ```
 
-Then `npm run dev`, open <http://localhost:3000/>, unlock editing, and import
-[`examples/bundles/shop.json`](./examples/bundles/shop.json) under **Settings →
-Bundles** for a ready-made dashboard. `npm run dev:db -- stop` stops the
-database and `-- reset` deletes it.
+Then `npm run dev`, open <http://localhost:3000/>, unlock editing, import
+[`examples/bundles/gnosis-vpn.json`](./examples/bundles/gnosis-vpn.json) under
+**Settings → Bundles** for ready-made dashboards, and add the three exit
+addresses `dev:db` printed to the list `exits` under **Settings → Lists**.
+`--blokli` rebuilds the demo index each time it is given, dated up to today.
+`npm run dev:db -- stop` stops the database and `-- reset` deletes it.
 
 (`dev` runs on webpack, like `build`: in the Nix shell `node_modules` is
 symlinked into the Nix store, outside the project, and Turbopack refuses to
@@ -263,8 +265,8 @@ column's most common value, so the chart draws at once.
 | Step | Does |
 |---|---|
 | Filter | `=`, `!=`, `<`…, `contains`, `in`, null checks; against a value or a dashboard variable, optionally skipped while the variable is unset. |
-| Range | Keeps the trailing `7d`, `30d`, `12h`, `6m`… named by a variable (default `range`) or fixed in the step, counted back from the newest row or from now; `all` keeps everything. |
-| Bucket | A time to its hour, day, week or month, or to hour-of-day and day-of-week; or *day or week, by range* — daily up to 31 days, weekly beyond. |
+| Range | Keeps the trailing `7d`, `30d`, `12h`, `6m`… of a time column, or the last `500000` of a number column such as a block, named by a variable (default `range`) or fixed in the step. A time window counts back from the newest row or from now; a number window from its newest value, or from a column holding where it ends (`head_block`). `all` keeps everything. |
+| Bucket | A time to its hour, day, week or month, or to hour-of-day and day-of-week; or *day or week, by range* — daily up to 31 days, weekly beyond. A number into bins of a fixed width, or about forty round-width bins (1, 2 or 5 × 10ⁿ) over the window, each named by its start. |
 | Compute | `+ − × ÷` between columns or with a number; days or months between two dates. |
 | Window | `min`, `max`, `sum`, `count`, `first_value`, `row_number`, `rank` over partitions, as a new column — first-seen months for cohorts, say. |
 | Group and aggregate | `count`, `count distinct` (of one column or a combination), `sum`, `avg`, `min`, `max`. |
@@ -354,13 +356,22 @@ describes the format.
   update or replace. Everything it creates is marked with the bundle's name, so
   importing a newer file of the same bundle updates what the last one created.
   A query or dashboard of the same slug that came from elsewhere is a conflict,
-  overwritten only when asked (`replace`). Lists are created empty.
+  overwritten only when asked (`replace`). Lists are created empty. What an
+  earlier file created and the newer one no longer has is archived.
+- **Removing one:** **Remove…** beside an imported bundle lists what it would
+  archive, then archives its dashboards, charts and queries. Lists stay, values
+  and all. Either way, something still used from outside the bundle is kept,
+  with the reason: a fragment a query of yours inlines, a query a chart of yours
+  reads, a chart on a dashboard of yours. Nothing is deleted: archived queries
+  are under **Queries → Show archived**, and importing the bundle again brings
+  everything back.
 
-Two examples ship in [`examples/bundles`](./examples/bundles):
-[`shop.json`](./examples/bundles/shop.json), for the demo data source, and
+An example ships in [`examples/bundles`](./examples/bundles):
 [`gnosis-vpn.json`](./examples/bundles/gnosis-vpn.json), the Gnosis VPN
-dashboards for a Blokli index of the HOPR network
-(it reads the list `exits`).
+dashboards for a Blokli index of the HOPR network (it reads the list `exits`).
+They read the raw event log (Blokli's `log` table) and decode the events in
+SQL; apart from that, only the last indexed block (`chain_info`) and the
+contract list (`log_topic_info`) come from Blokli's own tables.
 
 ### Search, lineage, guide, sharing
 
@@ -404,6 +415,7 @@ session.
 | `GET /api/v1/dashboards/:slug/data?v.name=` | Every widget's rows in one call. |
 | `GET /api/v1/dashboards/:slug/bundle` | The dashboard as a bundle file. Editors only. |
 | `GET·POST /api/v1/bundles` `{bundle \| url, replace?}` · `POST /api/v1/bundles/preview` | Imported bundles; import one; what an import would do. |
+| `GET·DELETE /api/v1/bundles/{name}` | What removing a bundle would archive and keep; remove it. |
 
 In the API a data source is a `network` (the name it had first). `network=all`
 (the default where accepted) stacks every source's rows under a leading

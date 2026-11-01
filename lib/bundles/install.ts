@@ -18,6 +18,7 @@ import {
   updateVisualization,
 } from '../viz/store';
 import type { Bundle } from './format';
+import { planRetirement, retire, type Kept } from './retire';
 
 /**
  * Imports a bundle: its queries, charts and dashboards, created through the
@@ -28,10 +29,12 @@ import type { Bundle } from './format';
  * updates what it created: a new query version when the SQL changed, the
  * chart configs, the layout. An item with the same slug that came from
  * elsewhere is a conflict: the import refuses until it is told to replace
- * those, and the plan says which they are.
+ * those, and the plan says which they are. What an earlier file of the bundle
+ * created and this one no longer has is archived (retire.ts), unless something
+ * outside still uses it.
  */
 
-export type Action = 'create' | 'update' | 'replace';
+export type Action = 'create' | 'update' | 'replace' | 'archive' | 'keep';
 
 export type PlanItem = {
   kind: 'list' | 'query' | 'fragment' | 'chart' | 'dashboard';
@@ -40,6 +43,8 @@ export type PlanItem = {
   action: Action;
   /** For a replacement: where the item it would replace came from. */
   from?: string | null;
+  /** For an item the bundle dropped but that is kept: what still uses it. */
+  reason?: string;
 };
 
 export type Plan = {
@@ -56,7 +61,18 @@ export type InstallReport = {
   created: string[];
   updated: string[];
   unchanged: string[];
+  /** What an earlier version created and this one dropped. */
+  archived: string[];
 };
+
+/** Everything a bundle file contains, as retirement must leave it. */
+function keptBy(bundle: Bundle): Kept {
+  return {
+    queries: bundle.queries.map((query) => query.slug),
+    charts: bundle.charts.map((chart) => chartKey(bundle, chart.key)),
+    dashboards: bundle.dashboards.map((dashboard) => dashboard.slug),
+  };
+}
 
 /** What importing the bundle would do, item by item; changes nothing. */
 export async function planInstall(bundle: Bundle): Promise<Plan> {
@@ -133,6 +149,23 @@ export async function planInstall(bundle: Bundle): Promise<Plan> {
         : {}),
     });
   }
+  // What an earlier file of this bundle created and this one dropped.
+  const dropped = await planRetirement(bundle.name, keptBy(bundle));
+  for (const item of dropped.archive)
+    items.push({
+      kind: item.kind,
+      name: item.name,
+      title: item.title,
+      action: 'archive',
+    });
+  for (const item of dropped.keep)
+    items.push({
+      kind: item.kind,
+      name: item.name,
+      title: item.title,
+      action: 'keep',
+      ...(item.reason ? { reason: item.reason } : {}),
+    });
   return {
     name: bundle.name,
     title: bundle.title,
@@ -169,6 +202,7 @@ export async function installBundle(
     created: [],
     updated: [],
     unchanged: [],
+    archived: [],
   };
   const db = await appDb();
   const note = `Imported with the bundle ${bundle.title}`;
@@ -326,15 +360,25 @@ export async function installBundle(
     );
     (existing ? report.updated : report.created).push(label);
   }
+
+  const retired = await retire(bundle.name, keptBy(bundle));
+  report.archived = retired.archive.map(
+    (item) => `${item.kind} ${item.kind === 'chart' ? item.title : item.name}`,
+  );
   return report;
 }
 
-/** Bundles this Arrakis has imported, with their main dashboard. */
+/**
+ * Bundles this Arrakis has imported, with their dashboards: any bundle with
+ * something left that is not archived, so one whose dashboards were archived
+ * by hand can still be removed.
+ */
 export async function installedBundles(): Promise<
   Array<{
     name: string;
     dashboards: Array<{ slug: string; title: string }>;
     queries: number;
+    charts: number;
   }>
 > {
   const db = await appDb();
@@ -342,13 +386,19 @@ export async function installedBundles(): Promise<
     name: string;
     dashboards: Array<{ slug: string; title: string }>;
     queries: number;
+    charts: number;
   }>(
-    `SELECT d.bundle AS name,
-            json_agg(json_build_object('slug', d.slug, 'title', d.title) ORDER BY d.created_at) AS dashboards,
-            (SELECT count(*)::int FROM queries q WHERE q.bundle = d.bundle AND q.archived_at IS NULL) AS queries
-     FROM dashboards d
-     WHERE d.bundle IS NOT NULL AND d.archived_at IS NULL
-     GROUP BY d.bundle ORDER BY d.bundle`,
+    `WITH named AS (
+       SELECT bundle FROM queries WHERE bundle IS NOT NULL AND archived_at IS NULL
+       UNION SELECT bundle FROM visualizations WHERE bundle IS NOT NULL AND archived_at IS NULL
+       UNION SELECT bundle FROM dashboards WHERE bundle IS NOT NULL AND archived_at IS NULL
+     )
+     SELECT n.bundle AS name,
+            COALESCE((SELECT json_agg(json_build_object('slug', d.slug, 'title', d.title) ORDER BY d.created_at)
+                      FROM dashboards d WHERE d.bundle = n.bundle AND d.archived_at IS NULL), '[]') AS dashboards,
+            (SELECT count(*)::int FROM queries q WHERE q.bundle = n.bundle AND q.archived_at IS NULL) AS queries,
+            (SELECT count(*)::int FROM visualizations v WHERE v.bundle = n.bundle AND v.archived_at IS NULL) AS charts
+     FROM named n ORDER BY n.bundle`,
   );
   return rows;
 }

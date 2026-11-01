@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
-import { FileUp, Link2, PackageOpen } from 'lucide-react';
+import { FileUp, Link2, PackageOpen, Trash2 } from 'lucide-react';
 
 import { api, ApiError } from '../../api';
 import { useNav } from '../../nav';
@@ -13,15 +13,26 @@ type Installed = {
   name: string;
   dashboards: Array<{ slug: string; title: string }>;
   queries: number;
+  charts: number;
 };
 
 type PlanItem = {
   kind: 'list' | 'query' | 'fragment' | 'chart' | 'dashboard';
   name: string;
   title: string;
-  action: 'create' | 'update' | 'replace';
+  action: 'create' | 'update' | 'replace' | 'archive' | 'keep';
   from?: string | null;
+  reason?: string;
 };
+
+type RetireItem = {
+  kind: 'query' | 'fragment' | 'chart' | 'dashboard';
+  name: string;
+  title: string;
+  reason?: string;
+};
+
+type Retirement = { archive: RetireItem[]; keep: RetireItem[] };
 
 type Plan = {
   name: string;
@@ -35,6 +46,8 @@ const ACTION_LABEL = {
   create: 'New',
   update: 'Update',
   replace: 'Replaces yours',
+  archive: 'Archived',
+  keep: 'Kept',
 } as const;
 
 /**
@@ -42,7 +55,9 @@ const ACTION_LABEL = {
  * Arrakis made. Importing one, from a file or a URL, first shows what it would
  * create, update or replace; importing it creates ordinary saved queries and
  * charts, edited like any other. Any dashboard can be exported as a bundle
- * from its Share menu.
+ * from its Share menu. Removing a bundle archives what it created, except
+ * what something outside it still uses; a newer file of a bundle archives
+ * what it dropped the same way.
  */
 export function BundleSettings() {
   const { user } = useSession();
@@ -57,7 +72,48 @@ export function BundleSettings() {
   const [busy, setBusy] = useState<'reading' | 'importing' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [removing, setRemoving] = useState<{
+    name: string;
+    title: string;
+    plan: Retirement | null;
+    busy: boolean;
+  } | null>(null);
   const file = useRef<HTMLInputElement>(null);
+
+  const askRemove = async (name: string, title: string) => {
+    setError(null);
+    setMessage(null);
+    setRemoving({ name, title, plan: null, busy: true });
+    try {
+      const { plan } = await api<{ plan: Retirement }>(
+        `/api/v1/bundles/${name}`,
+      );
+      setRemoving({ name, title, plan, busy: false });
+    } catch (failure) {
+      setRemoving(null);
+      setError((failure as ApiError).message);
+    }
+  };
+
+  const remove = async () => {
+    if (!removing) return;
+    setRemoving({ ...removing, busy: true });
+    try {
+      const { report } = await api<{ report: Retirement }>(
+        `/api/v1/bundles/${removing.name}`,
+        { method: 'DELETE' },
+      );
+      setMessage(
+        `${removing.title}: ${report.archive.length} archived${report.keep.length ? `, ${report.keep.length} kept because something else uses them` : ''}. Archived queries are listed under Queries → Show archived.`,
+      );
+      setRemoving(null);
+      setRevision((value) => value + 1);
+      dashboardsChanged();
+    } catch (failure) {
+      setRemoving({ ...removing, busy: false });
+      setError((failure as ApiError).message);
+    }
+  };
 
   useEffect(() => {
     if (!user) return;
@@ -117,13 +173,14 @@ export function BundleSettings() {
           created: string[];
           updated: string[];
           unchanged: string[];
+          archived: string[];
         };
       }>('/api/v1/bundles', {
         method: 'POST',
         body: { bundle, replace },
       });
       setMessage(
-        `${plan.title}: ${report.created.length} created, ${report.updated.length} updated, ${report.unchanged.length} unchanged. Its queries are running now; charts fill in as their results are stored.`,
+        `${plan.title}: ${report.created.length} created, ${report.updated.length} updated, ${report.unchanged.length} unchanged${report.archived.length ? `, ${report.archived.length} archived` : ''}. Its queries are running now; charts fill in as their results are stored.`,
       );
       setPlan(null);
       setBundle(null);
@@ -148,7 +205,12 @@ export function BundleSettings() {
   const counts = plan
     ? (['list', 'query', 'fragment', 'chart', 'dashboard'] as const)
         .map((kind) => {
-          const n = plan.items.filter((item) => item.kind === kind).length;
+          const n = plan.items.filter(
+            (item) =>
+              item.kind === kind &&
+              item.action !== 'archive' &&
+              item.action !== 'keep',
+          ).length;
           return n ? `${n} ${n === 1 ? kind : PLURAL[kind]}` : null;
         })
         .filter(Boolean)
@@ -232,6 +294,13 @@ export function BundleSettings() {
                 <p className="studio-muted">{plan.description}</p>
               )}
               <p>{counts}.</p>
+              {plan.items.some((item) => item.action === 'archive') && (
+                <p className="studio-muted">
+                  An earlier version of this bundle made items this one no
+                  longer has: they are archived, unless something else still
+                  uses them.
+                </p>
+              )}
               {plan.items.some((item) => item.kind === 'list') && (
                 <p className="studio-muted">
                   Lists are created empty: fill in their values under{' '}
@@ -248,6 +317,9 @@ export function BundleSettings() {
                     <span className="plan-kind">{item.kind}</span>
                     <span className="plan-title" title={item.name}>
                       {item.title}
+                      {item.reason && (
+                        <small className="studio-muted"> · {item.reason}</small>
+                      )}
                     </span>
                   </li>
                 ))}
@@ -299,26 +371,92 @@ export function BundleSettings() {
           {installed.length === 0 && (
             <p className="studio-muted">No bundle imported yet.</p>
           )}
-          {installed.map((entry) => (
-            <div key={entry.name} className="bundle">
-              <PackageOpen size={18} aria-hidden="true" />
-              <div>
-                <strong>{entry.dashboards[0]?.title ?? entry.name}</strong>
-                <p className="studio-muted">
-                  {entry.dashboards.map((dashboard, at) => (
-                    <span key={dashboard.slug}>
-                      {at > 0 && ', '}
-                      <Link href={`/dashboards/${dashboard.slug}`}>
-                        {dashboard.title}
-                      </Link>
-                    </span>
-                  ))}{' '}
-                  · {entry.queries} quer{entry.queries === 1 ? 'y' : 'ies'}.
-                  Importing a newer file of the same bundle updates them.
-                </p>
+          {installed.map((entry) => {
+            const title = entry.dashboards[0]?.title ?? entry.name;
+            const open = removing?.name === entry.name;
+            return (
+              <div key={entry.name} className="bundle">
+                <PackageOpen size={18} aria-hidden="true" />
+                <div>
+                  <strong>{title}</strong>
+                  <p className="studio-muted">
+                    {entry.dashboards.map((dashboard, at) => (
+                      <span key={dashboard.slug}>
+                        {at > 0 && ', '}
+                        <Link href={`/dashboards/${dashboard.slug}`}>
+                          {dashboard.title}
+                        </Link>
+                      </span>
+                    ))}
+                    {entry.dashboards.length > 0 && ' · '}
+                    {entry.charts} chart{entry.charts === 1 ? '' : 's'},{' '}
+                    {entry.queries} quer{entry.queries === 1 ? 'y' : 'ies'}.
+                    Importing a newer file of the same bundle updates them.
+                  </p>
+                  {open && removing.plan && (
+                    <div className="bundle-plan">
+                      <p>
+                        Removing it archives {removing.plan.archive.length} item
+                        {removing.plan.archive.length === 1 ? '' : 's'}. Lists
+                        are kept, values and all.
+                      </p>
+                      <ul>
+                        {[...removing.plan.archive, ...removing.plan.keep].map(
+                          (item) => (
+                            <li key={`${item.kind}:${item.name}`}>
+                              <span
+                                className={`plan-action ${item.reason ? 'keep' : 'archive'}`}
+                              >
+                                {item.reason ? 'Kept' : 'Archived'}
+                              </span>
+                              <span className="plan-kind">{item.kind}</span>
+                              <span className="plan-title" title={item.name}>
+                                {item.title}
+                                {item.reason && (
+                                  <small className="studio-muted">
+                                    {' '}
+                                    · {item.reason}
+                                  </small>
+                                )}
+                              </span>
+                            </li>
+                          ),
+                        )}
+                      </ul>
+                      <div className="bundle-actions">
+                        <button
+                          type="button"
+                          className="studio-button danger"
+                          disabled={removing.busy}
+                          onClick={() => void remove()}
+                        >
+                          {removing.busy ? 'Removing…' : 'Remove'}
+                        </button>
+                        <button
+                          type="button"
+                          className="studio-button"
+                          disabled={removing.busy}
+                          onClick={() => setRemoving(null)}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+                {!open && (
+                  <button
+                    type="button"
+                    className="studio-button"
+                    disabled={removing?.busy}
+                    onClick={() => void askRemove(entry.name, title)}
+                  >
+                    <Trash2 size={13} aria-hidden="true" /> Remove…
+                  </button>
+                )}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </section>
       )}
     </main>

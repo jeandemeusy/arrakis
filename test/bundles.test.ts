@@ -25,8 +25,12 @@ const PASSWORD = 'correct horse battery staple';
 type Json = Record<string, unknown>;
 type Report = { created: string[]; updated: string[]; unchanged: string[] };
 type Plan = {
-  items: Array<{ kind: string; name: string; action: string }>;
+  items: Array<{ kind: string; name: string; action: string; reason?: string }>;
   conflicts: number;
+};
+type Retirement = {
+  archive: Array<{ kind: string; name: string }>;
+  keep: Array<{ kind: string; name: string; reason?: string }>;
 };
 
 async function body<T = Json>(response: Response): Promise<T> {
@@ -42,6 +46,7 @@ describe(
     let routes: {
       login: typeof import('../app/api/v1/auth/login/route');
       bundles: typeof import('../app/api/v1/bundles/route');
+      bundle: typeof import('../app/api/v1/bundles/[name]/route');
       preview: typeof import('../app/api/v1/bundles/preview/route');
       exported: typeof import('../app/api/v1/dashboards/[slug]/bundle/route');
       queries: typeof import('../app/api/v1/queries/route');
@@ -79,6 +84,7 @@ describe(
       routes = {
         login: await import('../app/api/v1/auth/login/route'),
         bundles: await import('../app/api/v1/bundles/route'),
+        bundle: await import('../app/api/v1/bundles/[name]/route'),
         preview: await import('../app/api/v1/bundles/preview/route'),
         exported: await import('../app/api/v1/dashboards/[slug]/bundle/route'),
         queries: await import('../app/api/v1/queries/route'),
@@ -133,7 +139,7 @@ describe(
       );
       const { report } = await body<{ report: Report }>(first);
       // One list, sixteen queries, thirty charts, two dashboards.
-      assert.equal(report.created.length, 1 + 16 + 30 + 2);
+      assert.equal(report.created.length, 1 + 19 + 28 + 2);
 
       const again = await body<{ report: Report }>(
         await post(routes.bundles, '/api/v1/bundles', { bundle: example }),
@@ -142,7 +148,7 @@ describe(
       assert.equal(
         again.report.unchanged.filter((label) => label.startsWith('chart'))
           .length,
-        30,
+        28,
       );
 
       const { rows } = await (
@@ -151,7 +157,7 @@ describe(
         `SELECT count(*)::int AS n FROM visualizations
          WHERE bundle = 'gnosis-vpn' AND archived_at IS NULL`,
       );
-      assert.equal(rows[0].n, 30);
+      assert.equal(rows[0].n, 28);
       const listed = await body<{
         bundles: Array<{ name: string; dashboards: Array<{ slug: string }> }>;
       }>(
@@ -216,7 +222,7 @@ describe(
         exported.dashboards.map((dashboard) => dashboard.slug),
         ['gnosis-vpn', 'gnosis-vpn-client'],
       );
-      assert.equal(exported.charts.length, 30);
+      assert.equal(exported.charts.length, 28);
       // Each query comes after every fragment it names.
       const seen = new Set<string>();
       for (const query of exported.queries) {
@@ -319,6 +325,100 @@ describe(
           url,
         );
       }
+    });
+
+    it('archives what a newer file of a bundle dropped', async () => {
+      const newer = structuredClone(example) as {
+        queries: Array<{ slug: string }>;
+        charts: Array<{ key: string }>;
+        dashboards: Array<{ widgets: Array<{ chart?: string }> }>;
+      };
+      newer.queries = newer.queries.filter(
+        (query) => query.slug !== 'indexed-contracts',
+      );
+      newer.charts = newer.charts.filter(
+        (chart) => chart.key !== 'gnosis-vpn/contracts',
+      );
+      for (const dashboard of newer.dashboards)
+        dashboard.widgets = dashboard.widgets.filter(
+          (widget) => widget.chart !== 'gnosis-vpn/contracts',
+        );
+      const { plan } = await body<{ plan: Plan }>(
+        await post(routes.preview, '/api/v1/bundles/preview', {
+          bundle: newer,
+        }),
+      );
+      assert.deepEqual(
+        plan.items
+          .filter((item) => item.action === 'archive')
+          .map((item) => `${item.kind} ${item.name}`)
+          .sort(),
+        ['chart gnosis-vpn/contracts', 'query indexed-contracts'],
+      );
+      const imported = await body<{ report: { archived: string[] } }>(
+        await post(routes.bundles, '/api/v1/bundles', { bundle: newer }),
+      );
+      assert.equal(imported.report.archived.length, 2);
+      const { rows } = await (
+        await lib.app.appDb()
+      ).query<{ archived: boolean }>(
+        `SELECT archived_at IS NOT NULL AS archived FROM queries WHERE slug = 'indexed-contracts'`,
+      );
+      assert.equal(rows[0].archived, true);
+    });
+
+    it('removes a bundle, keeping what something else still uses', async () => {
+      // A query of one's own that inlines one of the bundle's fragments.
+      const mine = await post(routes.queries, '/api/v1/queries', {
+        slug: 'uses-hex',
+        title: 'Uses hex',
+        sql: "SELECT {{> hex('\\x01'::bytea)}} AS h",
+      });
+      assert.equal(mine.status, 201);
+      const where = context({ name: 'gnosis-vpn' });
+      const { plan } = await body<{ plan: Retirement }>(
+        await routes.bundle.GET(
+          request('GET', '/api/v1/bundles/gnosis-vpn', { cookie }),
+          where,
+        ),
+      );
+      assert.deepEqual(
+        plan.keep.map((item) => [item.name, item.reason]),
+        [['hex', 'read by the query uses-hex']],
+      );
+      assert.ok(
+        plan.archive.some(
+          (item) => item.kind === 'dashboard' && item.name === 'gnosis-vpn',
+        ),
+      );
+      const removed = await routes.bundle.DELETE(
+        request('DELETE', '/api/v1/bundles/gnosis-vpn', { cookie }),
+        where,
+      );
+      assert.equal(removed.status, 200);
+      const listed = await body<{
+        bundles: Array<{
+          name: string;
+          dashboards: unknown[];
+          queries: number;
+          charts: number;
+        }>;
+      }>(
+        await routes.bundles.GET(
+          request('GET', '/api/v1/bundles', { cookie }),
+          undefined,
+        ),
+      );
+      const left = listed.bundles.find((entry) => entry.name === 'gnosis-vpn');
+      assert.deepEqual(
+        left && [left.dashboards.length, left.charts, left.queries],
+        [0, 0, 1],
+      );
+      const unauthorised = await routes.bundle.DELETE(
+        request('DELETE', '/api/v1/bundles/other'),
+        context({ name: 'other' }),
+      );
+      assert.equal(unauthorised.status, 401);
     });
   },
 );

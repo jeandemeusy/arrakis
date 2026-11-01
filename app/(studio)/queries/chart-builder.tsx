@@ -79,6 +79,9 @@ const FORMAT_LABELS: Record<Format, string> = {
 const isTime = (column: ScopeColumn | undefined) =>
   Boolean(column && TEMPORAL.includes(column.type));
 
+const isNumber = (column: ScopeColumn | undefined) =>
+  Boolean(column && NUMERIC.includes(column.type));
+
 function Section({
   title,
   hint,
@@ -309,6 +312,49 @@ function DimensionRow({
           </select>
         </label>
       )}
+      {dimension && isNumber(column) && (
+        <label className="builder-inline">
+          <span>in</span>
+          <select
+            className="studio-input"
+            aria-label={`${label} bins`}
+            value={
+              dimension.size !== undefined
+                ? 'size'
+                : dimension.unit === 'auto'
+                  ? 'auto'
+                  : ''
+            }
+            onChange={(event) => {
+              const choice = event.target.value;
+              onChange({
+                column: dimension.column,
+                ...(choice === 'auto' ? { unit: 'auto' as Unit } : {}),
+                ...(choice === 'size' ? { size: 1000 } : {}),
+              });
+            }}
+          >
+            <option value="">each value</option>
+            <option value="auto">bins that suit the range</option>
+            <option value="size">bins of a fixed width</option>
+          </select>
+          {dimension.size !== undefined && (
+            <input
+              className="studio-input mono short"
+              type="number"
+              min={1}
+              aria-label={`${label} bin width`}
+              value={dimension.size}
+              onChange={(event) =>
+                onChange({
+                  column: dimension.column,
+                  size: Math.max(1, Number(event.target.value) || 1),
+                })
+              }
+            />
+          )}
+        </label>
+      )}
     </div>
   );
 }
@@ -502,34 +548,49 @@ function WindowField({
   onChange: (window: Builder['window']) => void;
 }) {
   const source = !window ? 'all' : window.fixed ? 'fixed' : 'range';
-  const temporal = columns.filter((column) => TEMPORAL.includes(column.type));
-  if (!temporal.length) {
-    return <p className="studio-muted">No date or time column to limit by.</p>;
+  const eligible = columns.filter(
+    (column) => TEMPORAL.includes(column.type) || NUMERIC.includes(column.type),
+  );
+  if (!eligible.length) {
+    return (
+      <p className="studio-muted">
+        No date, time or number column to limit by.
+      </p>
+    );
   }
+  const current = columns.find((column) => column.name === window?.column);
+  const numeric = isNumber(current);
+  const numbers = columns.filter((column) => NUMERIC.includes(column.type));
   return (
     <div className="builder-row">
       <select
         className="studio-input"
-        aria-label="Time window"
+        aria-label="Window"
         value={source}
         onChange={(event) => {
           const next = event.target.value;
-          const column = window?.column ?? temporal[0].name;
+          const column = window?.column ?? eligible[0].name;
+          const picked = columns.find((entry) => entry.name === column);
           if (next === 'all') onChange(undefined);
           else if (next === 'fixed')
-            onChange({ column, fixed: '30d', from: window?.from });
-          else onChange({ column, from: window?.from });
+            onChange({
+              column,
+              fixed: isNumber(picked) ? '100000' : '30d',
+              from: window?.from,
+              anchor: window?.anchor,
+            });
+          else onChange({ column, from: window?.from, anchor: window?.anchor });
         }}
       >
         <option value="range">The dashboard&rsquo;s range</option>
         <option value="fixed">A fixed window</option>
-        <option value="all">All time</option>
+        <option value="all">Everything</option>
       </select>
       {window && window.fixed !== undefined && (
         <input
           className="studio-input mono short"
           aria-label="Window length"
-          placeholder="30d"
+          placeholder={numeric ? '100000' : '30d'}
           value={window.fixed}
           onChange={(event) =>
             onChange({ ...window, fixed: event.target.value })
@@ -541,24 +602,44 @@ function WindowField({
           <span className="builder-inline">
             <span>of</span>
             <ColumnSelect
-              label="Time column"
+              label="Window column"
               value={window.column}
-              scope={temporal}
-              onChange={(column) => onChange({ ...window, column })}
-            />
-          </span>
-          <label className="builder-inline">
-            <span>from</span>
-            <input
-              className="studio-input"
-              type="date"
-              aria-label="Never before"
-              value={window.from ?? ''}
-              onChange={(event) =>
-                onChange({ ...window, from: event.target.value || undefined })
+              scope={eligible}
+              onChange={(column) =>
+                // A date's `from` and a number's end column do not carry over.
+                onChange({ column, var: window.var, fixed: window.fixed })
               }
             />
-          </label>
+          </span>
+          {numeric ? (
+            <span className="builder-inline">
+              <span>ending at</span>
+              <ColumnSelect
+                label="Window end"
+                value={window.anchor}
+                scope={numbers.filter(
+                  (column) => column.name !== window.column,
+                )}
+                allowNone
+                onChange={(anchor) =>
+                  onChange({ ...window, anchor: anchor || undefined })
+                }
+              />
+            </span>
+          ) : (
+            <label className="builder-inline">
+              <span>from</span>
+              <input
+                className="studio-input"
+                type="date"
+                aria-label="Never before"
+                value={window.from ?? ''}
+                onChange={(event) =>
+                  onChange({ ...window, from: event.target.value || undefined })
+                }
+              />
+            </label>
+          )}
         </>
       )}
     </div>

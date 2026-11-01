@@ -2,8 +2,10 @@
 # A throwaway PostgreSQL for trying the studio locally.
 #
 #   npm run dev:db              start it (creates it on first use)
-#   npm run dev:db -- --demo    also create a demo data source to query: a
-#                               made-up shop (db/demo/shop.sql)
+#   npm run dev:db -- --blokli  also (re)build a synthetic Blokli index to
+#                               query — eleven months of a made-up HOPR
+#                               network, raw events included — from
+#                               test/fixtures/blokli-demo.sql
 #   npm run dev:db -- stop      stop it
 #   npm run dev:db -- reset     stop it and delete its data
 #
@@ -50,37 +52,40 @@ if ! psql "$URL/postgres" -tAc "SELECT 1 FROM pg_database WHERE datname = 'arrak
   psql "$URL/postgres" -q -c 'CREATE DATABASE arrakis'
 fi
 
-DEMO=""
+BLOKLI=""
 for arg in "$@"; do
-  [ "$arg" = "--demo" ] && DEMO=1
+  [ "$arg" = "--blokli" ] && BLOKLI=1
 done
 
-if [ -n "$DEMO" ]; then
-  if ! psql "$URL/postgres" -tAc "SELECT 1 FROM pg_database WHERE datname = 'demo'" | grep -q 1; then
-    psql "$URL/postgres" -q -v ON_ERROR_STOP=1 <<'SQL'
+if [ -n "$BLOKLI" ]; then
+  # Rebuilt every time: the fixture places its blocks from the moment it is
+  # loaded, so a fresh build also brings the history up to today.
+  psql "$URL/postgres" -q -v ON_ERROR_STOP=1 <<'SQL'
+SET client_min_messages = warning;
 DO $$ BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'demo_reader') THEN
-    CREATE ROLE demo_reader LOGIN;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'blokli_reader') THEN
+    CREATE ROLE blokli_reader LOGIN;
   END IF;
 END $$;
-CREATE DATABASE demo;
+DROP DATABASE IF EXISTS blokli_demo WITH (FORCE);
+CREATE DATABASE blokli_demo;
 SQL
-    psql "$URL/demo" -q -v ON_ERROR_STOP=1 -f "$ROOT/db/demo/shop.sql"
-    # A data source is read through a role that can only read.
-    psql "$URL/demo" -q -v ON_ERROR_STOP=1 <<'SQL'
+  psql "$URL/blokli_demo" -q -v ON_ERROR_STOP=1 -f "$ROOT/test/fixtures/blokli-demo.sql"
+  # A data source is read through a role that can only read.
+  psql "$URL/blokli_demo" -q -v ON_ERROR_STOP=1 <<'SQL'
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
-GRANT USAGE ON SCHEMA public TO demo_reader;
-GRANT SELECT ON ALL TABLES IN SCHEMA public TO demo_reader;
+GRANT USAGE ON SCHEMA public TO blokli_reader;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO blokli_reader;
 SQL
-  fi
 fi
 
 echo "PostgreSQL is running on $HOST:$PORT. For .env.local:"
 echo
 echo "APP_DATABASE_URL=$URL/arrakis"
-if [ -n "$DEMO" ]; then
-  echo "DATA_SOURCES='[{\"id\":\"demo\",\"label\":\"Demo shop\",\"databaseUrl\":\"postgresql://demo_reader@$HOST:$PORT/demo\"}]'"
+if [ -n "$BLOKLI" ]; then
+  echo "DATA_SOURCES='[{\"id\":\"demo\",\"label\":\"Demo\",\"databaseUrl\":\"postgresql://blokli_reader@$HOST:$PORT/blokli_demo\"}]'"
   echo
-  echo "Then import examples/bundles/shop.json under Settings → Bundles for a"
-  echo "ready-made dashboard on it."
+  echo "Then import examples/bundles/gnosis-vpn.json under Settings → Bundles,"
+  echo "and add the demo network's three exits to the list \"exits\" (Settings → Lists):"
+  psql "$URL/blokli_demo" -tAc "SELECT '  0x' || encode(chain_key, 'hex') FROM account WHERE id BETWEEN 13 AND 15 ORDER BY id"
 fi

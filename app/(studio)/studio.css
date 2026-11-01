@@ -3149,6 +3149,7 @@ a.settings-card:focus-visible {
 
 .bundle > svg {
   box-sizing: content-box;
+  align-self: start;
   padding: 9px;
   border-radius: var(--radius-control);
   background: var(--hover);
@@ -5111,6 +5112,15 @@ a.settings-card:focus-visible {
 .plan-action.replace {
   background: var(--warn-halo);
   color: var(--warn-ink);
+}
+
+.plan-action.archive {
+  background: var(--warn-halo);
+  color: var(--warn-ink);
+}
+
+.bundle .bundle-plan {
+  margin-top: 12px;
 }
 
 .plan-kind {
