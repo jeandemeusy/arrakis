@@ -89,7 +89,7 @@ export function DashboardList() {
               <small>
                 {dashboard.charts} chart{dashboard.charts === 1 ? '' : 's'} ·
                 updated {UPDATED.format(new Date(dashboard.updatedAt))}
-                {dashboard.official && ' · bundled'}
+                {dashboard.official && ' · from a bundle'}
                 {dashboard.visibility !== 'public' && (
                   <span className={`badge ${dashboard.visibility}`}>
                     {dashboard.visibility}
@@ -147,14 +147,12 @@ export function DashboardList() {
           No dashboards yet.{' '}
           {user ? (
             <>
-              Install the bundled Gnosis VPN dashboard from{' '}
-              <Link href="/settings/bundles">Bundled dashboards</Link>, or
-              create one above.
+              Create one above, or import one somebody shared as a bundle from{' '}
+              <Link href="/settings/bundles">Bundles</Link>.
             </>
           ) : (
             <>
-              <Link href="/login?next=/settings/bundles">Unlock editing</Link>{' '}
-              to install the bundled Gnosis VPN dashboard.
+              <Link href="/login?next=/">Unlock editing</Link> to create one.
             </>
           )}
         </p>

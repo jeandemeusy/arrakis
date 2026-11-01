@@ -10,14 +10,14 @@ export function networks(): NetworkConfig[] {
   } catch (error) {
     throw new HttpError(
       503,
-      `Networks are misconfigured: ${(error as Error).message}`,
+      `Data sources are misconfigured: ${(error as Error).message}`,
     );
   }
 }
 
 export function network(id: string): NetworkConfig {
   const found = networks().find((entry) => entry.id === id);
-  if (!found) throw notFound(`Unknown network: ${id}`);
+  if (!found) throw notFound(`Unknown data source: ${id}`);
   return found;
 }
 

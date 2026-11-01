@@ -229,6 +229,12 @@ export type Variable = {
   options?: string[];
   /** Display names for some options, e.g. 31d → "Last 30 days". */
   labels?: Record<string, string>;
+  /**
+   * For the data source variable: whether viewers may pick every source at
+   * once, their rows stacked. Absent means yes; dashboards made before the
+   * choice existed all offered it.
+   */
+  stack?: boolean;
 };
 
 export type WidgetOptions = {
@@ -302,6 +308,7 @@ export function parseVariables(input: unknown): Variable[] {
     ) {
       variable.default = asText(entry.default).slice(0, 200);
     }
+    if (type === 'network' && entry.stack === false) variable.stack = false;
     if (type === 'range' || type === 'select') {
       const options = Array.isArray(entry.options)
         ? entry.options.map(String).filter(Boolean)
@@ -517,7 +524,7 @@ export async function createDashboard(
                 },
                 {
                   name: 'network',
-                  label: 'Network',
+                  label: 'Data source',
                   type: 'network',
                   default: 'all',
                 },

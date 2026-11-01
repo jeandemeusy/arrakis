@@ -7,6 +7,7 @@ import type { Principal } from '../auth/session';
 import { appDb, transaction } from '../db/app';
 import { compile, type ResolveFragment } from './compile';
 import { parseDefinitions, type ParameterDefinition } from './params';
+import { listResolver } from './lists';
 
 /**
  * Saved queries and their versions.
@@ -293,14 +294,19 @@ async function checkedSource(
   if (!sql) throw badRequest('sql must not be empty');
   const parameters = parseDefinitions(input.parameters);
   const resolve = fragmentResolver(client);
-  await compile(sql, parameters, async (slug) => {
-    // The stored graph still holds the previous version of this query, so a
-    // cycle through it only shows as a reference back to its own slug.
-    if (slug === selfSlug) {
-      throw badRequest(`Saving would make ${slug} include itself`);
-    }
-    return resolve(slug);
-  });
+  await compile(
+    sql,
+    parameters,
+    async (slug) => {
+      // The stored graph still holds the previous version of this query, so a
+      // cycle through it only shows as a reference back to its own slug.
+      if (slug === selfSlug) {
+        throw badRequest(`Saving would make ${slug} include itself`);
+      }
+      return resolve(slug);
+    },
+    listResolver(),
+  );
   return { sql, parameters };
 }
 

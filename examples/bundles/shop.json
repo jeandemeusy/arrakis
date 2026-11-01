@@ -1,0 +1,956 @@
+{
+  "format": "arrakis-bundle",
+  "version": 1,
+  "name": "shop",
+  "title": "Shop",
+  "description": "Orders, revenue and customers of a made-up shop. Works on the demo data source that `npm run dev:db -- --demo` creates (db/demo/shop.sql).",
+  "lists": [
+    {
+      "name": "excluded_countries",
+      "type": "text",
+      "description": "Country codes left out of every figure: test shops, say."
+    }
+  ],
+  "queries": [
+    {
+      "slug": "counted-orders",
+      "title": "Counted orders",
+      "description": "Fragment: every order that counts — not refunded, from a country not in the list excluded_countries — with its customer’s country and region.",
+      "kind": "fragment",
+      "sql": "-- Every order that counts: not refunded, and from a country that is not in\n-- {{list:excluded_countries}}.\nSELECT o.id, o.customer_id, o.ordered_at, o.status, c.country, k.region\nFROM orders o\nJOIN customers c ON c.id = o.customer_id\nJOIN countries k ON k.code = c.country\nWHERE o.status <> 'refunded'\n  AND c.country <> ALL ({{list:excluded_countries}})",
+      "parameters": [],
+      "combine": "concat",
+      "timeoutSeconds": null
+    },
+    {
+      "slug": "orders",
+      "title": "Orders",
+      "description": "One row per counted order, with its total and number of items.",
+      "kind": "query",
+      "sql": "SELECT o.id, o.ordered_at, o.status, o.country, o.region,\n  sum(i.quantity * i.unit_price) AS total,\n  sum(i.quantity) AS items\nFROM {{> counted-orders}} AS o\nJOIN order_items i ON i.order_id = o.id\nGROUP BY o.id, o.ordered_at, o.status, o.country, o.region",
+      "parameters": [],
+      "refreshSeconds": 3600,
+      "rowLimit": null,
+      "combine": "concat",
+      "timeoutSeconds": null
+    },
+    {
+      "slug": "customers",
+      "title": "Customers",
+      "description": "One row per customer: where they are, when they signed up and how many orders they placed.",
+      "kind": "query",
+      "sql": "SELECT c.id, c.signed_up_at, c.country, k.region,\n  count(o.id) AS orders\nFROM customers c\nJOIN countries k ON k.code = c.country\nLEFT JOIN orders o ON o.customer_id = c.id AND o.status <> 'refunded'\nWHERE c.country <> ALL ({{list:excluded_countries}})\nGROUP BY c.id, k.region",
+      "parameters": [],
+      "refreshSeconds": 3600,
+      "rowLimit": null,
+      "combine": "concat",
+      "timeoutSeconds": null
+    },
+    {
+      "slug": "order-lines",
+      "title": "Order lines",
+      "description": "One row per product in a counted order.",
+      "kind": "query",
+      "sql": "SELECT o.ordered_at, o.region, p.name AS product, p.category,\n  i.quantity, i.quantity * i.unit_price AS revenue\nFROM {{> counted-orders}} AS o\nJOIN order_items i ON i.order_id = o.id\nJOIN products p ON p.id = i.product_id",
+      "parameters": [],
+      "refreshSeconds": 3600,
+      "rowLimit": null,
+      "combine": "concat",
+      "timeoutSeconds": null
+    }
+  ],
+  "charts": [
+    {
+      "key": "shop/revenue",
+      "query": "orders",
+      "title": "Revenue",
+      "description": "",
+      "type": "number",
+      "config": {
+        "steps": [
+          {
+            "op": "range",
+            "var": "range",
+            "anchor": "now",
+            "column": "ordered_at"
+          },
+          {
+            "op": "aggregate",
+            "groupBy": [],
+            "measures": [
+              {
+                "as": "revenue",
+                "fn": "sum",
+                "columns": [
+                  "total"
+                ]
+              }
+            ]
+          }
+        ],
+        "builder": {
+          "window": {
+            "column": "ordered_at"
+          },
+          "measures": [
+            {
+              "as": "revenue",
+              "fn": "sum",
+              "columns": [
+                "total"
+              ]
+            }
+          ]
+        },
+        "options": {
+          "caption": "in the range"
+        },
+        "encoding": {
+          "y": [
+            "revenue"
+          ]
+        }
+      }
+    },
+    {
+      "key": "shop/orders",
+      "query": "orders",
+      "title": "Orders",
+      "description": "",
+      "type": "number",
+      "config": {
+        "steps": [
+          {
+            "op": "range",
+            "var": "range",
+            "anchor": "now",
+            "column": "ordered_at"
+          },
+          {
+            "op": "aggregate",
+            "groupBy": [],
+            "measures": [
+              {
+                "as": "orders",
+                "fn": "count"
+              }
+            ]
+          }
+        ],
+        "builder": {
+          "window": {
+            "column": "ordered_at"
+          },
+          "measures": [
+            {
+              "as": "orders",
+              "fn": "count"
+            }
+          ]
+        },
+        "options": {
+          "caption": "in the range"
+        },
+        "encoding": {
+          "y": [
+            "orders"
+          ]
+        }
+      }
+    },
+    {
+      "key": "shop/average-order",
+      "query": "orders",
+      "title": "Average order",
+      "description": "",
+      "type": "number",
+      "config": {
+        "steps": [
+          {
+            "op": "range",
+            "var": "range",
+            "anchor": "now",
+            "column": "ordered_at"
+          },
+          {
+            "op": "aggregate",
+            "groupBy": [],
+            "measures": [
+              {
+                "as": "average",
+                "fn": "avg",
+                "columns": [
+                  "total"
+                ]
+              }
+            ]
+          }
+        ],
+        "builder": {
+          "window": {
+            "column": "ordered_at"
+          },
+          "measures": [
+            {
+              "as": "average",
+              "fn": "avg",
+              "columns": [
+                "total"
+              ]
+            }
+          ]
+        },
+        "options": {},
+        "encoding": {
+          "y": [
+            "average"
+          ]
+        }
+      }
+    },
+    {
+      "key": "shop/customers",
+      "query": "customers",
+      "title": "Customers",
+      "description": "",
+      "type": "number",
+      "config": {
+        "steps": [
+          {
+            "op": "aggregate",
+            "groupBy": [],
+            "measures": [
+              {
+                "as": "customers",
+                "fn": "count"
+              }
+            ]
+          }
+        ],
+        "builder": {
+          "measures": [
+            {
+              "as": "customers",
+              "fn": "count"
+            }
+          ]
+        },
+        "options": {
+          "caption": "all time"
+        },
+        "encoding": {
+          "y": [
+            "customers"
+          ]
+        }
+      }
+    },
+    {
+      "key": "shop/orders-and-revenue",
+      "query": "orders",
+      "title": "Orders and revenue",
+      "description": "",
+      "type": "bar",
+      "config": {
+        "steps": [
+          {
+            "op": "range",
+            "var": "range",
+            "anchor": "now",
+            "column": "ordered_at"
+          },
+          {
+            "as": "period",
+            "op": "bucket",
+            "unit": "auto",
+            "column": "ordered_at"
+          },
+          {
+            "op": "aggregate",
+            "groupBy": [
+              "period"
+            ],
+            "measures": [
+              {
+                "as": "orders",
+                "fn": "count"
+              },
+              {
+                "as": "revenue",
+                "fn": "sum",
+                "columns": [
+                  "total"
+                ]
+              }
+            ]
+          },
+          {
+            "by": [
+              {
+                "column": "period"
+              }
+            ],
+            "op": "sort"
+          }
+        ],
+        "builder": {
+          "groups": [
+            {
+              "unit": "auto",
+              "column": "ordered_at"
+            }
+          ],
+          "window": {
+            "column": "ordered_at"
+          },
+          "measures": [
+            {
+              "as": "orders",
+              "fn": "count"
+            },
+            {
+              "as": "revenue",
+              "fn": "sum",
+              "columns": [
+                "total"
+              ]
+            }
+          ]
+        },
+        "options": {
+          "legend": true,
+          "series": {
+            "revenue": {
+              "axis": "right",
+              "mark": "line"
+            }
+          }
+        },
+        "encoding": {
+          "x": "period",
+          "y": [
+            "orders",
+            "revenue"
+          ]
+        }
+      }
+    },
+    {
+      "key": "shop/orders-by-status",
+      "query": "orders",
+      "title": "Orders by status",
+      "description": "",
+      "type": "pie",
+      "config": {
+        "steps": [
+          {
+            "op": "range",
+            "var": "range",
+            "anchor": "now",
+            "column": "ordered_at"
+          },
+          {
+            "op": "aggregate",
+            "groupBy": [
+              "status"
+            ],
+            "measures": [
+              {
+                "as": "orders",
+                "fn": "count"
+              }
+            ]
+          },
+          {
+            "by": [
+              {
+                "desc": true,
+                "column": "orders"
+              }
+            ],
+            "op": "sort"
+          }
+        ],
+        "builder": {
+          "groups": [
+            {
+              "column": "status"
+            }
+          ],
+          "window": {
+            "column": "ordered_at"
+          },
+          "measures": [
+            {
+              "as": "orders",
+              "fn": "count"
+            }
+          ]
+        },
+        "options": {
+          "donut": true
+        },
+        "encoding": {
+          "x": "status",
+          "y": [
+            "orders"
+          ]
+        }
+      }
+    },
+    {
+      "key": "shop/revenue-by-region",
+      "query": "orders",
+      "title": "Revenue by region",
+      "description": "",
+      "type": "area",
+      "config": {
+        "steps": [
+          {
+            "op": "range",
+            "var": "range",
+            "anchor": "now",
+            "column": "ordered_at"
+          },
+          {
+            "as": "period",
+            "op": "bucket",
+            "unit": "auto",
+            "column": "ordered_at"
+          },
+          {
+            "op": "aggregate",
+            "groupBy": [
+              "period",
+              "region"
+            ],
+            "measures": [
+              {
+                "as": "revenue",
+                "fn": "sum",
+                "columns": [
+                  "total"
+                ]
+              }
+            ]
+          },
+          {
+            "by": [
+              {
+                "column": "period"
+              }
+            ],
+            "op": "sort"
+          }
+        ],
+        "builder": {
+          "split": {
+            "column": "region"
+          },
+          "groups": [
+            {
+              "unit": "auto",
+              "column": "ordered_at"
+            }
+          ],
+          "window": {
+            "column": "ordered_at"
+          },
+          "measures": [
+            {
+              "as": "revenue",
+              "fn": "sum",
+              "columns": [
+                "total"
+              ]
+            }
+          ]
+        },
+        "options": {
+          "legend": true,
+          "stacked": true
+        },
+        "encoding": {
+          "x": "period",
+          "y": [
+            "revenue"
+          ],
+          "series": "region"
+        }
+      }
+    },
+    {
+      "key": "shop/revenue-by-category",
+      "query": "order-lines",
+      "title": "Revenue by category",
+      "description": "",
+      "type": "pie",
+      "config": {
+        "steps": [
+          {
+            "op": "range",
+            "var": "range",
+            "anchor": "now",
+            "column": "ordered_at"
+          },
+          {
+            "op": "aggregate",
+            "groupBy": [
+              "category"
+            ],
+            "measures": [
+              {
+                "as": "revenue",
+                "fn": "sum",
+                "columns": [
+                  "revenue"
+                ]
+              }
+            ]
+          },
+          {
+            "by": [
+              {
+                "desc": true,
+                "column": "revenue"
+              }
+            ],
+            "op": "sort"
+          }
+        ],
+        "builder": {
+          "groups": [
+            {
+              "column": "category"
+            }
+          ],
+          "window": {
+            "column": "ordered_at"
+          },
+          "measures": [
+            {
+              "as": "revenue",
+              "fn": "sum",
+              "columns": [
+                "revenue"
+              ]
+            }
+          ]
+        },
+        "options": {
+          "dataLabels": true
+        },
+        "encoding": {
+          "x": "category",
+          "y": [
+            "revenue"
+          ]
+        }
+      }
+    },
+    {
+      "key": "shop/top-products",
+      "query": "order-lines",
+      "title": "Top products",
+      "description": "",
+      "type": "share",
+      "config": {
+        "steps": [
+          {
+            "op": "range",
+            "var": "range",
+            "anchor": "now",
+            "column": "ordered_at"
+          },
+          {
+            "op": "aggregate",
+            "groupBy": [
+              "product"
+            ],
+            "measures": [
+              {
+                "as": "revenue",
+                "fn": "sum",
+                "columns": [
+                  "revenue"
+                ]
+              }
+            ]
+          },
+          {
+            "n": 10,
+            "by": "revenue",
+            "op": "top",
+            "sum": [
+              "revenue"
+            ],
+            "column": "product",
+            "others": "Others"
+          },
+          {
+            "by": [
+              {
+                "desc": true,
+                "column": "revenue"
+              }
+            ],
+            "op": "sort"
+          }
+        ],
+        "builder": {
+          "top": {
+            "n": 10
+          },
+          "groups": [
+            {
+              "column": "product"
+            }
+          ],
+          "window": {
+            "column": "ordered_at"
+          },
+          "measures": [
+            {
+              "as": "revenue",
+              "fn": "sum",
+              "columns": [
+                "revenue"
+              ]
+            }
+          ]
+        },
+        "options": {},
+        "encoding": {
+          "x": "product",
+          "y": [
+            "revenue"
+          ]
+        }
+      }
+    },
+    {
+      "key": "shop/when-orders-come-in",
+      "query": "orders",
+      "title": "When orders come in",
+      "description": "",
+      "type": "heatmap",
+      "config": {
+        "steps": [
+          {
+            "op": "range",
+            "var": "range",
+            "anchor": "now",
+            "column": "ordered_at"
+          },
+          {
+            "as": "hour",
+            "op": "bucket",
+            "unit": "hour_of_day",
+            "column": "ordered_at"
+          },
+          {
+            "as": "weekday",
+            "op": "bucket",
+            "unit": "day_of_week",
+            "column": "ordered_at"
+          },
+          {
+            "op": "aggregate",
+            "groupBy": [
+              "hour",
+              "weekday"
+            ],
+            "measures": [
+              {
+                "as": "orders",
+                "fn": "count"
+              }
+            ]
+          },
+          {
+            "as": "orders_total",
+            "fn": "sum",
+            "op": "window",
+            "column": "orders"
+          },
+          {
+            "as": "share",
+            "op": "compute",
+            "left": "orders",
+            "right": "orders_total",
+            "operator": "/"
+          },
+          {
+            "by": [
+              {
+                "column": "hour"
+              },
+              {
+                "column": "weekday"
+              }
+            ],
+            "op": "sort"
+          }
+        ],
+        "builder": {
+          "share": {
+            "of": "orders"
+          },
+          "groups": [
+            {
+              "unit": "hour_of_day",
+              "column": "ordered_at"
+            },
+            {
+              "unit": "day_of_week",
+              "column": "ordered_at"
+            }
+          ],
+          "window": {
+            "column": "ordered_at"
+          },
+          "measures": [
+            {
+              "as": "orders",
+              "fn": "count"
+            }
+          ]
+        },
+        "options": {
+          "format": "percent",
+          "formats": {
+            "share": "percent"
+          }
+        },
+        "encoding": {
+          "x": "hour",
+          "row": "weekday",
+          "value": "share"
+        }
+      }
+    },
+    {
+      "key": "shop/customers-by-country",
+      "query": "customers",
+      "title": "Customers by country",
+      "description": "",
+      "type": "bar",
+      "config": {
+        "steps": [
+          {
+            "op": "aggregate",
+            "groupBy": [
+              "country"
+            ],
+            "measures": [
+              {
+                "as": "customers",
+                "fn": "count"
+              }
+            ]
+          },
+          {
+            "by": [
+              {
+                "desc": true,
+                "column": "customers"
+              }
+            ],
+            "op": "sort"
+          }
+        ],
+        "builder": {
+          "sort": [
+            {
+              "desc": true,
+              "column": "customers"
+            }
+          ],
+          "groups": [
+            {
+              "column": "country"
+            }
+          ],
+          "measures": [
+            {
+              "as": "customers",
+              "fn": "count"
+            }
+          ]
+        },
+        "options": {},
+        "encoding": {
+          "x": "country",
+          "y": [
+            "customers"
+          ]
+        }
+      }
+    },
+    {
+      "key": "shop/latest-orders",
+      "query": "orders",
+      "title": "Latest orders",
+      "description": "",
+      "type": "table",
+      "config": {
+        "steps": [
+          {
+            "by": [
+              {
+                "desc": true,
+                "column": "ordered_at"
+              }
+            ],
+            "op": "sort"
+          },
+          {
+            "n": 200,
+            "op": "limit"
+          }
+        ],
+        "builder": {
+          "sort": [
+            {
+              "desc": true,
+              "column": "ordered_at"
+            }
+          ],
+          "limit": 200
+        },
+        "options": {},
+        "encoding": {}
+      }
+    }
+  ],
+  "dashboards": [
+    {
+      "slug": "shop",
+      "title": "Shop",
+      "description": "Orders, revenue and customers of a made-up shop: the demo data source that npm run dev:db -- --demo creates.",
+      "visibility": "public",
+      "variables": [
+        {
+          "name": "range",
+          "type": "range",
+          "label": "Range",
+          "default": "30d",
+          "options": [
+            "7d",
+            "30d",
+            "90d",
+            "all"
+          ]
+        },
+        {
+          "name": "network",
+          "type": "network",
+          "label": "Data source",
+          "default": "all"
+        }
+      ],
+      "widgets": [
+        {
+          "kind": "visualization",
+          "chart": "shop/revenue",
+          "width": 3,
+          "height": 160,
+          "options": {}
+        },
+        {
+          "kind": "visualization",
+          "chart": "shop/orders",
+          "width": 3,
+          "height": 160,
+          "options": {}
+        },
+        {
+          "kind": "visualization",
+          "chart": "shop/average-order",
+          "width": 3,
+          "height": 160,
+          "options": {}
+        },
+        {
+          "kind": "visualization",
+          "chart": "shop/customers",
+          "width": 3,
+          "height": 160,
+          "options": {}
+        },
+        {
+          "kind": "text",
+          "text": "Sales",
+          "width": 12,
+          "height": 80,
+          "options": {
+            "note": "Refunded orders are left out, and so are the countries in the list excluded_countries."
+          }
+        },
+        {
+          "kind": "visualization",
+          "chart": "shop/orders-and-revenue",
+          "width": 8,
+          "height": 320,
+          "options": {}
+        },
+        {
+          "kind": "visualization",
+          "chart": "shop/orders-by-status",
+          "width": 4,
+          "height": 320,
+          "options": {}
+        },
+        {
+          "kind": "visualization",
+          "chart": "shop/revenue-by-region",
+          "width": 8,
+          "height": 320,
+          "options": {}
+        },
+        {
+          "kind": "visualization",
+          "chart": "shop/revenue-by-category",
+          "width": 4,
+          "height": 320,
+          "options": {}
+        },
+        {
+          "kind": "text",
+          "text": "Products and customers",
+          "width": 12,
+          "height": 80,
+          "options": {}
+        },
+        {
+          "kind": "visualization",
+          "chart": "shop/top-products",
+          "width": 6,
+          "height": 360,
+          "options": {}
+        },
+        {
+          "kind": "visualization",
+          "chart": "shop/when-orders-come-in",
+          "width": 6,
+          "height": 360,
+          "options": {}
+        },
+        {
+          "kind": "visualization",
+          "chart": "shop/customers-by-country",
+          "width": 6,
+          "height": 320,
+          "options": {}
+        },
+        {
+          "kind": "visualization",
+          "chart": "shop/latest-orders",
+          "width": 6,
+          "height": 320,
+          "options": {}
+        }
+      ]
+    }
+  ]
+}

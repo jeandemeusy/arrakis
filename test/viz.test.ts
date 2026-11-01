@@ -116,9 +116,17 @@ describe(
       );
       cookie = cookieFrom(login);
 
+      // The exits the redemption query reads: none listed.
+      await (
+        await lib.app.appDb()
+      ).query("INSERT INTO lists (name, type) VALUES ('exits', 'bytes')");
+
       // Every redemption paid to an announced node, timestamped.
       const redemptions = (
-        await readFile(path.join(root, 'sql', 'v1', 'redemptions.sql'), 'utf8')
+        await readFile(
+          path.join(root, 'test', 'fixtures', 'sql', 'v1', 'redemptions.sql'),
+          'utf8',
+        )
       )
         .replaceAll('$1::bytea[]', '{{exits}}')
         .replace(/;\s*$/, '');
@@ -129,7 +137,7 @@ describe(
             slug: 'timed',
             title: 'Timed redemptions',
             visibility: 'public',
-            sql: `WITH r AS (\n${redemptions}\n)\nSELECT r.*, {{block_time(r.published_block)}} AS at FROM r`,
+            sql: `WITH r AS (\n${redemptions}\n)\nSELECT r.*, to_timestamp(extract(epoch FROM now()) - ((SELECT last_indexed_block FROM chain_info ORDER BY id LIMIT 1) - r.published_block) * 5) AS at FROM r`,
           },
         }),
         undefined,

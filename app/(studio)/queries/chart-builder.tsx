@@ -73,7 +73,7 @@ const FORMAT_LABELS: Record<Format, string> = {
   decimal: '1.23',
   percent: '12%',
   gigabytes: 'GB / MB',
-  token: 'wxHOPR',
+  token: '÷ 10¹⁸ (token)',
 };
 
 const isTime = (column: ScopeColumn | undefined) =>

@@ -176,7 +176,6 @@ export type Preview = {
     id: string;
     rowCount: number;
     durationMs: number;
-    timebase: 'rpc' | 'estimated' | null;
     error?: string;
   }>;
 };
@@ -191,7 +190,6 @@ export type ResultPage = {
     truncated: boolean;
     finishedAt: string | null;
     durationMs: number | null;
-    timebase: 'rpc' | 'estimated' | null;
     stale: boolean;
     lastAttempt: {
       status: string;
@@ -237,6 +235,8 @@ export type DashboardVariable = {
   options?: string[];
   /** Display names for some options, e.g. 31d → "Last 30 days". */
   labels?: Record<string, string>;
+  /** Data source variable: whether "All, stacked" is offered (absent: yes). */
+  stack?: boolean;
 };
 
 export type WidgetOptions = {

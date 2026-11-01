@@ -103,10 +103,25 @@ export function VariablesEditor({
             }}
           >
             <option value="range">time range</option>
-            <option value="network">network</option>
+            <option value="network">data source</option>
             <option value="text">text (set by clicks)</option>
             <option value="select">select</option>
           </select>
+          {variable.type === 'network' && (
+            <label
+              className="stack-sources"
+              title="Offer every data source at once, their rows stacked under a source column"
+            >
+              <input
+                type="checkbox"
+                checked={variable.stack !== false}
+                onChange={(event) =>
+                  set(at, { stack: event.target.checked ? undefined : false })
+                }
+              />
+              <span>All, stacked</span>
+            </label>
+          )}
           {(variable.type === 'range' || variable.type === 'select') && (
             <OptionsInput
               variable={variable}

@@ -78,23 +78,34 @@ describe('compile', () => {
     assert.ok(compiled.text.includes("'{{nope}}'"));
   });
 
-  it('fills system parameters and refuses to let them be declared', async () => {
+  it('fills the data source and lists, and refuses to let them be declared', async () => {
+    const lists = async (name: string) => (name === 'exits' ? 'bytes' : null);
     const compiled = await compile(
-      'SELECT {{network}}, cardinality({{exits}})',
+      'SELECT {{source}}, {{network}}, cardinality({{list:exits}}), cardinality({{exits}})',
       [],
       none,
+      lists,
     );
-    assert.deepEqual(compiled.system.sort(), ['exits', 'network']);
+    assert.deepEqual(compiled.system.sort(), ['network', 'source']);
+    assert.deepEqual(compiled.lists, ['exits']);
+    // `{{exits}}` is the list of that name: one slot for both.
+    assert.match(compiled.text, /\$3::bytea\[\]\).*\$3::bytea\[\]/s);
     const { values } = bind(
       compiled,
       {},
-      { network: 'jura', exits: [Buffer.alloc(20)] },
+      { network: 'jura', lists: { exits: [Buffer.alloc(20)] } },
     );
-    assert.equal(values.length, 2);
-    assert.throws(
-      () => parseDefinitions([{ name: 'exits', type: 'text' }]),
-      /reserved/,
+    assert.equal(values.length, 3);
+    assert.throws(() => bind(compiled, {}, { network: 'jura' }), /list exits/);
+    await assert.rejects(
+      compile('SELECT {{list:nope}}', [], none, lists),
+      /no list "nope"/,
     );
+    for (const name of ['exits', 'source', 'network'])
+      assert.throws(
+        () => parseDefinitions([{ name, type: 'text' }]),
+        /reserved/,
+      );
   });
 
   it('rejects a second statement, positional parameters and unknown names', async () => {
@@ -160,17 +171,6 @@ describe('compile', () => {
       compile('SELECT * FROM {{> nope}} z', [], resolve),
       /Unknown fragment/,
     );
-  });
-
-  it('expands block_time() over two clock slots', async () => {
-    const compiled = await compile(
-      'SELECT {{block_time(published_block)}} AS at, {{block_time(1)}} FROM account',
-      [],
-      none,
-    );
-    assert.equal(compiled.usesClock, true);
-    assert.equal(compiled.slots.length, 2);
-    assert.throws(() => bind(compiled, {}, { network: 'jura' }), /block clock/);
   });
 
   it('validates parameter values', async () => {

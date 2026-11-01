@@ -8,10 +8,13 @@ import { HelpTip } from '../help-tip';
 export function SchemaPanel({
   schema,
   fragments,
+  lists,
   onInsert,
 }: {
   schema: SchemaTable[];
   fragments: QuerySummary[];
+  /** The lists a query can read, by name. */
+  lists: Array<{ name: string; type: string }>;
   onInsert: (text: string) => void;
 }) {
   const [schemaFilter, setSchemaFilter] = useState('');
@@ -101,13 +104,35 @@ export function SchemaPanel({
       </ul>
       <h2>Built in</h2>
       <ul className="fragment-list">
-        {['{{network}}', '{{exits}}', '{{block_time(block)}}'].map((text) => (
-          <li key={text}>
-            <button type="button" onClick={() => onInsert(text)}>
-              {text}
+        <li>
+          <button
+            type="button"
+            title="The id of the data source the run reads"
+            onClick={() => onInsert('{{source}}')}
+          >
+            {'{{source}}'}
+          </button>
+        </li>
+      </ul>
+      <h2>Lists</h2>
+      <ul className="fragment-list">
+        {lists.map((list) => (
+          <li key={list.name}>
+            <button
+              type="button"
+              title={`An array of ${list.type}, as kept under Settings → Lists`}
+              onClick={() => onInsert(`{{list:${list.name}}}`)}
+            >
+              {`{{list:${list.name}}}`}
             </button>
+            <small>{list.type}</small>
           </li>
         ))}
+        {!lists.length && (
+          <li className="studio-muted">
+            None yet. Keep values a query reads under Settings → Lists.
+          </li>
+        )}
       </ul>
     </aside>
   );

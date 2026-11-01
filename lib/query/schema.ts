@@ -5,7 +5,7 @@ import { runReadOnly } from './runner';
 
 /**
  * What an editor can query on a network: every table and view the role can
- * read, with its columns. Cached for a few minutes; the Blokli schema only
+ * read, with its columns. Cached for a few minutes; a schema rarely
  * changes with a migration.
  */
 

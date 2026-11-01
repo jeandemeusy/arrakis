@@ -30,7 +30,7 @@ const FORMAT_LABELS: Record<Format, string> = {
   decimal: '1,234.56',
   percent: '12.3%',
   gigabytes: '1.2 GB',
-  token: 'wxHOPR',
+  token: '÷ 10¹⁸ (token)',
 };
 
 type Set = (patch: Partial<Options>) => void;

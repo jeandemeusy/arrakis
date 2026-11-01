@@ -11,7 +11,7 @@ export const metadata: Metadata = {
 };
 
 /**
- * Every page but the classic dashboard: the dashboards, the queries behind
+ * Every page: the dashboards, the queries behind
  * them and the settings, with the sidebar beside them. Readable by anyone for
  * what is public; editing needs the password.
  */

@@ -702,6 +702,9 @@ export function DashboardView({
               path={() => window.location.pathname + window.location.search}
               viewLabel="the filters as they are now"
               canEdit={Boolean(user)}
+              bundleHref={
+                user ? `/api/v1/dashboards/${slug}/bundle` : undefined
+              }
               onVisibility={async (visibility) => {
                 await api(`/api/v1/dashboards/${slug}`, {
                   method: 'PATCH',

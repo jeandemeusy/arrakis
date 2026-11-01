@@ -36,7 +36,7 @@ export function ExtractForm({
         <input
           className="studio-input mono"
           aria-label="Fragment slug"
-          placeholder="slug, e.g. vpn-clients"
+          placeholder="slug, e.g. active-users"
           pattern="[a-z0-9][a-z0-9\-]*"
           required
           value={slug}

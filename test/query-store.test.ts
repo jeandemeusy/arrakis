@@ -50,8 +50,8 @@ describe(
       run: typeof import('../app/api/v1/queries/[slug]/run/route');
       results: typeof import('../app/api/v1/queries/[slug]/results/route');
       adhoc: typeof import('../app/api/v1/run/route');
-      exits: typeof import('../app/api/v1/networks/[network]/exits/route');
-      exit: typeof import('../app/api/v1/networks/[network]/exits/[address]/route');
+      lists: typeof import('../app/api/v1/lists/route');
+      listValues: typeof import('../app/api/v1/lists/[name]/values/route');
       schema: typeof import('../app/api/v1/schema/route');
       runs: typeof import('../app/api/v1/runs/route');
       cancel: typeof import('../app/api/v1/runs/cancel/route');
@@ -102,8 +102,8 @@ describe(
         run: await import('../app/api/v1/queries/[slug]/run/route'),
         results: await import('../app/api/v1/queries/[slug]/results/route'),
         adhoc: await import('../app/api/v1/run/route'),
-        exits: await import('../app/api/v1/networks/[network]/exits/route'),
-        exit: await import('../app/api/v1/networks/[network]/exits/[address]/route'),
+        lists: await import('../app/api/v1/lists/route'),
+        listValues: await import('../app/api/v1/lists/[name]/values/route'),
         schema: await import('../app/api/v1/schema/route'),
         runs: await import('../app/api/v1/runs/route'),
         cancel: await import('../app/api/v1/runs/cancel/route'),
@@ -235,27 +235,6 @@ describe(
         );
         assert.equal((result.rows as unknown[]).length, 10_000);
         assert.equal(result.truncated, true);
-      });
-
-      it('interpolates block_time() and reports the timebase', async () => {
-        const result = await body(
-          await adhoc(
-            `SELECT published_block, {{block_time(published_block)}} AS at
-           FROM account ORDER BY published_block`,
-            { network: 'jura' },
-          ),
-        );
-        const rows = result.rows as Array<[string, string]>;
-        const times = rows.map(([, at]) => Date.parse(at));
-        assert.ok(
-          times.every((time, index) => index === 0 || time > times[index - 1]),
-        );
-        // 1,000 blocks apart at five seconds a block.
-        assert.equal((times[1] - times[0]) / 1000, 5_000);
-        assert.equal(
-          (result.networks as Array<{ timebase: string }>)[0].timebase,
-          'estimated',
-        );
       });
 
       it('binds declared parameters', async () => {
@@ -483,9 +462,17 @@ describe(
           context({ slug }),
         );
 
-      it('stores the dashboard redemption query, with exits as a system parameter', async () => {
+      it('stores the dashboard redemption query, reading the list of exits', async () => {
+        const list = await routes.lists.POST(
+          request('POST', '/api/v1/lists', {
+            cookie,
+            body: { name: 'exits', type: 'bytes' },
+          }),
+          undefined,
+        );
+        assert.equal(list.status, 201);
         const original = await readFile(
-          path.join(root, 'sql', 'v1', 'redemptions.sql'),
+          path.join(root, 'test', 'fixtures', 'sql', 'v1', 'redemptions.sql'),
           'utf8',
         );
         const sql = original.replaceAll('$1::bytea[]', '{{exits}}');
@@ -610,43 +597,47 @@ describe(
         );
       });
 
-      it('configures exits per network and warns about an unannounced one', async () => {
-        const add = (address: string) =>
-          routes.exits.POST(
-            request('POST', '/api/v1/networks/jura/exits', {
+      it('keeps list values per data source', async () => {
+        const add = (value: string, source: string | null = 'jura') =>
+          routes.listValues.POST(
+            request('POST', '/api/v1/lists/exits/values', {
               cookie,
-              body: { address, label: 'exit' },
+              body: { value, label: 'exit', source },
             }),
-            context({ network: 'jura' }),
+            context({ name: 'exits' }),
           );
-        const first = await add(EXIT_A);
-        assert.equal(first.status, 201);
-        assert.equal((await body(first)).warning, null);
-        assert.equal((await add(EXIT_B)).status, 201);
-        assert.equal((await add(EXIT_B)).status, 409);
-
-        const unannounced = await body(await add(CLIENT));
-        assert.match(String(unannounced.warning), /never announced/);
-        const removed = await routes.exit.DELETE(
-          request('DELETE', `/api/v1/networks/jura/exits/${CLIENT}`, {
-            cookie,
-          }),
-          context({ network: 'jura', address: CLIENT }),
+        assert.equal((await add(EXIT_A)).status, 201);
+        assert.equal(
+          (await add(EXIT_B.toUpperCase().replace('0X', '0x'))).status,
+          201,
         );
-        assert.equal(removed.status, 200);
+        assert.equal((await add(EXIT_B)).status, 400);
+        assert.equal((await add('not hex')).status, 400);
+        assert.equal((await add(EXIT_A, 'nowhere')).status, 400);
 
-        const listed = await body(
-          await routes.exits.GET(
-            request('GET', '/api/v1/networks/jura/exits'),
-            context({ network: 'jura' }),
+        const listed = (await body(
+          await routes.lists.GET(
+            request('GET', '/api/v1/lists', { cookie }),
+            undefined,
           ),
-        );
+        )) as {
+          lists: Array<{
+            name: string;
+            values: Array<{ value: string; source: string }>;
+          }>;
+        };
         assert.deepEqual(
-          (listed.exits as Array<{ address: string }>).map(
-            (exit) => exit.address,
-          ),
-          [EXIT_A, EXIT_B],
+          listed.lists[0].values.map((entry) => [entry.source, entry.value]),
+          [
+            ['jura', EXIT_A],
+            ['jura', EXIT_B],
+          ],
         );
+        const anonymous = await routes.lists.GET(
+          request('GET', '/api/v1/lists'),
+          undefined,
+        );
+        assert.equal(anonymous.status, 401);
       });
 
       it('marks results built on the old exit set stale, and the scheduler reruns them', async () => {

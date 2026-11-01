@@ -1,7 +1,7 @@
 /**
  * Result columns: what a PostgreSQL type becomes in a result table, and in JSON.
  *
- * Blokli stores addresses, balances and oracle values as raw bytes, and bigints
+ * Databases often store hashes, addresses and large values as raw bytes, and bigints
  * exceed what a JSON number holds exactly, so the mapping is explicit rather than
  * left to `JSON.stringify`: bytes become 0x-hex, 64-bit integers and numerics
  * stay decimal strings, timestamps become ISO 8601.

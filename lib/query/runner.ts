@@ -14,10 +14,10 @@ import { columnType, type Column } from './columns';
 import type { BindValue } from './params';
 
 /**
- * Runs SQL against a Blokli database, read-only, bounded in time, rows and
+ * Runs SQL against a data source, read-only, bounded in time, rows and
  * concurrency. Every query in Arrakis — an editor's experiment, a scheduled
  * refresh, a system lookup — goes through `runReadOnly`; there is no second
- * path to a Blokli database for saved queries.
+ * path to a data source for saved queries.
  *
  * Read-only is enforced three times over:
  *

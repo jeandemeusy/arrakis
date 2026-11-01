@@ -1,11 +1,17 @@
 import assert from 'node:assert/strict';
-import { readdir, readFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { describe, it } from 'node:test';
 
 import { formatSql, significant } from '../app/(studio)/sql-format';
 
-const seeds = path.join(import.meta.dirname, '..', 'db', 'seed', 'gnosis-vpn');
+const example = path.join(
+  import.meta.dirname,
+  '..',
+  'examples',
+  'bundles',
+  'gnosis-vpn.json',
+);
 
 describe('formatSql', () => {
   it('lays clauses, lists, joins and subqueries out on their own lines', () => {
@@ -72,16 +78,15 @@ describe('formatSql', () => {
     );
   });
 
-  it('changes only whitespace and case, and is stable, on every bundled query', async () => {
-    const files = (await readdir(seeds)).filter((name) =>
-      name.endsWith('.sql'),
-    );
-    assert.ok(files.length > 5);
-    for (const name of files) {
-      const sql = await readFile(path.join(seeds, name), 'utf8');
+  it('changes only whitespace and case, and is stable, on every query of the example bundle', async () => {
+    const { queries } = JSON.parse(await readFile(example, 'utf8')) as {
+      queries: Array<{ slug: string; sql: string }>;
+    };
+    assert.ok(queries.length > 5);
+    for (const { slug, sql } of queries) {
       const once = formatSql(sql);
-      assert.deepEqual(significant(once), significant(sql), name);
-      assert.equal(formatSql(once), once, name);
+      assert.deepEqual(significant(once), significant(sql), slug);
+      assert.equal(formatSql(once), once, slug);
     }
   });
 });

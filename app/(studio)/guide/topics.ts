@@ -19,6 +19,12 @@ export const GUIDE_TOPICS = [
       'Queries read a data source and store their result; charts shape a stored result; dashboards arrange charts. Reading a chart never runs a query.',
   },
   {
+    id: 'sources',
+    title: 'Data sources',
+    summary:
+      'The databases Arrakis reads, each through a read-only role, set in the deployment. A query runs on one, or on all of them stacked.',
+  },
+  {
     id: 'queries',
     title: 'Writing and running queries',
     summary:
@@ -43,6 +49,12 @@ export const GUIDE_TOPICS = [
       'A fragment is SQL saved to be reused: a query stands in for a table, anything else for a value. {{> slug(arg)}} passes arguments.',
   },
   {
+    id: 'lists',
+    title: 'Lists',
+    summary:
+      'Values a query reads as {{list:name}}, kept per data source or for all of them. Changing one reruns the queries that read it.',
+  },
+  {
     id: 'results',
     title: 'Stored results and schedules',
     summary:
@@ -65,6 +77,12 @@ export const GUIDE_TOPICS = [
     title: 'Dashboards and variables',
     summary:
       'Variables are what viewers change: a range, a data source, a selected value. Charts read them through their filters; a click on a chart can set one.',
+  },
+  {
+    id: 'bundles',
+    title: 'Bundles',
+    summary:
+      'A dashboard with its charts and queries as one file: export it from Share, import it on another Arrakis from a file or a URL.',
   },
   {
     id: 'lineage',

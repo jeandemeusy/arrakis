@@ -1,85 +1,51 @@
 /**
- * The set of Blokli index databases the dashboard reads.
+ * The data sources Arrakis queries: PostgreSQL databases (or anything that
+ * speaks its protocol — Supabase, Neon, RDS, Timescale…), each reached through
+ * a role that can only read.
  *
- * Configured with `NETWORKS`, a JSON array:
+ * Configured in the deployment, not in the app, with `DATA_SOURCES`, a JSON
+ * array:
  *
- *   NETWORKS='[{"id":"jura","label":"Jura","databaseUrl":"postgres://…","rpcUrl":"https://…"}]'
+ *   DATA_SOURCES='[{"id":"prod","label":"Production","databaseUrl":"postgres://…"}]'
  *
- * A lone `DATABASE_URL` still works and is read as a single unnamed network, so an
- * existing single-network deployment needs no configuration change.
+ * `queryDatabaseUrl`, optional, is where saved queries actually run: a read
+ * replica, or the same database under a stricter role. A lone `DATABASE_URL`
+ * still works and is read as one source, and `NETWORKS` — this variable's
+ * name before Arrakis read more than one kind of database — is read as
+ * `DATA_SOURCES`.
  *
- * Exit addresses are configuration rather than something read off the chain.
- * Nothing on chain distinguishes an exit from a relay — both announce — and an
- * exit that also relays for clients cannot be told apart by elimination at all.
- * Naming them is the only reliable way, until the service registry does it:
- *
- *   EXITS='0xabc…,0xdef…'                       applies to every network
- *   NETWORKS='[{…,"exits":["0xabc…"]}]'         overrides it for one network
+ * Internally a data source is still a "network" in names and columns: that is
+ * what the first one was.
  */
 
 export type NetworkConfig = {
   id: string;
   label: string;
   databaseUrl: string;
-  /**
-   * Where saved queries run. Defaults to `databaseUrl`; point it at a read
-   * replica, or at the same database under a stricter role, to keep editor and
-   * scheduled queries off the connection the dashboard depends on.
-   */
+  /** Where saved queries run. Defaults to `databaseUrl`. */
   queryDatabaseUrl: string;
-  rpcUrl: string | null;
-  /** Known exit addresses, lowercased. Empty means none were configured. */
-  exits: string[];
 };
 
-/** What the browser is told about a network: never the connection string. */
+/** What the browser is told about a data source: never the connection string. */
 export type NetworkSummary = {
   id: string;
   label: string;
 };
 
 const ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,31}$/;
-const ADDRESS_PATTERN = /^0x[0-9a-f]{40}$/;
-
-/**
- * Parses a list of addresses, from a JSON array or a delimited string.
- *
- * Addresses are lowercased because a checksummed address and the same address in
- * lower case are the same account, and the chain hands them over in lower case.
- * A malformed entry throws: an exit silently dropped for a typo would take its
- * traffic out of the downstream figure with nothing to show for it.
- */
-function parseAddresses(input: unknown, where: string): string[] {
-  if (input === undefined || input === null) return [];
-  const raw = Array.isArray(input)
-    ? input
-    : typeof input === 'string'
-      ? input.split(/[\s,]+/)
-      : null;
-  if (!raw) throw new Error(`${where} must be an array or a delimited string`);
-
-  const addresses = raw
-    .map((entry) =>
-      typeof entry === 'string' ? entry.trim().toLowerCase() : '',
-    )
-    .filter((entry) => entry.length > 0);
-  for (const address of addresses) {
-    if (!ADDRESS_PATTERN.test(address)) {
-      throw new Error(
-        `${where} contains ${JSON.stringify(address)}, which is not an address`,
-      );
-    }
-  }
-  return [...new Set(addresses)];
-}
 
 function isPostgres(url: string): boolean {
   return url.startsWith('postgres://') || url.startsWith('postgresql://');
 }
 
-function parseEntry(entry: unknown, index: number): NetworkConfig {
+function parseEntry(
+  entry: unknown,
+  index: number,
+  variable: string,
+): NetworkConfig {
+  const where = `${variable}[${index}]`;
   if (typeof entry !== 'object' || entry === null) {
-    throw new Error(`NETWORKS[${index}] is not an object`);
+    throw new Error(`${where} is not an object`);
   }
   const record = entry as Record<string, unknown>;
   const id = typeof record.id === 'string' ? record.id.trim() : '';
@@ -94,81 +60,73 @@ function parseEntry(entry: unknown, index: number): NetworkConfig {
     record.queryDatabaseUrl.trim()
       ? record.queryDatabaseUrl.trim()
       : databaseUrl;
-  const rpcUrl =
-    typeof record.rpcUrl === 'string' && record.rpcUrl.trim()
-      ? record.rpcUrl.trim()
-      : null;
-  const exits =
-    record.exits === undefined
-      ? defaultExits()
-      : parseAddresses(record.exits, `NETWORKS[${index}].exits`);
 
   if (!ID_PATTERN.test(id)) {
     throw new Error(
-      `NETWORKS[${index}].id must be lowercase letters, digits or dashes; got ${JSON.stringify(record.id)}`,
+      `${where}.id must be lowercase letters, digits or dashes; got ${JSON.stringify(record.id)}`,
     );
   }
   if (!isPostgres(databaseUrl)) {
     throw new Error(
-      `NETWORKS[${index}].databaseUrl must be a PostgreSQL connection string`,
+      `${where}.databaseUrl must be a PostgreSQL connection string`,
     );
   }
   if (!isPostgres(queryDatabaseUrl)) {
     throw new Error(
-      `NETWORKS[${index}].queryDatabaseUrl must be a PostgreSQL connection string`,
+      `${where}.queryDatabaseUrl must be a PostgreSQL connection string`,
     );
   }
-  return { id, label, databaseUrl, queryDatabaseUrl, rpcUrl, exits };
-}
-
-/** Exits shared by every network, unless one names its own. */
-function defaultExits(): string[] {
-  return parseAddresses(process.env.EXITS?.trim() || null, 'EXITS');
+  return { id, label, databaseUrl, queryDatabaseUrl };
 }
 
 /**
- * Reads the configured networks, newest configuration format first.
+ * Reads the configured data sources.
  *
- * Throws rather than silently falling back: a malformed `NETWORKS` almost always
- * means a deployment mistake, and quietly serving one network — or none — would
- * hide it behind an empty dashboard.
+ * Throws rather than silently falling back: a malformed `DATA_SOURCES` almost
+ * always means a deployment mistake, and quietly serving one source — or none
+ * — would hide it behind empty dashboards.
  */
 export function resolveNetworks(): NetworkConfig[] {
-  const raw = process.env.NETWORKS?.trim();
+  const variable = process.env.DATA_SOURCES?.trim()
+    ? 'DATA_SOURCES'
+    : process.env.NETWORKS?.trim()
+      ? 'NETWORKS'
+      : null;
+  const raw = variable ? process.env[variable]!.trim() : null;
 
-  if (raw) {
+  if (variable && raw) {
     let parsed: unknown;
     try {
       parsed = JSON.parse(raw);
     } catch {
-      throw new Error('NETWORKS is not valid JSON');
+      throw new Error(`${variable} is not valid JSON`);
     }
     if (!Array.isArray(parsed) || parsed.length === 0) {
-      throw new Error('NETWORKS must be a non-empty JSON array');
+      throw new Error(`${variable} must be a non-empty JSON array`);
     }
-    const networks = parsed.map(parseEntry);
-    const ids = new Set(networks.map((network) => network.id));
-    if (ids.size !== networks.length) {
-      throw new Error('NETWORKS contains duplicate ids');
+    const sources = parsed.map((entry, index) =>
+      parseEntry(entry, index, variable),
+    );
+    const ids = new Set(sources.map((source) => source.id));
+    if (ids.size !== sources.length) {
+      throw new Error(`${variable} contains duplicate ids`);
     }
-    return networks;
+    return sources;
   }
 
   const databaseUrl = process.env.DATABASE_URL?.trim();
-  if (!databaseUrl) throw new Error('DATABASE_URL is not configured');
+  if (!databaseUrl) {
+    throw new Error('No data source: set DATA_SOURCES, or DATABASE_URL');
+  }
   if (!isPostgres(databaseUrl)) {
-    throw new Error(
-      'The dashboard backend currently requires a PostgreSQL DATABASE_URL',
-    );
+    throw new Error('DATABASE_URL must be a PostgreSQL connection string');
   }
   return [
     {
       id: 'default',
-      label: 'Network',
+      label: 'Default',
       databaseUrl,
       queryDatabaseUrl: process.env.QUERY_DATABASE_URL?.trim() || databaseUrl,
-      rpcUrl: process.env.RPC_URL?.trim() || null,
-      exits: defaultExits(),
     },
   ];
 }

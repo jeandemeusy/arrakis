@@ -91,10 +91,10 @@ function pages(editor: boolean): Item[] {
     page('/lineage', 'Lineage', 'What reads what'),
     page('/guide', 'Guide', 'How Arrakis works, and questions'),
     page('/settings', 'Settings'),
-    page('/settings/networks', 'Exits', 'Settings'),
     ...(editor
       ? [
-          page('/settings/bundles', 'Bundled dashboards', 'Settings'),
+          page('/settings/lists', 'Lists', 'Values queries read'),
+          page('/settings/bundles', 'Bundles', 'Import or export dashboards'),
           page('/settings/runs', 'Running now', 'Settings'),
         ]
       : []),

@@ -3,6 +3,7 @@ import 'server-only';
 import { appDb } from '../db/app';
 import { compile } from './compile';
 import { fragmentResolver, listQueries } from './store';
+import { listResolver } from './lists';
 
 /**
  * What a fragment's change would reach: every saved query that inlines it,
@@ -34,7 +35,9 @@ export async function dependents(
      GROUP BY q.slug`,
   );
   const charts = new Map(rows.map((row) => [row.slug, row.charts]));
-  const named = new RegExp(`\\{\\{\\s*>\\s*${slug.replace(/-/g, '\\-')}\\s*(\\(|\\}\\})`);
+  const named = new RegExp(
+    `\\{\\{\\s*>\\s*${slug.replace(/-/g, '\\-')}\\s*(\\(|\\}\\})`,
+  );
   const out: Dependent[] = [];
   for (const query of queries) {
     if (query.slug === slug || !query.current) continue;
@@ -43,6 +46,7 @@ export async function dependents(
         query.current.sql,
         query.current.parameters,
         resolve,
+        listResolver(),
       );
       if (!compiled.fragments.some((fragment) => fragment.slug === slug))
         continue;
@@ -59,6 +63,7 @@ export async function dependents(
     });
   }
   return out.sort(
-    (a, b) => Number(b.direct) - Number(a.direct) || a.slug.localeCompare(b.slug),
+    (a, b) =>
+      Number(b.direct) - Number(a.direct) || a.slug.localeCompare(b.slug),
   );
 }

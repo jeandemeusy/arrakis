@@ -26,16 +26,15 @@ export type Draft = {
   parameters: ParameterDefinition[];
 };
 
-const SYSTEM_NAMES = new Set(['network', 'exits']);
+const SYSTEM_NAMES = new Set(['network', 'source', 'exits']);
 
-const STARTER_SQL = `-- Each run reads one network, or every network with "All".
--- {{network}} and {{exits}} are filled in for you; {{> slug}} inlines a fragment.
-SELECT
-  account.chain_key AS address,
-  account.published_block,
-  {{block_time(account.published_block)}} AS deployed_at
-FROM account
-ORDER BY account.published_block DESC
+const STARTER_SQL = `-- Each run reads one data source, or all of them with "All".
+-- {{name}} is a parameter, {{> slug}} a fragment, {{list:name}} a list, and
+-- {{source}} the data source the run reads.
+SELECT table_schema, table_name
+FROM information_schema.tables
+WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
+ORDER BY table_schema, table_name
 LIMIT 100`;
 
 export function emptyDraft(): Draft {

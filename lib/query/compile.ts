@@ -18,7 +18,11 @@ export { isRelation };
  * The template language is deliberately small:
  *
  *   {{name}}               a declared parameter, bound as $n::<type>
- *   {{network}}, {{exits}} system parameters the platform fills in
+ *   {{source}}             the id of the data source the run reads (also
+ *                          written {{network}})
+ *   {{list:name}}          a list an editor keeps under Settings → Lists, for
+ *                          the data source the run reads, as an array of the
+ *                          list's type (`{{exits}}` is `{{list:exits}}`)
  *   {{> slug}}             another saved query of kind `fragment`, inlined as a
  *                          parenthesized subquery: `FROM {{> clients}} AS c`
  *                          or `WITH c AS {{> clients}}`
@@ -29,8 +33,6 @@ export { isRelation };
  *   {{$name}}              inside a fragment, one of its arguments, in the
  *   {{$name = default}}    order they first appear; the default is used when
  *                          a call leaves it out, or the fragment runs alone
- *   {{block_time(expr)}}   the timestamp of block number `expr`, interpolated
- *                          between sampled anchor blocks (see clock.ts)
  *
  * Placeholders are only recognized in code, never inside strings or comments.
  * Raw positional parameters ($1) and a second statement are rejected here, with
@@ -49,7 +51,19 @@ export type ResolveFragment = (slug: string) => Promise<FragmentSource | null>;
 type Slot =
   | { kind: 'user'; name: string }
   | { kind: 'system'; name: SystemParameter }
-  | { kind: 'clock'; part: 'blocks' | 'times' };
+  | { kind: 'list'; name: string };
+
+/** What a list holds, and so the array type it binds as. */
+export type ListType = 'text' | 'number' | 'bytes';
+
+const LIST_CAST: Record<ListType, string> = {
+  text: 'text[]',
+  number: 'numeric[]',
+  bytes: 'bytea[]',
+};
+
+/** A list's type, or null when there is no list of that name. */
+export type ResolveList = (name: string) => Promise<ListType | null>;
 
 export type Compiled = {
   /** The statement, with $n placeholders. */
@@ -61,7 +75,8 @@ export type Compiled = {
   /** The declared parameters the statement actually uses. */
   used: string[];
   system: SystemParameter[];
-  usesClock: boolean;
+  /** The lists the statement reads. */
+  lists: string[];
   /** Fragments inlined, outermost first, each with the version that was used. */
   fragments: Array<{ slug: string; versionId: string }>;
 };
@@ -69,7 +84,7 @@ export type Compiled = {
 const MAX_FRAGMENT_DEPTH = 8;
 const FRAGMENT = /^>\s*([a-z0-9][a-z0-9-]{0,79})\s*(?:\(([\s\S]*)\))?$/;
 const ARGUMENT = /^\$([a-z_][a-z0-9_]{0,62})(?:\s*=\s*([\s\S]+))?$/;
-const BLOCK_TIME = /^block_time\s*\(([\s\S]+)\)$/;
+const LIST = /^list:([a-z_][a-z0-9_]{0,62})$/;
 const NAME = /^[a-z_][a-z0-9_]{0,62}$/;
 
 type Placeholder = { start: number; end: number; inner: string };
@@ -222,6 +237,7 @@ export async function compile(
   sql: string,
   definitions: ParameterDefinition[],
   resolveFragment: ResolveFragment,
+  resolveList: ResolveList = async () => 'text',
 ): Promise<Compiled> {
   const slots: Slot[] = [];
   const slotIndex = new Map<string, number>();
@@ -229,7 +245,7 @@ export async function compile(
   const used = new Set<string>();
   const system = new Set<SystemParameter>();
   const fragments: Compiled['fragments'] = [];
-  let usesClock = false;
+  const lists = new Set<string>();
 
   const slot = (key: string, value: Slot): number => {
     let position = slotIndex.get(key);
@@ -355,25 +371,20 @@ export async function compile(
         continue;
       }
 
-      const blockTime = BLOCK_TIME.exec(inner);
-      if (blockTime) {
-        const expression = blockTime[1].trim();
-        if (expression.includes('{{')) {
+      // `{{exits}}`, from before lists, is the list of that name.
+      const list =
+        LIST.exec(inner) ?? (inner === 'exits' ? [inner, 'exits'] : null);
+      if (list) {
+        const name = list[1];
+        const type = await resolveList(name);
+        if (!type) {
           throw badRequest(
-            `${where}: block_time() cannot contain a placeholder`,
+            `${where}: there is no list "${name}"; add it under Settings → Lists`,
           );
         }
-        usesClock = true;
-        const blocks = slot('clock:blocks', { kind: 'clock', part: 'blocks' });
-        const times = slot('clock:times', { kind: 'clock', part: 'times' });
-        out +=
-          '(SELECT to_timestamp(arrakis_bt_c.t[arrakis_bt_c.i] + ' +
-          '(arrakis_bt_c.x - arrakis_bt_c.b[arrakis_bt_c.i]) * ' +
-          '(arrakis_bt_c.t[arrakis_bt_c.i + 1] - arrakis_bt_c.t[arrakis_bt_c.i])::float8 / ' +
-          'NULLIF(arrakis_bt_c.b[arrakis_bt_c.i + 1] - arrakis_bt_c.b[arrakis_bt_c.i], 0)) ' +
-          'FROM (SELECT arrakis_bt_v.x, arrakis_bt_v.b, arrakis_bt_v.t, ' +
-          'LEAST(GREATEST(width_bucket(arrakis_bt_v.x, arrakis_bt_v.b), 1), cardinality(arrakis_bt_v.b) - 1) AS i ' +
-          `FROM (SELECT (${expression})::bigint AS x, $${blocks}::bigint[] AS b, $${times}::bigint[] AS t) AS arrakis_bt_v) AS arrakis_bt_c)`;
+        lists.add(name);
+        const position = slot(`list:${name}`, { kind: 'list', name });
+        out += `$${position}::${LIST_CAST[type]}`;
         continue;
       }
 
@@ -422,15 +433,15 @@ export async function compile(
     parameters: [...scope.values()],
     used: [...used],
     system: [...system],
-    usesClock,
+    lists: [...lists],
     fragments,
   };
 }
 
 export type SystemValues = {
   network: string;
-  exits?: Buffer[];
-  clock?: { blocks: number[]; times: number[] };
+  /** Each list the statement reads, as its values for this data source. */
+  lists?: Record<string, BindValue>;
 };
 
 /**
@@ -466,16 +477,16 @@ export function bind(
       case 'user':
         return resolved[slot.name];
       case 'system':
-        if (slot.name === 'network') return systemValues.network;
-        if (!systemValues.exits) {
-          throw new Error('exits were not resolved for a query that uses them');
+        return systemValues.network;
+      case 'list': {
+        const value = systemValues.lists?.[slot.name];
+        if (value === undefined) {
+          throw new Error(
+            `list ${slot.name} was not resolved for a query that uses it`,
+          );
         }
-        return systemValues.exits;
-      case 'clock':
-        if (!systemValues.clock) {
-          throw new Error('the block clock was not resolved for block_time()');
-        }
-        return systemValues.clock[slot.part];
+        return value;
+      }
     }
   });
   return { values, resolved };

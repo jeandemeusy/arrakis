@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { Activity, ArrowRight, PackageOpen, Waypoints } from 'lucide-react';
+import { Activity, ArrowRight, ListChecks, PackageOpen } from 'lucide-react';
 
 export const metadata: Metadata = {
   title: 'Settings',
@@ -9,16 +9,16 @@ export const metadata: Metadata = {
 
 const PAGES = [
   {
-    href: '/settings/networks',
-    icon: Waypoints,
-    title: 'Exits',
-    text: 'The exit nodes of each network. Downstream volume counts only the exits named here; nothing is guessed.',
+    href: '/settings/lists',
+    icon: ListChecks,
+    title: 'Lists',
+    text: 'Values queries read as {{list:name}}, kept per data source or for all of them. Changing one reruns the queries that read it. Editors only.',
   },
   {
     href: '/settings/bundles',
     icon: PackageOpen,
-    title: 'Bundled dashboards',
-    text: 'Dashboards that ship with arrakis, ready to install as saved queries and charts, or to bring back to their bundled version. Editors only.',
+    title: 'Bundles',
+    text: 'Import a dashboard, its charts and its queries from a bundle file or URL. Export any dashboard as one from its Share menu. Editors only.',
   },
   {
     href: '/settings/runs',

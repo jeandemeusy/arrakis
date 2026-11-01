@@ -23,9 +23,18 @@ import {
   X,
 } from 'lucide-react';
 
-import type { PanelStatus } from '@/lib/snapshot';
 import type { Palette } from './chart-theme';
 import { usePalette } from './style';
+
+
+/**
+ * Whether what a tile shows is whole: `partial` when some of its sources
+ * answered and others did not, `failed` when none did.
+ */
+export type PanelStatus = {
+  state: 'ok' | 'partial' | 'failed';
+  reason: string | null;
+};
 
 /** One legend entry, shared by the rendered legend and the exported image. */
 export type LegendEntry = {
@@ -308,9 +317,9 @@ export type TileProps = {
   status?: PanelStatus;
   legend?: LegendEntry[];
   /**
-   * Whether the legend belongs in the card header. Off for the relayer charts,
-   * which share one key below the pair rather than repeating it twice — but the
-   * data is still carried, so the dialog and the export can use it.
+   * Whether the legend belongs in the card header. Off for charts that share
+   * one key with a neighbour rather than repeating it — but the data is still
+   * carried, so the dialog and the export can use it.
    */
   showLegend?: boolean;
   /** Plain-text note, drawn into the exported image of a number tile. */

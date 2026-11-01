@@ -3,7 +3,7 @@ import type { Metadata } from 'next';
 import { BundleSettings } from './bundle-settings';
 
 export const metadata: Metadata = {
-  title: 'Bundled dashboards',
+  title: 'Bundles',
   robots: { index: false, follow: false },
 };
 

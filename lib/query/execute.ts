@@ -4,10 +4,9 @@ import { createHash } from 'node:crypto';
 
 import { badRequest } from '../api/errors';
 import type { NetworkConfig } from '../networks';
-import { blockClock } from './clock';
 import { toJsonValue, type Column } from './columns';
 import { bind, compile, type Compiled, type ResolveFragment } from './compile';
-import { exitBytes } from './exits';
+import { listResolver, listValues } from './lists';
 import {
   coerce,
   displayValue,
@@ -40,7 +39,7 @@ function canonical(values: Record<string, BindValue>): Record<string, unknown> {
 
 /**
  * The user parameter values a run would use, and their hash, without touching
- * a Blokli database. Readers use it to find the stored result for a request.
+ * a data source. Readers use it to find the stored result for a request.
  */
 export function parameterKey(
   compiled: Compiled,
@@ -66,18 +65,33 @@ export function parameterKey(
 
 /**
  * Everything outside the SQL text that changes what a query returns on this
- * network. A stored result whose fingerprint differs is stale.
+ * data source: the fragment versions it inlined and the lists it reads. A
+ * stored result whose fingerprint differs is stale.
+ *
+ * Shaped as it was when the only list was the exit set, so results stored
+ * then stay current.
  */
 export async function inputsFingerprint(
   compiled: Compiled,
   network: NetworkConfig,
-  exits?: Buffer[],
+  lists?: Record<string, BindValue>,
 ): Promise<string> {
-  const usesExits = compiled.system.includes('exits');
-  const set = usesExits ? (exits ?? (await exitBytes(network.id))) : null;
+  const values = lists ?? (await listValues(compiled.lists, network.id));
+  const text = (value: unknown) =>
+    Buffer.isBuffer(value) ? value.toString('hex') : String(value);
+  const others = compiled.lists.filter((name) => name !== 'exits').sort();
   return sha256({
     fragments: compiled.fragments,
-    exits: set?.map((address) => address.toString('hex')) ?? null,
+    exits: compiled.lists.includes('exits')
+      ? (values.exits as unknown[]).map(text)
+      : null,
+    ...(others.length
+      ? {
+          lists: Object.fromEntries(
+            others.map((name) => [name, (values[name] as unknown[]).map(text)]),
+          ),
+        }
+      : {}),
   });
 }
 
@@ -86,7 +100,6 @@ export type Prepared = {
   values: BindValue[];
   parameters: { values: Record<string, unknown>; hash: string };
   inputsHash: string;
-  timebase: 'rpc' | 'estimated' | null;
 };
 
 export async function prepare(
@@ -95,22 +108,19 @@ export async function prepare(
   network: NetworkConfig,
   resolve: ResolveFragment = fragmentResolver(),
 ): Promise<Prepared> {
-  const compiled = await compile(source.sql, source.parameters, resolve);
-  const exits = compiled.system.includes('exits')
-    ? await exitBytes(network.id)
-    : undefined;
-  const clock = compiled.usesClock ? await blockClock(network) : undefined;
-  const { values } = bind(compiled, supplied, {
-    network: network.id,
-    exits,
-    clock,
-  });
+  const compiled = await compile(
+    source.sql,
+    source.parameters,
+    resolve,
+    listResolver(),
+  );
+  const lists = await listValues(compiled.lists, network.id);
+  const { values } = bind(compiled, supplied, { network: network.id, lists });
   return {
     compiled,
     values,
     parameters: parameterKey(compiled, supplied),
-    inputsHash: await inputsFingerprint(compiled, network, exits),
-    timebase: clock?.timebase ?? null,
+    inputsHash: await inputsFingerprint(compiled, network, lists),
   };
 }
 
@@ -123,7 +133,6 @@ export type Preview = {
     id: string;
     rowCount: number;
     durationMs: number;
-    timebase: 'rpc' | 'estimated' | null;
     error?: string;
   }>;
 };
@@ -175,7 +184,7 @@ export async function preview(
   if (targets.length === 1) {
     const only = outcomes[0];
     if (only.status === 'rejected') throw only.reason;
-    const { network, prepared, outcome } = only.value;
+    const { network, outcome } = only.value;
     return {
       columns: outcome.columns,
       rows: outcome.rows.map((row) => row.map(toJsonValue)),
@@ -186,7 +195,6 @@ export async function preview(
           id: network.id,
           rowCount: outcome.rowCount,
           durationMs: outcome.durationMs,
-          timebase: prepared.timebase,
         },
       ],
     };
@@ -207,12 +215,11 @@ export async function preview(
         id,
         rowCount: 0,
         durationMs: 0,
-        timebase: null,
         error: (settled.reason as Error).message,
       });
       return;
     }
-    const { prepared, outcome } = settled.value;
+    const { outcome } = settled.value;
     const signature = JSON.stringify(outcome.columns);
     if (shape === null) {
       shape = signature;
@@ -222,7 +229,6 @@ export async function preview(
         id,
         rowCount: 0,
         durationMs: outcome.durationMs,
-        timebase: prepared.timebase,
         error: 'Returned different columns from the other networks',
       });
       return;
@@ -239,7 +245,6 @@ export async function preview(
       id,
       rowCount: outcome.rowCount,
       durationMs: outcome.durationMs,
-      timebase: prepared.timebase,
     });
   });
   result.rowCount = result.rows.length;

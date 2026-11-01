@@ -23,7 +23,14 @@ export function VariableBar({
   return (
     <div className="dashboard-vars">
       {variables.map((variable) => {
-        const value = vars[variable.name];
+        const raw = vars[variable.name];
+        // Not stacking: "all" means the first source, as the server reads it.
+        const value =
+          variable.type === 'network' &&
+          variable.stack === false &&
+          raw === 'all'
+            ? networks[0]?.id
+            : raw;
         if (
           variable.type === 'range' ||
           variable.type === 'select' ||
@@ -32,8 +39,8 @@ export function VariableBar({
           const options =
             variable.type === 'network'
               ? [
-                  ...(networks.length > 1
-                    ? [{ value: 'all', label: 'All networks' }]
+                  ...(networks.length > 1 && variable.stack !== false
+                    ? [{ value: 'all', label: 'All, stacked' }]
                     : []),
                   ...networks.map((network) => ({
                     value: network.id,

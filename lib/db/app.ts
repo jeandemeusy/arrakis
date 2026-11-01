@@ -11,7 +11,7 @@ import { HttpError } from '../api/errors';
  * materialized results.
  *
  * Configured with APP_DATABASE_URL. It is deliberately separate from every
- * Blokli database — those are only ever read, through a read-only role, while
+ * data source — those are only ever read, through a read-only role, while
  * this one is the only place Arrakis writes.
  *
  * Migrations run lazily, once per process, before the first query is handed a

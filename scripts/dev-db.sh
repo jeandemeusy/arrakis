@@ -2,8 +2,8 @@
 # A throwaway PostgreSQL for trying the studio locally.
 #
 #   npm run dev:db              start it (creates it on first use)
-#   npm run dev:db -- --demo    also load a synthetic Blokli index to query
-#                               (eleven months of a made-up network)
+#   npm run dev:db -- --demo    also create a demo data source to query: a
+#                               made-up shop (db/demo/shop.sql)
 #   npm run dev:db -- stop      stop it
 #   npm run dev:db -- reset     stop it and delete its data
 #
@@ -56,16 +56,21 @@ for arg in "$@"; do
 done
 
 if [ -n "$DEMO" ]; then
-  if ! psql "$URL/postgres" -tAc "SELECT 1 FROM pg_database WHERE datname = 'blokli_demo'" | grep -q 1; then
+  if ! psql "$URL/postgres" -tAc "SELECT 1 FROM pg_database WHERE datname = 'demo'" | grep -q 1; then
     psql "$URL/postgres" -q -v ON_ERROR_STOP=1 <<'SQL'
-CREATE ROLE blokli_reader LOGIN;
-CREATE DATABASE blokli_demo;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'demo_reader') THEN
+    CREATE ROLE demo_reader LOGIN;
+  END IF;
+END $$;
+CREATE DATABASE demo;
 SQL
-    psql "$URL/blokli_demo" -q -v ON_ERROR_STOP=1 -f "$ROOT/test/fixtures/blokli-demo.sql"
-    psql "$URL/blokli_demo" -q -v ON_ERROR_STOP=1 <<'SQL'
+    psql "$URL/demo" -q -v ON_ERROR_STOP=1 -f "$ROOT/db/demo/shop.sql"
+    # A data source is read through a role that can only read.
+    psql "$URL/demo" -q -v ON_ERROR_STOP=1 <<'SQL'
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
-GRANT USAGE ON SCHEMA public TO blokli_reader;
-GRANT SELECT ON ALL TABLES IN SCHEMA public TO blokli_reader;
+GRANT USAGE ON SCHEMA public TO demo_reader;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO demo_reader;
 SQL
   fi
 fi
@@ -74,8 +79,8 @@ echo "PostgreSQL is running on $HOST:$PORT. For .env.local:"
 echo
 echo "APP_DATABASE_URL=$URL/arrakis"
 if [ -n "$DEMO" ]; then
-  echo "NETWORKS='[{\"id\":\"demo\",\"label\":\"Demo\",\"databaseUrl\":\"postgresql://blokli_reader@$HOST:$PORT/blokli_demo\"}]'"
+  echo "DATA_SOURCES='[{\"id\":\"demo\",\"label\":\"Demo shop\",\"databaseUrl\":\"postgresql://demo_reader@$HOST:$PORT/demo\"}]'"
   echo
-  echo "The demo network has three exits; add them on the Exits page (/settings/networks):"
-  psql "$URL/blokli_demo" -tAc "SELECT '  0x' || encode(chain_key, 'hex') FROM account WHERE id BETWEEN 13 AND 15 ORDER BY id"
+  echo "Then import examples/bundles/shop.json under Settings → Bundles for a"
+  echo "ready-made dashboard on it."
 fi

@@ -22,7 +22,7 @@ import { MAX_ROWS, buildSql, type Column } from './transform';
  *
  * Reads only the application database — the result tables a query run wrote —
  * so a dashboard of twenty charts costs twenty small queries against local
- * tables and not one against Blokli. Each run is read-only, time-limited and
+ * tables and not one against a data source. Each run is read-only, time-limited and
  * in UTC; hand-written SQL additionally runs as a role that can see the result
  * tables and nothing else.
  *

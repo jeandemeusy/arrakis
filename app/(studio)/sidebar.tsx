@@ -1,6 +1,5 @@
 'use client';
 
-import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
@@ -16,13 +15,14 @@ import {
   Activity,
   PanelLeftClose,
   PanelLeftOpen,
-  Route,
+  ListChecks,
   Settings,
   Workflow,
   X,
   type LucideIcon,
 } from 'lucide-react';
 
+import { Logo } from '../logo';
 import { StyleSwitch, ThemeSwitch } from '../style';
 import { api } from './api';
 import { SearchButton } from './search';
@@ -149,7 +149,7 @@ export function Sidebar() {
           <Menu size={18} aria-hidden="true" />
         </button>
         <Link className="sidebar-brand" href="/">
-          <Image src="/gnosis-owl.svg" alt="" width={28} height={28} />
+          <Logo />
           <span>Arrakis</span>
         </Link>
       </header>
@@ -161,7 +161,7 @@ export function Sidebar() {
       >
         <div className="sidebar-head">
           <Link className="sidebar-brand" href="/" onClick={close} title="Home">
-            <Image src="/gnosis-owl.svg" alt="" width={28} height={28} />
+            <Logo />
             <span>Arrakis</span>
           </Link>
           <button
@@ -236,15 +236,6 @@ export function Sidebar() {
                 {dashboards?.length === 0 && (
                   <li className="nav-empty">None yet</li>
                 )}
-                <li>
-                  <NavLink
-                    href="/classic"
-                    label="Classic page"
-                    className="nav-quiet"
-                    active={false}
-                    onNavigate={close}
-                  />
-                </li>
               </ul>
             </li>
             <li>
@@ -276,10 +267,10 @@ export function Sidebar() {
               <ul className="nav-children">
                 <li>
                   <NavLink
-                    href="/settings/networks"
-                    icon={Route}
-                    label="Exits"
-                    active={within('/settings/networks')}
+                    href="/settings/lists"
+                    icon={ListChecks}
+                    label="Lists"
+                    active={within('/settings/lists')}
                     onNavigate={close}
                   />
                 </li>
@@ -288,7 +279,7 @@ export function Sidebar() {
                     <NavLink
                       href="/settings/bundles"
                       icon={PackageOpen}
-                      label="Bundled dashboards"
+                      label="Bundles"
                       active={within('/settings/bundles')}
                       onNavigate={close}
                     />

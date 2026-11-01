@@ -106,6 +106,24 @@ export default function GuidePage() {
             </p>
           </Section>
 
+          <Section id="sources">
+            <p>
+              A data source is a PostgreSQL database, or one that speaks its
+              protocol (Supabase, Neon, RDS, Timescale…). Arrakis reaches each
+              through a role that can only read, and refuses one that can write.
+              Sources are set where Arrakis is deployed, in{' '}
+              <code>DATA_SOURCES</code>, not from this page.
+            </p>
+            <p>
+              With several sources, a query runs on one, or on all of them with
+              their rows stacked: useful when they share a schema, like
+              production and staging. A query whose figure only means something
+              per source can refuse the stacked view. A dashboard&apos;s data
+              source variable decides whether its viewers may pick{' '}
+              <em>All, stacked</em>.
+            </p>
+          </Section>
+
           <Section id="queries">
             <p>
               Open <Link href="/queries">Queries</Link> and pick one, or start a{' '}
@@ -145,8 +163,8 @@ export default function GuidePage() {
               </li>
               <li>
                 The chip under the title picks the data source a run reads, or
-                all of them at once, stacked under a <code>network</code>{' '}
-                column.
+                all of them at once, stacked under a <code>network</code> column
+                that names the source.
               </li>
             </ul>
             <p>
@@ -208,19 +226,19 @@ export default function GuidePage() {
                 </tr>
                 <tr>
                   <td>
-                    <code>{'{{network}}'}</code>
+                    <code>{'{{list:name}}'}</code>
                   </td>
-                  <td>The id of the data source the run reads.</td>
+                  <td>
+                    A <a href="#lists">list</a> kept under Settings → Lists, as
+                    an array: <code>{'WHERE id = ANY({{list:excluded}})'}</code>
+                    .
+                  </td>
                 </tr>
                 <tr>
                   <td>
-                    <code>{'{{exits}}'}</code>,{' '}
-                    <code>{'{{block_time(block)}}'}</code>
+                    <code>{'{{source}}'}</code>
                   </td>
-                  <td>
-                    Built-ins of this deployment: the exit addresses configured
-                    under Settings, and a block number&apos;s time.
-                  </td>
+                  <td>The id of the data source the run reads.</td>
                 </tr>
               </tbody>
             </table>
@@ -263,6 +281,23 @@ export default function GuidePage() {
             </p>
           </Section>
 
+          <Section id="lists">
+            <p>
+              A list is a set of values a query reads, kept out of its SQL so
+              editors can change it without a new version: the accounts to leave
+              out, the regions that count. Create one under{' '}
+              <Link href="/settings/lists">Settings → Lists</Link> and write{' '}
+              <code>{'{{list:name}}'}</code> where an array goes:{' '}
+              <code>{'WHERE account = ANY({{list:excluded}})'}</code>.
+            </p>
+            <p>
+              A list holds text, numbers or bytes (written <code>0x…</code>),
+              and each value is kept for one data source or for every one.
+              Changing a list makes the stored results of the queries that read
+              it stale, and the scheduled ones rerun.
+            </p>
+          </Section>
+
           <Section id="results">
             <p>
               A stored result is a copy of the rows a query returned, kept until
@@ -273,8 +308,8 @@ export default function GuidePage() {
             <p>
               The freshness chip under a query&apos;s title, and the footer of
               every chart, say how old the result is: green when current, amber
-              when <em>stale</em> (the query, a fragment it uses or the exit set
-              changed since), red when the last run failed.
+              when <em>stale</em> (the query, a fragment it uses or a list it
+              reads changed since), red when the last run failed.
             </p>
             <p>
               A <strong>refresh</strong> schedule (hourly, daily…) reruns the
@@ -353,6 +388,25 @@ export default function GuidePage() {
               rename it or make a click on it set a variable, here or on another
               dashboard. That is how a drill-down works: click a row, and a
               second dashboard opens filtered on it.
+            </p>
+          </Section>
+
+          <Section id="bundles">
+            <p>
+              A bundle carries a dashboard to another Arrakis: the dashboard,
+              those its charts link to, the charts, their queries, the fragments
+              those use and the definitions of the lists they read (not the
+              values, which are each Arrakis&apos;s own). An editor downloads
+              one from a dashboard&apos;s <strong>Share</strong> menu.
+            </p>
+            <p>
+              <Link href="/settings/bundles">Settings → Bundles</Link> imports
+              one from a file or a URL. It first shows what it would create,
+              update or replace; importing a newer file of the same bundle
+              updates what the last import created. A query or dashboard of the
+              same name that came from elsewhere is only overwritten when you
+              say so. The queries then run on your data sources, so they must
+              find the tables they expect there.
             </p>
           </Section>
 

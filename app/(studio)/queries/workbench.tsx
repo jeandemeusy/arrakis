@@ -191,6 +191,7 @@ export function Workbench({
   const schemaOpen = usePreference('arrakis.workbench.schema', true);
   const aboutOpen = usePreference('arrakis.workbench.about', true);
   const [schema, setSchema] = useState<SchemaTable[]>([]);
+  const [lists, setLists] = useState<Array<{ name: string; type: string }>>([]);
   const [fragments, setFragments] = useState<QuerySummary[]>([]);
   const [versions, setVersions] = useState<QueryVersion[]>([]);
   const [selectedVersion, setSelectedVersion] = useState<number | null>(null);
@@ -326,7 +327,19 @@ export function Workbench({
   const [extractError, setExtractError] = useState<string | null>(null);
   const [extractHint, setExtractHint] = useState<string | null>(null);
 
-  // The schema of one network: with "All", the first one's stands for the rest.
+  // The lists a query can read, for completion and the side panel.
+  useEffect(() => {
+    if (!editor) return;
+    let live = true;
+    api<{ lists: Array<{ name: string; type: string }> }>('/api/v1/lists')
+      .then((answer) => live && setLists(answer.lists))
+      .catch(() => live && setLists([]));
+    return () => {
+      live = false;
+    };
+  }, [editor]);
+
+  // The schema of one data source: with "All", the first one's stands for the rest.
   const schemaNetwork = network === 'all' ? networks[0]?.id : network;
   useEffect(() => {
     if (!editor || !schemaNetwork) return;
@@ -666,23 +679,17 @@ export function Workbench({
         insert: `${label}(|)`,
       })),
       {
-        label: 'network',
+        label: 'source',
         kind: 'placeholder',
-        detail: 'text',
-        insert: 'network}}',
+        detail: 'text: the data source',
+        insert: 'source}}',
       },
-      {
-        label: 'exits',
-        kind: 'placeholder',
-        detail: 'bytea[]',
-        insert: 'exits}}',
-      },
-      {
-        label: 'block_time()',
-        kind: 'placeholder',
-        detail: 'timestamptz',
-        insert: 'block_time(|)}}',
-      },
+      ...lists.map((list) => ({
+        label: `list:${list.name}`,
+        kind: 'placeholder' as const,
+        detail: `${list.type}[]`,
+        insert: `list:${list.name}}}`,
+      })),
       ...draft.parameters.map((parameter) => ({
         label: parameter.name,
         kind: 'placeholder' as const,
@@ -712,7 +719,7 @@ export function Workbench({
       }
     }
     return items;
-  }, [draft.parameters, draft.slug, fragments, schema]);
+  }, [draft.parameters, draft.slug, fragments, lists, schema]);
 
   const columnsByTable = useMemo(
     () =>
@@ -807,6 +814,7 @@ export function Workbench({
         <SchemaPanel
           schema={schema}
           fragments={fragments}
+          lists={lists}
           onInsert={(text) => sqlEditor.current?.insert(text)}
         />
       )}
@@ -918,19 +926,19 @@ export function Workbench({
                   </label>
                   <label
                     className="chip"
-                    title="With every network selected: stack their rows, or show it per network only"
+                    title="With every data source selected: stack their rows, or show it per source only"
                   >
                     <Layers size={13} aria-hidden="true" />
                     <select
                       value={draft.combine}
                       disabled={readOnly}
-                      aria-label="All networks"
+                      aria-label="All data sources"
                       onChange={(event) =>
                         update('combine', event.target.value as Combine)
                       }
                     >
-                      <option value="concat">All networks: stacked</option>
-                      <option value="hidden">Per network only</option>
+                      <option value="concat">All sources: stacked</option>
+                      <option value="hidden">Per source only</option>
                     </select>
                   </label>
                 </>
@@ -1201,7 +1209,7 @@ export function Workbench({
           <div className="editor-foot">
             {networks.length > 1 || network !== 'all' ? (
               <fieldset className="network-switch">
-                <legend className="sr-only">Network</legend>
+                <legend className="sr-only">Data source</legend>
                 {networks.length > 1 && (
                   <button
                     type="button"
@@ -1488,8 +1496,6 @@ export function Workbench({
                           {entry.status === 'ready' &&
                             ` · ${entry.rowCount?.toLocaleString()} rows · ${when(entry.finishedAt)}`}
                           {entry.stale && ' · stale'}
-                          {entry.timebase === 'estimated' &&
-                            ' · estimated time'}
                           {entry.lastAttempt?.status === 'failed' &&
                             ` · last run failed`}
                         </span>
@@ -1624,8 +1630,6 @@ export function Workbench({
                                 {entry.error
                                   ? 'failed'
                                   : `${entry.rowCount.toLocaleString()} in ${entry.durationMs} ms`}
-                                {entry.timebase === 'estimated' &&
-                                  ' · estimated time'}
                               </span>
                             ))}
                           </>

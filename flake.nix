@@ -1,5 +1,5 @@
 {
-  description = "Arrakis — Gnosis VPN on-chain metrics dashboard";
+  description = "Arrakis — SQL queries, charts and dashboards over read-only databases";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -53,7 +53,6 @@
                   "instrumentation.ts"
                   "lib"
                   "public"
-                  "sql"
                   "next.config.ts"
                   "package.json"
                   "package-lock.json"
@@ -87,11 +86,10 @@
             mkdir -p $out/share/arrakis
             cp -r .next/standalone/. $out/share/arrakis/
             # Standalone omits these: static assets are served from disk, and
-            # the SQL and the app database migrations are read at runtime
-            # relative to the working directory.
+            # the app database migrations are read at runtime relative to the
+            # working directory.
             cp -r .next/static $out/share/arrakis/.next/static
             cp -r public $out/share/arrakis/public
-            cp -r sql $out/share/arrakis/sql
             cp -r db $out/share/arrakis/db
 
             mkdir -p $out/bin
@@ -157,7 +155,7 @@
           packages = [
             pkgs.nodejs_22
             pkgs.importNpmLock.hooks.linkNodeModulesHook
-            # psql, for poking at a Blokli index database directly.
+            # psql, for poking at a data source directly.
             pkgs.postgresql_16
           ];
 
@@ -168,7 +166,6 @@
             echo "arrakis · node $(node --version) · npm $(npm --version)"
             echo "  dependencies are linked from the Nix store"
             echo "  npm run dev           run against DATABASE_URL"
-            echo "  npm run dev:fixtures  run on synthetic data, no database needed"
           '';
         };
       }

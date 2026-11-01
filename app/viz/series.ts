@@ -1,7 +1,7 @@
 import type { Encoding, Options, SeriesMark } from '@/lib/viz/config';
 import { asText } from '@/lib/viz/text';
 
-import { relayerColor, type Palette } from '../chart-theme';
+import { rampColor, type Palette } from '../chart-theme';
 import { formatCategory, toNumber } from './format';
 
 /**
@@ -63,7 +63,7 @@ export function defaultColors(
   }
   if (keys.length === 1) return [palette.accent];
   if (keys.length === 2) return [palette.accent, palette.accent2];
-  return keys.map((_, at) => relayerColor(palette, at, keys.length));
+  return keys.map((_, at) => rampColor(palette, at, keys.length));
 }
 
 /** `keys` with the ones `order` names moved first, in that order. */

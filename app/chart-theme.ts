@@ -97,8 +97,8 @@ export type Palette = {
   /** The heatmap and cohort ramp, blended from empty to full. */
   heatFrom: Rgb;
   heatTo: Rgb;
-  /** The ramp the relayer series are keyed off, blended across the roster. */
-  relayerRamp: readonly Rgb[];
+  /** The ramp many series are coloured from, blended across however many there are. */
+  rampColors: readonly Rgb[];
   /**
    * Distinct colours for charts that colour series by name (stable colours),
    * and the swatches offered when picking a series' colour.
@@ -151,7 +151,7 @@ const EDITORIAL: Palette = {
 
   heatFrom: [244, 244, 242],
   heatTo: [79, 80, 155],
-  relayerRamp: [
+  rampColors: [
     [79, 80, 155], // indigo
     [226, 100, 63], // vermilion
     [230, 180, 60], // mustard
@@ -230,7 +230,7 @@ const NEUBRUTAL: Palette = {
 
   heatFrom: [255, 255, 255],
   heatTo: [255, 77, 109],
-  relayerRamp: [
+  rampColors: [
     [255, 216, 0], // yellow
     [255, 77, 109], // hot pink
     [0, 212, 170], // mint
@@ -288,7 +288,7 @@ const EDITORIAL_DARK: Palette = {
   seriesTotal: '#ececea',
   heatFrom: [35, 36, 40],
   heatTo: [139, 141, 240],
-  relayerRamp: [
+  rampColors: [
     [139, 141, 240], // periwinkle
     [239, 122, 85], // vermilion
     [236, 194, 84], // mustard
@@ -351,8 +351,8 @@ export function formatDay(value: unknown) {
 }
 
 /** Blends two colours of the ramp, so a roster of any size spans the whole of it. */
-export function relayerColor(palette: Palette, index: number, total: number) {
-  const ramp = palette.relayerRamp;
+export function rampColor(palette: Palette, index: number, total: number) {
+  const ramp = palette.rampColors;
   const step = total > 1 ? Math.min(1, index / (total - 1)) : 0;
   const scaled = step * (ramp.length - 1);
   const low = Math.floor(scaled);

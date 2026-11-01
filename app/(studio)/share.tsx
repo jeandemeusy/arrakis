@@ -1,7 +1,15 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Check, Copy, Globe, Link2, Lock, Share2 } from 'lucide-react';
+import {
+  Check,
+  Copy,
+  Download,
+  Globe,
+  Link2,
+  Lock,
+  Share2,
+} from 'lucide-react';
 
 import type { Visibility } from './api';
 
@@ -39,6 +47,7 @@ export function ShareButton({
   viewLabel,
   canEdit,
   onVisibility,
+  bundleHref,
 }: {
   what: 'dashboard' | 'query';
   visibility: Visibility;
@@ -50,6 +59,8 @@ export function ShareButton({
   viewLabel?: string;
   canEdit: boolean;
   onVisibility?: (next: Visibility) => Promise<void>;
+  /** Where to download it as a bundle, for another Arrakis; editors only. */
+  bundleHref?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<string | null>(null);
@@ -190,6 +201,17 @@ export function ShareButton({
               />
               <span>With {viewLabel}</span>
             </label>
+          )}
+          {bundleHref && (
+            <div className="share-bundle">
+              <p className="studio-muted">
+                For another Arrakis: the {what}, its charts and their queries,
+                as one file to import there.
+              </p>
+              <a className="studio-button" href={bundleHref} download>
+                <Download size={13} aria-hidden="true" /> Download as a bundle
+              </a>
+            </div>
           )}
         </div>
       )}

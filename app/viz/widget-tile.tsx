@@ -1,10 +1,9 @@
 'use client';
 
-import type { PanelStatus } from '@/lib/snapshot';
 import type { Encoding, Options, VisualizationType } from '@/lib/viz/config';
 import { asText } from '@/lib/viz/text';
 
-import { Tile, type Freshness } from '../tile';
+import { Tile, type Freshness, type PanelStatus } from '../tile';
 import { ago } from '../(studio)/time';
 import {
   Missing,

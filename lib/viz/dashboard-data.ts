@@ -29,10 +29,8 @@ export function resolveVariables(
   variables: Variable[],
   supplied: Record<string, string | undefined>,
 ): Record<string, string | undefined> {
-  const networkIds = new Set([
-    'all',
-    ...configuredNetworks().map((network) => network.id),
-  ]);
+  const sources = configuredNetworks().map((network) => network.id);
+  const networkIds = new Set(['all', ...sources]);
   const out: Record<string, string | undefined> = {};
   for (const variable of variables) {
     let value = supplied[variable.name];
@@ -42,6 +40,14 @@ export function resolveVariables(
         value = variable.default;
       if (variable.type === 'network' && !networkIds.has(value ?? ''))
         value = 'all';
+      // A dashboard that does not stack its sources shows one at a time.
+      if (
+        variable.type === 'network' &&
+        variable.stack === false &&
+        value === 'all' &&
+        sources.length > 1
+      )
+        value = sources[0];
       if (variable.type === 'text') value = value?.slice(0, 500);
     }
     out[variable.name] = value;

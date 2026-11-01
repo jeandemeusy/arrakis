@@ -61,7 +61,7 @@ const NAME = /^[a-z_][a-z0-9_]{0,62}$/;
  */
 export const SYSTEM_PARAMETERS = {
   network: 'text',
-  exits: 'bytea[]',
+  source: 'text',
 } as const;
 
 export type SystemParameter = keyof typeof SYSTEM_PARAMETERS;
@@ -87,7 +87,7 @@ export function parseDefinitions(input: unknown): ParameterDefinition[] {
         `${where}.name must be lowercase letters, digits or underscores`,
       );
     }
-    if (isSystemParameter(name) || name.startsWith('__')) {
+    if (isSystemParameter(name) || name === 'exits' || name.startsWith('__')) {
       throw badRequest(`${where}.name "${name}" is reserved`);
     }
     if (seen.has(name))

@@ -1,5 +1,5 @@
 {
-  "name": "gnosis-vpn-network-intelligence",
+  "name": "arrakis",
   "version": "0.1.0",
   "private": true,
   "engines": {
@@ -7,7 +7,6 @@
   },
   "scripts": {
     "dev": "next dev --webpack",
-    "dev:fixtures": "DASHBOARD_FIXTURES=1 next dev --webpack",
     "dev:db": "sh scripts/dev-db.sh",
     "build": "nix develop -c npm run build:nix",
     "build:nix": "next build --webpack",
@@ -15,7 +14,6 @@
     "lint": "oxlint app lib instrumentation.ts && stylelint 'app/**/*.css'",
     "test": "node --import ./test/loader.mjs --test 'test/**/*.test.ts'",
     "hash-password": "node scripts/hash-password.mjs",
-    "parity": "node --import ./test/loader.mjs scripts/parity.ts",
     "format": "oxfmt && stylelint --fix 'app/**/*.css'"
   },
   "dependencies": {

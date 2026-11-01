@@ -56,7 +56,7 @@ import { HelpTip } from '../help-tip';
  * show this, over that, for these rows), steps (the pipeline the builder
  * compiles to), and SQL over the stored result. The form sits on the left
  * and the chart on the right, redrawn a moment after each change — always
- * from the stored result, never from Blokli, so trying things costs nothing.
+ * from the stored result, never from the data source, so trying things costs nothing.
  */
 
 export type Saved = {

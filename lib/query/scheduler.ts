@@ -11,6 +11,7 @@ import { pruneActiveRuns } from './cancel';
 import { limits } from './limits';
 import { materialize, pruneResults } from './results';
 import { fragmentResolver, listQueries, type QueryRecord } from './store';
+import { listResolver } from './lists';
 
 /**
  * Keeps scheduled queries' results fresh.
@@ -96,6 +97,7 @@ async function dueJobs(networks: NetworkConfig[]): Promise<Job[]> {
         version.sql,
         version.parameters,
         fragmentResolver(),
+        listResolver(),
       );
       key = parameterKey(compiled, {});
     } catch (error) {

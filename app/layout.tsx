@@ -13,18 +13,12 @@ import {
 export const metadata: Metadata = {
   title: 'Arrakis',
   description:
-    'Public, on-chain Gnosis VPN adoption and HOPR network metrics powered by Blokli.',
+    'Query a database in SQL, keep the answers as charts, and arrange them on dashboards.',
+  icons: { icon: '/favicon.svg' },
   openGraph: {
     title: 'Arrakis',
-    description:
-      'Private access. Public proof. Finalized on-chain metrics powered by Blokli.',
+    description: 'SQL in, charts and dashboards out.',
     type: 'website',
-  },
-  twitter: {
-    card: 'summary_large_image',
-    title: 'Arrakis',
-    description:
-      'Private access. Public proof. Finalized on-chain metrics powered by Blokli.',
   },
 };
 

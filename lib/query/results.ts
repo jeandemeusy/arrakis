@@ -17,13 +17,14 @@ import { inputsFingerprint, parameterKey, prepare } from './execute';
 import { rowLimitFor, timeoutFor } from './limits';
 import { runReadOnly, TYPES } from './runner';
 import { fragmentResolver, type QueryRecord, type QueryVersion } from './store';
+import { listResolver } from './lists';
 
 /**
  * Materialized results.
  *
  * A saved query's rows are copied into a real table in the application
  * database — `results.r_<created>_<random>` — so that any number of
- * visualizations can aggregate one result without reading Blokli again, and
+ * visualizations can aggregate one result without reading the data source again, and
  * public readers are served from here and never cause a query to run.
  *
  * A run writes a fresh table and only then points the result row at it, in one
@@ -216,7 +217,7 @@ export async function materialize(options: {
           outcome.rowCount,
           outcome.truncated,
           prepared.inputsHash,
-          prepared.timebase,
+          null,
           outcome.durationMs,
         ],
       );
@@ -233,7 +234,7 @@ export async function materialize(options: {
       truncated: outcome.truncated,
       finishedAt: new Date().toISOString(),
       durationMs: outcome.durationMs,
-      timebase: prepared.timebase,
+      timebase: null,
     };
   } catch (error) {
     if (created) {
@@ -342,6 +343,7 @@ export async function locateResults(options: {
     version.sql,
     version.parameters,
     fragmentResolver(),
+    listResolver(),
   );
   const key = parameterKey(compiled, supplied);
   const db = await appDb();
