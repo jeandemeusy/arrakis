@@ -97,7 +97,7 @@
             # standard shell variable, so --set-default would leave the server
             # trying to bind to the machine's name. Take the address from an
             # app-specific variable instead.
-            makeWrapper ${lib.getExe pkgs.nodejs_22} $out/bin/arrakis \
+            makeWrapper ${lib.getExe pkgs.nodejs-slim_22} $out/bin/arrakis \
               --add-flags $out/share/arrakis/server.js \
               --set-default NODE_ENV production \
               --set-default PORT 3000 \
