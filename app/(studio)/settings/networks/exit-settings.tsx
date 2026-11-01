@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 
@@ -231,6 +232,12 @@ function NetworkExits({
             <Plus size={14} aria-hidden="true" /> Add exit
           </button>
         </form>
+      )}
+      {!editor && (
+        <p className="studio-muted">
+          <Link href="/login?next=/settings/networks">Unlock editing</Link> to
+          add or remove exits.
+        </p>
       )}
       {warning && <output className="studio-warning">{warning}</output>}
       {error && (

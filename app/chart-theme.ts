@@ -79,57 +79,79 @@ export type Palette = {
   heatTo: Rgb;
   /** The ramp the relayer series are keyed off, blended across the roster. */
   relayerRamp: readonly Rgb[];
+  /**
+   * Distinct colours for charts that colour series by name (stable colours),
+   * and the swatches offered when picking a series' colour.
+   */
+  categorical: readonly string[];
 };
 
 const EDITORIAL: Palette = {
-  axis: { fill: '#8a877f', fontSize: 11 },
-  grid: '#e6e2d8',
+  axis: { fill: '#8b8d93', fontSize: 11 },
+  grid: '#ececea',
   gridDash: undefined,
-  cursor: { fill: '#f2eee5' },
+  cursor: { fill: 'rgb(27 28 31 / 0.05)' },
   tooltip: {
-    background: '#fffdf8',
-    border: '1px solid #d9d5cb',
-    borderRadius: 2,
+    background: '#ffffff',
+    border: '1px solid #e2e2de',
+    borderRadius: 8,
+    boxShadow: '0 8px 24px rgb(0 0 0 / 0.10)',
     fontSize: 12,
+    color: '#1b1c1f',
   },
   addressTooltip: {
-    background: '#fffdf8',
-    border: '1px solid #d9d5cb',
-    borderRadius: 2,
+    background: '#ffffff',
+    border: '1px solid #e2e2de',
+    borderRadius: 8,
+    boxShadow: '0 8px 24px rgb(0 0 0 / 0.10)',
     fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
     fontSize: 11,
   },
 
-  ink: '#17191c',
-  surface: '#fffdf8',
-  muted: '#6a6760',
-  accent: '#ffd84d',
-  accent2: '#8d4f68',
-  accent3: '#4c8f7b',
-  seriesNeutral: '#9b978d',
-  seriesTotal: '#17191c',
+  ink: '#1b1c1f',
+  surface: '#ffffff',
+  muted: '#6c6e74',
+  accent: '#4f509b',
+  accent2: '#e2643f',
+  accent3: '#6bbaa2',
+  seriesNeutral: '#9b9da2',
+  seriesTotal: '#1b1c1f',
 
   barStroke: undefined,
   barStrokeWidth: 0,
   barRadius: [2, 2, 0, 0],
   lineWidth: 2,
-  areaOpacity: 0.45,
+  areaOpacity: 0.3,
   areaGradient: true,
 
   faces: {
-    sans: 'Arial, Helvetica, sans-serif',
-    display: 'Georgia, serif',
+    sans: 'system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif',
+    display: 'system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif',
   },
 
-  heatFrom: [244, 241, 232],
-  heatTo: [141, 79, 104],
+  heatFrom: [244, 244, 242],
+  heatTo: [79, 80, 155],
   relayerRamp: [
-    [255, 216, 77], // brand yellow
-    [201, 139, 58], // ochre
-    [178, 90, 77], // terracotta
-    [141, 79, 104], // plum
-    [95, 107, 134], // slate
-    [122, 133, 138], // stone
+    [79, 80, 155], // indigo
+    [226, 100, 63], // vermilion
+    [230, 180, 60], // mustard
+    [107, 186, 162], // sea green
+    [181, 92, 166], // orchid
+    [75, 138, 200], // sky
+  ],
+  categorical: [
+    '#4f509b', // indigo
+    '#e2643f', // vermilion
+    '#8e9196', // grey
+    '#b55ca6', // orchid
+    '#e6b43c', // mustard
+    '#5a70b8', // cornflower
+    '#6bbaa2', // sea green
+    '#9dcc5a', // lime
+    '#3c7162', // pine
+    '#d98837', // amber
+    '#4b8ac8', // sky
+    '#c9496b', // rose
   ],
 };
 
@@ -195,6 +217,20 @@ const NEUBRUTAL: Palette = {
     [92, 156, 255], // blue
     [255, 138, 0], // orange
     [178, 122, 255], // violet
+  ],
+  categorical: [
+    '#ffd800',
+    '#ff4d6d',
+    '#00d4aa',
+    '#5c9cff',
+    '#ff8a00',
+    '#b27aff',
+    '#00b8ff',
+    '#ff70d9',
+    '#7ee000',
+    '#ff5c33',
+    '#00e0e0',
+    '#c2a100',
   ],
 };
 

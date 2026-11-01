@@ -15,6 +15,7 @@
     "lint": "oxlint app lib instrumentation.ts && stylelint 'app/**/*.css'",
     "test": "node --import ./test/loader.mjs --test 'test/**/*.test.ts'",
     "hash-password": "node scripts/hash-password.mjs",
+    "parity": "node --import ./test/loader.mjs scripts/parity.ts",
     "format": "oxfmt && stylelint --fix 'app/**/*.css'"
   },
   "dependencies": {

@@ -4,11 +4,24 @@ import {
   cloneElement,
   useEffect,
   useRef,
+  useState,
   type CSSProperties,
   type ReactElement,
   type ReactNode,
 } from 'react';
-import { AlertTriangle, Download, Maximize, Search, X } from 'lucide-react';
+import Link from 'next/link';
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Clock,
+  Code2,
+  Download,
+  Loader2,
+  Maximize,
+  MoreHorizontal,
+  Search,
+  X,
+} from 'lucide-react';
 
 import type { PanelStatus } from '@/lib/snapshot';
 import type { Palette } from './chart-theme';
@@ -313,9 +326,89 @@ export type TileProps = {
   /** Exported as CSV when supplied, for the number and table variants. */
   rows?: () => string[][];
   children?: ReactNode;
+  /** Where the figure comes from: its title and an action link there. */
+  source?: { href: string; label: string };
+  /** Shown muted after the title: the query the figure is drawn from. */
+  subtitle?: string;
+  /** How fresh the data is, as a pill in the tile's footer. */
+  freshness?: Freshness;
+  /**
+   * The actions (source, download, enlarge) in a `•••` menu in a footer row,
+   * with the freshness pill, rather than floating over the tile's corner.
+   */
+  menu?: boolean;
   expanded: string | null;
   onExpand: (id: string | null) => void;
 };
+
+export type Freshness = {
+  state: 'fresh' | 'stale' | 'failed' | 'running' | 'updating';
+  /** Short: `11h ago`. */
+  label: string;
+  /** Long, for the tooltip. */
+  title: string;
+};
+
+function FreshnessPill({ freshness }: { freshness: Freshness }) {
+  const busy = freshness.state === 'running' || freshness.state === 'updating';
+  const Icon = busy
+    ? Loader2
+    : freshness.state === 'fresh'
+      ? CheckCircle2
+      : freshness.state === 'stale'
+        ? Clock
+        : AlertTriangle;
+  return (
+    <span
+      className={`tile-fresh ${freshness.state}`}
+      title={freshness.title}
+      role={busy ? 'status' : undefined}
+    >
+      <span className="tile-fresh-label">{freshness.label}</span>
+      <Icon size={13} aria-hidden="true" />
+    </span>
+  );
+}
+
+/** The `•••` button and its list, closing on a click elsewhere. */
+function TileMenu({ children, label }: { children: ReactNode; label: string }) {
+  const [open, setOpen] = useState(false);
+  const anchor = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (event: MouseEvent) => {
+      if (!anchor.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('mousedown', close);
+    document.addEventListener('keydown', escape);
+    return () => {
+      document.removeEventListener('mousedown', close);
+      document.removeEventListener('keydown', escape);
+    };
+  }, [open]);
+  return (
+    <div className="tile-menu" ref={anchor}>
+      <button
+        type="button"
+        aria-label={label}
+        aria-expanded={open}
+        title={label}
+        onClick={() => setOpen(!open)}
+      >
+        <MoreHorizontal size={16} aria-hidden="true" />
+      </button>
+      {open && (
+        // oxlint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- closes the menu after any choice; the choices are the buttons inside
+        <div className="tile-menu-list" onClick={() => setOpen(false)}>
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
 
 /**
  * The one panel every figure on the page is built from.
@@ -344,6 +437,10 @@ export function Tile({
   chart,
   rows,
   children,
+  source,
+  subtitle,
+  freshness,
+  menu = false,
   expanded,
   onExpand,
 }: TileProps) {
@@ -397,8 +494,50 @@ export function Tile({
   // A table has a footer strip, so the controls join it and cannot overlap the
   // pager. A chart has none, so they float over its bottom-right corner.
   const hasFoot = Boolean(search || footer || rowCount !== undefined);
-  const actions = (
+  const heading = source ? (
+    <Link className="tile-title-link" href={source.href} title={source.label}>
+      {title}
+    </Link>
+  ) : (
+    title
+  );
+  const menuActions = (
+    <TileMenu label={`More on ${title}`}>
+      {source && (
+        <Link href={source.href} title={source.label}>
+          <Code2 size={14} aria-hidden="true" /> Open the query
+        </Link>
+      )}
+      {canDownload && (
+        <button type="button" onClick={download}>
+          <Download size={14} aria-hidden="true" />
+          {chart ? 'Download image' : 'Download data'}
+        </button>
+      )}
+      <button type="button" onClick={() => onExpand(id)}>
+        <Maximize size={14} aria-hidden="true" /> Enlarge
+      </button>
+    </TileMenu>
+  );
+  const meta = (
+    <div className="tile-meta">
+      {freshness ? <FreshnessPill freshness={freshness} /> : <span />}
+      {menuActions}
+    </div>
+  );
+  const sub = subtitle ? <small className="tile-subtitle">{subtitle}</small> : null;
+  const actions = menu ? meta : (
     <div className="chart-actions">
+      {source && (
+        <Link
+          className="tile-source"
+          href={source.href}
+          aria-label={source.label}
+          title={source.label}
+        >
+          <Code2 size={14} aria-hidden="true" />
+        </Link>
+      )}
       {canDownload && (
         <button
           type="button"
@@ -421,11 +560,12 @@ export function Tile({
   );
 
   return (
-    <div className={`chart-card ${className ?? ''}`}>
+    <div className={`chart-card ${menu ? 'menu-mode' : ''} ${className ?? ''}`}>
       {isNumber ? (
         <>
           <span>
-            {title}
+            {heading}
+            {sub}
             {flag}
           </span>
           <strong>{figure}</strong>
@@ -440,7 +580,10 @@ export function Tile({
           <div className="chart-title">
             <div>
               {eyebrow && <span>{eyebrow}</span>}
-              <h3>{title}</h3>
+              <h3>
+                {heading}
+                {sub}
+              </h3>
             </div>
             {flag}
             {badge}

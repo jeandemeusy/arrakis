@@ -5,14 +5,28 @@ import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Archive,
+  ChevronDown,
   Clock,
   Copy,
+  Database,
   GitFork,
+  Globe,
   History,
+  Layers,
+  LayoutDashboard,
+  Lock,
+  MoreHorizontal,
+  PanelLeft,
+  PanelRight,
   Play,
   Plus,
+  Puzzle,
   RefreshCw,
   Save,
+  Settings2,
+  Shapes,
+  Table2,
+  Timer,
   Trash2,
   Wand2,
 } from 'lucide-react';
@@ -22,6 +36,7 @@ import {
   ApiError,
   PARAMETER_TYPES,
   type Combine,
+  type Dependent,
   type Kind,
   type Network,
   type ParameterDefinition,
@@ -37,12 +52,20 @@ import {
 import { diffLines } from '../diff';
 import { ResultsTable } from '../results-table';
 import { useSession } from '../session';
+import { setPreference, usePreference } from '../preference';
+import {
+  TYPE_ICONS,
+  VisualizationsPanel,
+  type Saved,
+} from './visualizations-panel';
 import {
   SqlEditor,
   type Completion,
   type SqlEditorHandle,
 } from '../sql-editor';
 import { FUNCTIONS, KEYWORDS } from '../sql-highlight';
+import { isRelation, segments } from '@/lib/query/scan';
+import { ago, took } from '../time';
 
 /**
  * Where a query is written, run, saved and read back.
@@ -64,7 +87,9 @@ type Draft = {
   parameters: ParameterDefinition[];
 };
 
-type Tab = 'preview' | 'stored' | 'versions';
+/** `results`, `versions`, `new` (a new chart) or `chart:<id>`. */
+type Tab = string;
+type ResultMode = 'stored' | 'preview';
 
 const REFRESH_OPTIONS: Array<{ label: string; value: number | null }> = [
   { label: 'Not scheduled', value: null },
@@ -132,6 +157,14 @@ function when(iso: string | null): string {
   });
 }
 
+/** The SQL outside comments and strings. */
+function codeOf(sql: string): string {
+  return segments(sql)
+    .filter((segment) => segment.code)
+    .map((segment) => segment.text)
+    .join(' ');
+}
+
 /** `{{name}}` placeholders in code that are neither declared nor built in. */
 function undeclared(sql: string, declared: ParameterDefinition[]): string[] {
   const known = new Set(declared.map((parameter) => parameter.name));
@@ -166,7 +199,28 @@ function ErrorBox({ error }: { error: ApiError | null }) {
   );
 }
 
-export function Workbench({ slug }: { slug: string | null }) {
+/** The tab and result view a `?tab=` link asks for (older links included). */
+function initialTabOf(
+  creating: boolean,
+  tab: string | undefined,
+  chart: string | undefined,
+): { tab: Tab; mode: ResultMode } {
+  if (creating || tab === 'preview') return { tab: 'results', mode: 'preview' };
+  if (tab === 'charts' && chart)
+    return { tab: `chart:${chart}`, mode: 'stored' };
+  if (tab === 'versions') return { tab: 'versions', mode: 'stored' };
+  return { tab: 'results', mode: 'stored' };
+}
+
+export function Workbench({
+  slug,
+  initialTab,
+  initialChart,
+}: {
+  slug: string | null;
+  initialTab?: string;
+  initialChart?: string;
+}) {
   const router = useRouter();
   const { user } = useSession();
   const editor = Boolean(user);
@@ -190,7 +244,21 @@ export function Workbench({ slug }: { slug: string | null }) {
   const [saveError, setSaveError] = useState<ApiError | null>(null);
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<string | null>(null);
-  const [tab, setTab] = useState<Tab>(creating ? 'preview' : 'stored');
+  const [tab, setTab] = useState<Tab>(
+    () => initialTabOf(creating, initialTab, initialChart).tab,
+  );
+  const [resultMode, setResultMode] = useState<ResultMode>(
+    () => initialTabOf(creating, initialTab, initialChart).mode,
+  );
+  const [charts, setCharts] = useState<Saved[] | null>(null);
+  const [paramsOpen, setParamsOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [runMenu, setRunMenu] = useState(false);
+  const [dashboards, setDashboards] = useState<
+    Array<{ slug: string; title: string; charts: number }>
+  >([]);
+  const schemaOpen = usePreference('arrakis.workbench.schema', true);
+  const aboutOpen = usePreference('arrakis.workbench.about', true);
   const [schema, setSchema] = useState<SchemaTable[]>([]);
   const [schemaFilter, setSchemaFilter] = useState('');
   const [fragments, setFragments] = useState<QuerySummary[]>([]);
@@ -216,7 +284,10 @@ export function Workbench({ slug }: { slug: string | null }) {
         setQuery(loaded);
         setDraft(draftOf(loaded));
         setLoadError(null);
-        if (loaded.kind === 'fragment') setTab('preview');
+        if (loaded.kind === 'fragment') {
+          setTab('results');
+          setResultMode('preview');
+        }
       })
       .catch((error: ApiError) => live && setLoadError(error));
     return () => {
@@ -234,6 +305,8 @@ export function Workbench({ slug }: { slug: string | null }) {
     };
   }, []);
 
+  // Bumped when a fragment is made from the selection, to list it.
+  const [fragmentsRevision, setFragmentsRevision] = useState(0);
   useEffect(() => {
     if (!editor) return;
     let live = true;
@@ -243,7 +316,85 @@ export function Workbench({ slug }: { slug: string | null }) {
     return () => {
       live = false;
     };
-  }, [editor]);
+  }, [editor, fragmentsRevision]);
+
+  // For a fragment: the queries a new version would reach.
+  const [dependents, setDependents] = useState<Dependent[] | null>(null);
+  const isFragment = query?.kind === 'fragment';
+  useEffect(() => {
+    if (!slug || !isFragment) return;
+    let live = true;
+    api<{ dependents: Dependent[] }>(`/api/v1/queries/${slug}/dependents`)
+      .then(({ dependents: list }) => live && setDependents(list))
+      .catch(() => live && setDependents([]));
+    return () => {
+      live = false;
+    };
+  }, [slug, isFragment, queryRevision]);
+
+  // The charts drawn from this query: each one a tab of its own.
+  const hasCharts = query?.kind === 'query';
+  useEffect(() => {
+    if (!slug || !hasCharts) return;
+    let live = true;
+    api<{ visualizations: Saved[] }>(`/api/v1/queries/${slug}/visualizations`)
+      .then(({ visualizations }) => live && setCharts(visualizations))
+      .catch(() => live && setCharts([]));
+    api<{
+      dashboards: Array<{ slug: string; title: string; charts: number }>;
+    }>(`/api/v1/queries/${slug}/dashboards`)
+      .then(({ dashboards: list }) => live && setDashboards(list))
+      .catch(() => live && setDashboards([]));
+    return () => {
+      live = false;
+    };
+  }, [slug, hasCharts]);
+
+  // The Run and More menus close on a click elsewhere, or Escape.
+  useEffect(() => {
+    if (!runMenu && !menuOpen) return;
+    const close = (event: Event) => {
+      if (
+        event instanceof KeyboardEvent
+          ? event.key === 'Escape'
+          : !(event.target as Element).closest?.('.menu-anchor')
+      ) {
+        setRunMenu(false);
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', close);
+    document.addEventListener('keydown', close);
+    return () => {
+      document.removeEventListener('mousedown', close);
+      document.removeEventListener('keydown', close);
+    };
+  }, [runMenu, menuOpen]);
+
+  // Arriving from a dashboard tile: show the chart, not the SQL above it.
+  const chartsLoaded = charts !== null;
+  useEffect(() => {
+    if (!initialChart || !chartsLoaded) return;
+    requestAnimationFrame(() =>
+      document
+        .querySelector('.results-card')
+        ?.scrollIntoView({ block: 'start' }),
+    );
+  }, [initialChart, chartsLoaded]);
+
+  // Turning the selected SQL into a fragment of its own.
+  // Fragments do not run on their own: only the queries a save reruns count.
+  const reruns =
+    dependents?.filter((entry) => entry.kind === 'query').length ?? 0;
+  const [extracting, setExtracting] = useState<{
+    start: number;
+    end: number;
+    text: string;
+  } | null>(null);
+  const [extractSlug, setExtractSlug] = useState('');
+  const [extractTitle, setExtractTitle] = useState('');
+  const [extractError, setExtractError] = useState<string | null>(null);
+  const [extractHint, setExtractHint] = useState<string | null>(null);
 
   // The schema of one network: with "All", the first one's stands for the rest.
   const schemaNetwork = network === 'all' ? networks[0]?.id : network;
@@ -268,7 +419,8 @@ export function Workbench({ slug }: { slug: string | null }) {
     return search.toString();
   }, [network, values]);
 
-  const showsStored = tab === 'stored' && query?.kind === 'query';
+  // Read whatever the tab: the header says when it last ran.
+  const showsStored = query?.kind === 'query';
   useEffect(() => {
     if (!slug || !showsStored) return;
     let live = true;
@@ -288,7 +440,8 @@ export function Workbench({ slug }: { slug: string | null }) {
     };
   }, [slug, showsStored, storedSearch, storedRevision]);
 
-  const showsVersions = tab === 'versions';
+  // Read whatever the tab: the About panel lists the latest.
+  const showsVersions = Boolean(slug);
   useEffect(() => {
     if (!slug || !showsVersions) return;
     let live = true;
@@ -331,7 +484,9 @@ export function Workbench({ slug }: { slug: string | null }) {
   const run = useCallback(async () => {
     if (!editor || running) return;
     setRunning(true);
-    setTab('preview');
+    if (tab === 'versions' || tab.startsWith('chart:') || tab === 'new')
+      setTab('results');
+    setResultMode('preview');
     setPreviewError(null);
     try {
       setPreview(
@@ -351,7 +506,7 @@ export function Workbench({ slug }: { slug: string | null }) {
     } finally {
       setRunning(false);
     }
-  }, [draft.parameters, draft.sql, editor, network, running, supplied]);
+  }, [draft.parameters, draft.sql, editor, network, running, supplied, tab]);
 
   const save = useCallback(async () => {
     if (!editor || saving || !dirty) return;
@@ -427,6 +582,69 @@ export function Workbench({ slug }: { slug: string | null }) {
     }
   };
 
+  /** Opens the form for the selected SQL, or says to select some first. */
+  const startExtract = () => {
+    const selection = sqlEditor.current?.selection();
+    if (!selection?.text.trim()) {
+      setExtracting(null);
+      setExtractHint(
+        'Select the SQL to reuse — a subquery, a CTE body, or an expression — then try again.',
+      );
+      return;
+    }
+    setExtractHint(null);
+    setExtractError(null);
+    setExtracting(selection);
+  };
+
+  /**
+   * Saves the selection as a fragment and puts `{{> slug}}` in its place.
+   * The query itself still has to be saved to use it.
+   */
+  const extract = async (event: React.SubmitEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!extracting) return;
+    setExtractError(null);
+    const text = extracting.text.trim();
+    const used = new Set(
+      [...text.matchAll(/\{\{\s*([a-z_][a-z0-9_]*)\s*\}\}/g)].map(
+        (match) => match[1],
+      ),
+    );
+    try {
+      await api('/api/v1/queries', {
+        method: 'POST',
+        body: {
+          slug: extractSlug,
+          title: extractTitle || extractSlug,
+          kind: 'fragment',
+          visibility: draft.visibility,
+          sql: text,
+          parameters: draft.parameters.filter((entry) => used.has(entry.name)),
+          note: `Taken out of ${draft.slug || 'a new query'}`,
+        },
+      });
+      // Only replace what is still where it was selected.
+      if (
+        draft.sql.slice(extracting.start, extracting.end) === extracting.text
+      ) {
+        update(
+          'sql',
+          `${draft.sql.slice(0, extracting.start)}{{> ${extractSlug}}}${draft.sql.slice(extracting.end)}`,
+        );
+      }
+      setExtracting(null);
+      setExtractSlug('');
+      setExtractTitle('');
+      setExtractHint(
+        `Saved as the fragment ${extractSlug}. Save this query to use it in place of the SQL it replaced.`,
+      );
+      setFragmentsRevision((value) => value + 1);
+    } catch (error) {
+      setExtractError((error as ApiError).message);
+    }
+  };
+
   const fork = async () => {
     if (!slug || !forkSlug) return;
     try {
@@ -487,8 +705,10 @@ export function Workbench({ slug }: { slug: string | null }) {
         .map((fragment) => ({
           label: `> ${fragment.slug}`,
           kind: 'fragment' as const,
-          detail: 'fragment',
-          insert: `> ${fragment.slug}}}`,
+          detail: fragment.expression ? 'fragment · value' : 'fragment',
+          insert: fragment.arguments?.length
+            ? `> ${fragment.slug}(|${fragment.arguments.join(', ')})}}`
+            : `> ${fragment.slug}}}`,
         })),
     ];
     for (const table of schema) {
@@ -562,9 +782,47 @@ export function Workbench({ slug }: { slug: string | null }) {
     versions.find((version) => version.version === selectedVersion) ?? null;
   const publicUrl = slug ? `/api/v1/queries/${slug}/results` : null;
 
+  const hasStored = !creating && draft.kind === 'query';
+  const lastRun = stored?.networks
+    .filter((entry) => entry.finishedAt)
+    .sort((a, b) => (b.finishedAt ?? '').localeCompare(a.finishedAt ?? ''))[0];
+  const runFailed = stored?.networks.some(
+    (entry) => entry.lastAttempt?.status === 'failed',
+  );
+  const runStale = stored?.networks.some((entry) => entry.stale);
+  const code = codeOf(draft.sql);
+  const tables = schema
+    .map((table) => table.name)
+    .filter((name) => new RegExp(`\\b${name}\\b`, 'i').test(code));
+  const usedFragments = [
+    ...new Set(
+      [...code.matchAll(/\{\{\s*>\s*([a-z0-9][a-z0-9-]*)/g)].map(
+        (match) => match[1],
+      ),
+    ),
+  ];
+  const openChart = tab.startsWith('chart:')
+    ? (charts?.find((entry) => entry.id === tab.slice(6)) ?? null)
+    : null;
+  const savedChart = (chart: Saved) => {
+    setCharts((list) =>
+      list?.some((entry) => entry.id === chart.id)
+        ? list.map((entry) => (entry.id === chart.id ? chart : entry))
+        : [...(list ?? []), chart],
+    );
+    setTab(`chart:${chart.id}`);
+  };
+
   return (
-    <main className={`studio-page workbench${editor ? '' : ' reader'}`}>
-      {editor && (
+    <main
+      className={[
+        'studio-page workbench',
+        editor ? '' : 'reader',
+        editor && schemaOpen ? '' : 'no-schema',
+        aboutOpen && !creating ? '' : 'no-about',
+      ].join(' ')}
+    >
+      {editor && schemaOpen && (
         <aside className="workbench-side" aria-label="Schema">
           <h2>Schema</h2>
           <input
@@ -614,19 +872,23 @@ export function Workbench({ slug }: { slug: string | null }) {
           </div>
           <h2>Fragments</h2>
           <ul className="fragment-list">
-            {fragments.map((fragment) => (
-              <li key={fragment.slug}>
-                <button
-                  type="button"
-                  onClick={() =>
-                    sqlEditor.current?.insert(`{{> ${fragment.slug}}}`)
-                  }
-                  title={fragment.title}
-                >
-                  {`{{> ${fragment.slug}}}`}
-                </button>
-              </li>
-            ))}
+            {fragments.map((fragment) => {
+              const call = fragment.arguments?.length
+                ? `{{> ${fragment.slug}(${fragment.arguments.join(', ')})}}`
+                : `{{> ${fragment.slug}}}`;
+              return (
+                <li key={fragment.slug}>
+                  <button
+                    type="button"
+                    onClick={() => sqlEditor.current?.insert(call)}
+                    title={`${fragment.title}${fragment.expression ? ' — a value: use it where an expression goes' : ' — a table: use it after FROM or JOIN'}`}
+                  >
+                    {call}
+                  </button>
+                  {fragment.expression && <small>value</small>}
+                </li>
+              );
+            })}
             {!fragments.length && (
               <li className="studio-muted">
                 None yet. Save a query as a fragment to reuse it.
@@ -670,680 +932,1143 @@ export function Workbench({ slug }: { slug: string | null }) {
                 }}
               />
             )}
-            <p className="studio-muted workbench-meta">
+            <div className="meta-chips">
               {creating ? (
-                <label className="inline-field">
-                  <span>/queries/</span>
-                  <input
-                    value={draft.slug}
-                    aria-label="Slug"
-                    placeholder="slug"
-                    onChange={(event) => {
-                      setSlugTouched(true);
-                      update('slug', event.target.value);
-                    }}
-                  />
-                </label>
+                <>
+                  <label className="inline-field">
+                    <span>/queries/</span>
+                    <input
+                      value={draft.slug}
+                      aria-label="Slug"
+                      placeholder="slug"
+                      onChange={(event) => {
+                        setSlugTouched(true);
+                        update('slug', event.target.value);
+                      }}
+                    />
+                  </label>
+                  <label className="chip">
+                    <Shapes size={13} aria-hidden="true" />
+                    <select
+                      value={draft.kind}
+                      aria-label="Kind"
+                      onChange={(event) => {
+                        const kind = event.target.value as Kind;
+                        update('kind', kind);
+                        if (kind === 'fragment') update('refreshSeconds', null);
+                      }}
+                    >
+                      <option value="query">Query</option>
+                      <option value="fragment">Fragment</option>
+                    </select>
+                  </label>
+                </>
               ) : (
                 <>
-                  <code>{draft.slug}</code>
-                  {query?.current && <> · v{query.current.version}</>}
-                  {query?.current?.createdBy && (
-                    <> · saved by {query.current.createdBy}</>
+                  <code className="chip mono" title="Slug">
+                    {draft.slug}
+                  </code>
+                  {isFragment && (
+                    <span className="chip">
+                      <Puzzle size={13} aria-hidden="true" /> Fragment
+                    </span>
                   )}
-                  {query?.current && <> · {when(query.current.createdAt)}</>}
-                  {query?.forkedFrom && (
-                    <>
-                      {' '}
-                      · forked from{' '}
-                      <Link href={`/queries/${query.forkedFrom}`}>
-                        {query.forkedFrom}
-                      </Link>
-                    </>
-                  )}
-                  {query?.archivedAt && <> · archived</>}
                 </>
               )}
-            </p>
-          </div>
-          {editor && !query?.archivedAt && (
-            <div className="workbench-actions">
-              {dirty && !creating && (
-                <span className="dirty-mark">Unsaved changes</span>
+              <label className="chip" title="Who can see it">
+                {draft.visibility === 'private' ? (
+                  <Lock size={13} aria-hidden="true" />
+                ) : (
+                  <Globe size={13} aria-hidden="true" />
+                )}
+                <select
+                  value={draft.visibility}
+                  disabled={readOnly}
+                  aria-label="Visibility"
+                  onChange={(event) =>
+                    update('visibility', event.target.value as Visibility)
+                  }
+                >
+                  <option value="private">Private</option>
+                  <option value="unlisted">Unlisted</option>
+                  <option value="public">Public</option>
+                </select>
+              </label>
+              {draft.kind === 'query' && (
+                <>
+                  <label className="chip" title="Scheduled refresh">
+                    <Timer size={13} aria-hidden="true" />
+                    <select
+                      value={draft.refreshSeconds ?? ''}
+                      disabled={readOnly}
+                      aria-label="Refresh"
+                      onChange={(event) =>
+                        update(
+                          'refreshSeconds',
+                          event.target.value
+                            ? Number(event.target.value)
+                            : null,
+                        )
+                      }
+                    >
+                      {REFRESH_OPTIONS.map((option) => (
+                        <option key={option.label} value={option.value ?? ''}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label
+                    className="chip"
+                    title="With every network selected: stack their rows, or show it per network only"
+                  >
+                    <Layers size={13} aria-hidden="true" />
+                    <select
+                      value={draft.combine}
+                      disabled={readOnly}
+                      aria-label="All networks"
+                      onChange={(event) =>
+                        update('combine', event.target.value as Combine)
+                      }
+                    >
+                      <option value="concat">All networks: stacked</option>
+                      <option value="hidden">Per network only</option>
+                    </select>
+                  </label>
+                </>
               )}
-              {savedAt && !dirty && <span className="studio-muted">Saved</span>}
-              <input
-                className="studio-input note-input"
-                value={note}
-                onChange={(event) => setNote(event.target.value)}
-                placeholder={creating ? 'Note (optional)' : 'What changed?'}
-                aria-label="Version note"
-              />
+              {lastRun && (
+                <button
+                  type="button"
+                  className={`chip status ${runFailed ? 'failed' : runStale ? 'stale' : 'fresh'}`}
+                  title={`${runFailed ? 'The last run failed' : runStale ? 'Stale: its inputs changed since' : 'Up to date'} · finished ${when(lastRun.finishedAt)}`}
+                  onClick={() => {
+                    setTab('results');
+                    setResultMode('stored');
+                  }}
+                >
+                  <Clock size={13} aria-hidden="true" />
+                  Last run {ago(lastRun.finishedAt)}
+                  {lastRun.durationMs !== null &&
+                    ` in ${took(lastRun.durationMs)}`}
+                </button>
+              )}
+              {query?.current && (
+                <span
+                  className="chip quiet"
+                  title={`Saved ${when(query.current.createdAt)}`}
+                >
+                  v{query.current.version}
+                  {query.current.createdBy && ` · ${query.current.createdBy}`}
+                  {` · ${ago(query.current.createdAt)}`}
+                </span>
+              )}
+              {query?.forkedFrom && (
+                <Link
+                  className="chip quiet"
+                  href={`/queries/${query.forkedFrom}`}
+                >
+                  <GitFork size={13} aria-hidden="true" /> {query.forkedFrom}
+                </Link>
+              )}
+              {query?.archivedAt && <span className="chip warn">Archived</span>}
+            </div>
+          </div>
+          <div className="workbench-actions">
+            {editor && !query?.archivedAt && (
+              <>
+                {dirty && !creating && (
+                  <span className="dirty-mark">
+                    Unsaved changes
+                    {isFragment &&
+                      sqlDirty &&
+                      reruns > 0 &&
+                      ` · saving reruns ${reruns} quer${reruns === 1 ? 'y' : 'ies'}`}
+                  </span>
+                )}
+                {savedAt && !dirty && (
+                  <span className="studio-muted">Saved</span>
+                )}
+                <input
+                  className="studio-input note-input"
+                  value={note}
+                  onChange={(event) => setNote(event.target.value)}
+                  placeholder={creating ? 'Note (optional)' : 'What changed?'}
+                  aria-label="Version note"
+                />
+                <button
+                  type="button"
+                  className="studio-button primary"
+                  disabled={!dirty || saving || !draft.title || !draft.slug}
+                  onClick={() => void save()}
+                  title="Cmd/Ctrl+S"
+                >
+                  <Save size={14} aria-hidden="true" />
+                  {saving ? 'Saving…' : creating ? 'Create' : 'Save'}
+                </button>
+              </>
+            )}
+            {!creating && (
               <button
                 type="button"
-                className="studio-button primary"
-                disabled={!dirty || saving || !draft.title || !draft.slug}
-                onClick={() => void save()}
-                title="Cmd/Ctrl+S"
+                className="studio-icon-button"
+                aria-pressed={aboutOpen}
+                title={aboutOpen ? 'Hide the details' : 'Show the details'}
+                aria-label="About this query"
+                onClick={() =>
+                  setPreference('arrakis.workbench.about', !aboutOpen)
+                }
               >
-                <Save size={14} aria-hidden="true" />
-                {saving ? 'Saving…' : creating ? 'Create' : 'Save'}
+                <PanelRight size={15} aria-hidden="true" />
               </button>
-            </div>
-          )}
+            )}
+            {editor && !creating && !query?.archivedAt && (
+              <div className="menu-anchor">
+                <button
+                  type="button"
+                  className="studio-icon-button"
+                  aria-label="More"
+                  aria-expanded={menuOpen}
+                  onClick={() => setMenuOpen(!menuOpen)}
+                >
+                  <MoreHorizontal size={15} aria-hidden="true" />
+                </button>
+                {menuOpen && (
+                  <div className="menu">
+                    <span className="inline-field">
+                      <GitFork size={14} aria-hidden="true" />
+                      <input
+                        className="studio-input"
+                        value={forkSlug}
+                        placeholder="new-slug"
+                        aria-label="Slug for the fork"
+                        onChange={(event) => setForkSlug(event.target.value)}
+                      />
+                      <button
+                        type="button"
+                        className="studio-button"
+                        disabled={!forkSlug}
+                        onClick={() => void fork()}
+                      >
+                        Fork
+                      </button>
+                    </span>
+                    {confirmArchive ? (
+                      <span className="inline-field">
+                        <span>Archive this query? Its history is kept.</span>
+                        <button
+                          type="button"
+                          className="studio-button danger"
+                          onClick={() => void archive()}
+                        >
+                          Archive
+                        </button>
+                        <button
+                          type="button"
+                          className="studio-button"
+                          onClick={() => setConfirmArchive(false)}
+                        >
+                          Cancel
+                        </button>
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        className="studio-button"
+                        onClick={() => setConfirmArchive(true)}
+                      >
+                        <Archive size={13} aria-hidden="true" /> Archive
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </header>
 
         <ErrorBox error={saveError} />
 
-        <div className="workbench-settings">
-          {creating && (
-            <label className="studio-field compact">
-              <span>Kind</span>
-              <select
-                value={draft.kind}
-                onChange={(event) => {
-                  const kind = event.target.value as Kind;
-                  update('kind', kind);
-                  if (kind === 'fragment') update('refreshSeconds', null);
-                }}
-              >
-                <option value="query">Query</option>
-                <option value="fragment">Fragment</option>
-              </select>
-            </label>
-          )}
-          <label className="studio-field compact">
-            <span>Visibility</span>
-            <select
-              value={draft.visibility}
-              disabled={readOnly}
-              onChange={(event) =>
-                update('visibility', event.target.value as Visibility)
-              }
-            >
-              <option value="private">Private</option>
-              <option value="unlisted">Unlisted</option>
-              <option value="public">Public</option>
-            </select>
-          </label>
-          {draft.kind === 'query' && (
-            <>
-              <label className="studio-field compact">
-                <span>Refresh</span>
-                <select
-                  value={draft.refreshSeconds ?? ''}
-                  disabled={readOnly}
-                  onChange={(event) =>
-                    update(
-                      'refreshSeconds',
-                      event.target.value ? Number(event.target.value) : null,
-                    )
-                  }
-                >
-                  {REFRESH_OPTIONS.map((option) => (
-                    <option key={option.label} value={option.value ?? ''}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="studio-field compact">
-                <span>All networks</span>
-                <select
-                  value={draft.combine}
-                  disabled={readOnly}
-                  onChange={(event) =>
-                    update('combine', event.target.value as Combine)
-                  }
-                >
-                  <option value="concat">Stack rows</option>
-                  <option value="hidden">Per network only</option>
-                </select>
-              </label>
-            </>
-          )}
-          <label className="studio-field grow">
-            <span>Description</span>
-            <input
-              value={draft.description}
-              disabled={readOnly}
-              placeholder="What this query answers"
-              onChange={(event) => update('description', event.target.value)}
-            />
-          </label>
-        </div>
-
-        <div className="workbench-toolbar">
-          <fieldset className="network-switch">
-            <legend className="sr-only">Network</legend>
-            {networks.length > 1 && (
-              <button
-                type="button"
-                aria-pressed={network === 'all'}
-                className={network === 'all' ? 'active' : ''}
-                onClick={() => setNetwork('all')}
-              >
-                All
-              </button>
-            )}
-            {networks.map((entry) => (
-              <button
-                key={entry.id}
-                type="button"
-                aria-pressed={network === entry.id}
-                className={
-                  network === entry.id ||
-                  (networks.length === 1 && network === 'all')
-                    ? 'active'
-                    : ''
-                }
-                onClick={() => setNetwork(entry.id)}
-              >
-                {entry.label}
-              </button>
-            ))}
-          </fieldset>
-          <span className="results-spacer" />
-          {editor && (
-            <button
-              type="button"
-              className="studio-button primary"
-              onClick={() => void run()}
-              disabled={running}
-              title="Cmd/Ctrl+Enter"
-            >
-              <Play size={14} aria-hidden="true" />
-              {running ? 'Running…' : 'Run'}
-            </button>
-          )}
-        </div>
-
-        <SqlEditor
-          ref={sqlEditor}
-          label="SQL"
-          value={draft.sql}
-          onChange={(sql) => update('sql', sql)}
-          onRun={() => void run()}
-          onSave={() => void save()}
-          readOnly={readOnly}
-          completions={completions}
-          columns={columnsByTable}
-          height={readOnly ? 260 : 340}
-        />
-
-        <section className="parameters" aria-label="Parameters">
-          <div className="parameters-head">
-            <h2>Parameters</h2>
-            {!readOnly && missing.length > 0 && (
-              <button
-                type="button"
-                className="studio-button"
-                onClick={() =>
-                  update('parameters', [
-                    ...draft.parameters,
-                    ...missing.map((name) => ({
-                      name,
-                      type: 'text' as ParameterType,
-                    })),
-                  ])
-                }
-              >
-                <Wand2 size={13} aria-hidden="true" /> Declare{' '}
-                {missing.map((name) => `{{${name}}}`).join(', ')}
-              </button>
-            )}
-            {!readOnly && (
-              <button
-                type="button"
-                className="studio-button"
-                onClick={() =>
-                  update('parameters', [
-                    ...draft.parameters,
-                    {
-                      name: `param_${draft.parameters.length + 1}`,
-                      type: 'text',
-                    },
-                  ])
-                }
-              >
-                <Plus size={13} aria-hidden="true" /> Add
-              </button>
-            )}
-          </div>
-          {draft.parameters.length === 0 ? (
-            <p className="studio-muted">
-              None. Write <code>{'{{name}}'}</code> in the SQL to add one.
-            </p>
-          ) : (
-            <table className="parameter-table">
-              <thead>
-                <tr>
-                  <th scope="col">Name</th>
-                  <th scope="col">Type</th>
-                  <th scope="col">Default</th>
-                  <th scope="col">Value for this run</th>
-                  {!readOnly && (
-                    <th scope="col">
-                      <span className="sr-only">Remove</span>
-                    </th>
-                  )}
-                </tr>
-              </thead>
-              <tbody>
-                {draft.parameters.map((parameter, index) => {
-                  const change = (patch: Partial<ParameterDefinition>) =>
-                    update(
-                      'parameters',
-                      draft.parameters.map((entry, at) =>
-                        at === index ? { ...entry, ...patch } : entry,
-                      ),
-                    );
-                  return (
-                    <tr key={index}>
-                      <td>
-                        <input
-                          className="studio-input mono"
-                          value={parameter.name}
-                          disabled={readOnly}
-                          aria-label="Parameter name"
-                          onChange={(event) =>
-                            change({ name: event.target.value })
-                          }
-                        />
-                      </td>
-                      <td>
-                        <select
-                          className="studio-input"
-                          value={parameter.type}
-                          disabled={readOnly}
-                          aria-label="Parameter type"
-                          onChange={(event) =>
-                            change({
-                              type: event.target.value as ParameterType,
-                            })
-                          }
-                        >
-                          {PARAMETER_TYPES.map((type) => (
-                            <option key={type} value={type}>
-                              {type}
-                            </option>
-                          ))}
-                        </select>
-                        {parameter.type === 'enum' && (
-                          <input
-                            className="studio-input"
-                            placeholder="option, option"
-                            value={(parameter.options ?? []).join(', ')}
-                            disabled={readOnly}
-                            aria-label="Enum options"
-                            onChange={(event) =>
-                              change({
-                                options: event.target.value
-                                  .split(',')
-                                  .map((option) => option.trim())
-                                  .filter(Boolean),
-                              })
-                            }
-                          />
-                        )}
-                      </td>
-                      <td>
-                        <input
-                          className="studio-input"
-                          value={
-                            parameter.default === undefined ||
-                            parameter.default === null
-                              ? ''
-                              : String(parameter.default as string)
-                          }
-                          disabled={readOnly}
-                          placeholder="none"
-                          aria-label="Parameter default"
-                          onChange={(event) => {
-                            const { default: _, ...rest } = parameter;
-                            update(
-                              'parameters',
-                              draft.parameters.map((entry, at) =>
-                                at === index
-                                  ? event.target.value === ''
-                                    ? rest
-                                    : { ...rest, default: event.target.value }
-                                  : entry,
-                              ),
-                            );
-                          }}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          className="studio-input"
-                          value={values[parameter.name] ?? ''}
-                          placeholder="default"
-                          aria-label={`Value of ${parameter.name}`}
-                          onChange={(event) =>
-                            setValues((current) => ({
-                              ...current,
-                              [parameter.name]: event.target.value,
-                            }))
-                          }
-                        />
-                      </td>
-                      {!readOnly && (
-                        <td>
-                          <button
-                            type="button"
-                            className="studio-icon-button"
-                            aria-label={`Remove ${parameter.name}`}
-                            onClick={() =>
-                              update(
-                                'parameters',
-                                draft.parameters.filter(
-                                  (_, at) => at !== index,
-                                ),
-                              )
-                            }
-                          >
-                            <Trash2 size={14} aria-hidden="true" />
-                          </button>
-                        </td>
-                      )}
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          )}
-        </section>
-
-        <div className="workbench-tabs" role="tablist" aria-label="Results">
-          {editor && (
-            <button
-              type="button"
-              role="tab"
-              aria-selected={tab === 'preview'}
-              onClick={() => setTab('preview')}
-            >
-              <Play size={13} aria-hidden="true" /> Preview
-            </button>
-          )}
-          {!creating && draft.kind === 'query' && (
-            <button
-              type="button"
-              role="tab"
-              aria-selected={tab === 'stored'}
-              onClick={() => setTab('stored')}
-            >
-              <Clock size={13} aria-hidden="true" /> Stored result
-            </button>
-          )}
-          {!creating && (
-            <button
-              type="button"
-              role="tab"
-              aria-selected={tab === 'versions'}
-              onClick={() => setTab('versions')}
-            >
-              <History size={13} aria-hidden="true" /> Versions
-            </button>
-          )}
-        </div>
-
-        <div className="workbench-panel" role="tabpanel">
-          {tab === 'preview' && (
-            <>
-              <ErrorBox error={previewError} />
-              {preview && (
-                <ResultsTable
-                  columns={preview.columns}
-                  rows={preview.rows}
-                  name={draft.slug || 'preview'}
-                  footer={
-                    <>
-                      {preview.truncated && (
-                        <span className="badge warn">
-                          First {preview.rowCount.toLocaleString()} rows
-                        </span>
-                      )}
-                      {preview.networks.map((entry) => (
-                        <span
-                          key={entry.id}
-                          className={`badge${entry.error ? ' warn' : ''}`}
-                          title={entry.error}
-                        >
-                          {entry.id}:{' '}
-                          {entry.error
-                            ? 'failed'
-                            : `${entry.rowCount.toLocaleString()} in ${entry.durationMs} ms`}
-                          {entry.timebase === 'estimated' &&
-                            ' · estimated time'}
-                        </span>
-                      ))}
-                    </>
-                  }
-                />
-              )}
-              {!preview && !previewError && (
-                <p className="studio-muted">
-                  {running
-                    ? 'Running…'
-                    : 'Run the SQL to preview up to 10,000 rows. Nothing is stored.'}
-                </p>
-              )}
-            </>
-          )}
-
-          {tab === 'stored' && (
-            <>
-              <div className="stored-head">
-                {stored?.networks.map((entry) => (
-                  <span
-                    key={entry.id}
-                    className={`badge ${entry.status}${entry.stale ? ' warn' : ''}`}
-                    title={entry.lastAttempt?.error ?? undefined}
-                  >
-                    {entry.id}: {entry.status}
-                    {entry.status === 'ready' &&
-                      ` · ${entry.rowCount?.toLocaleString()} rows · ${when(entry.finishedAt)}`}
-                    {entry.stale && ' · stale'}
-                    {entry.timebase === 'estimated' && ' · estimated time'}
-                    {entry.lastAttempt?.status === 'failed' &&
-                      ` · last run failed`}
-                  </span>
-                ))}
-                <span className="results-spacer" />
+        <section className="card editor-card" aria-label="Query editor">
+          <header className="card-head">
+            <h2>Query editor</h2>
+            <div className="card-tools">
+              {editor && (
                 <button
                   type="button"
-                  className="studio-button"
-                  onClick={() => setStoredRevision((value) => value + 1)}
+                  className="tool"
+                  aria-pressed={schemaOpen}
+                  title={schemaOpen ? 'Hide the schema' : 'Show the schema'}
+                  aria-label="Schema"
+                  onClick={() =>
+                    setPreference('arrakis.workbench.schema', !schemaOpen)
+                  }
                 >
-                  <RefreshCw size={13} aria-hidden="true" /> Reload
+                  <PanelLeft size={15} aria-hidden="true" />
                 </button>
-                {editor && !query?.archivedAt && (
-                  <button
-                    type="button"
-                    className="studio-button primary"
-                    disabled={storing || sqlDirty}
-                    title={
-                      sqlDirty
-                        ? 'Save first: stored results come from saved versions'
-                        : undefined
-                    }
-                    onClick={() => void store()}
-                  >
-                    <Play size={13} aria-hidden="true" />
-                    {storing ? 'Running…' : 'Run and store now'}
-                  </button>
-                )}
-              </div>
-              {stored?.networks.some((entry) => entry.lastAttempt?.error) && (
-                <ul className="attempt-errors">
-                  {stored.networks
-                    .filter((entry) => entry.lastAttempt?.error)
-                    .map((entry) => (
-                      <li key={entry.id} className="studio-error">
-                        {entry.id}: {entry.lastAttempt?.error}
-                      </li>
-                    ))}
-                </ul>
               )}
-              <ErrorBox error={storeError} />
-              <ErrorBox error={storedError} />
-              {stored && stored.columns.length > 0 && (
-                <ResultsTable
-                  columns={stored.columns}
-                  rows={stored.rows}
-                  name={`${draft.slug}-v${stored.version}`}
-                />
+              {editor && !readOnly && (
+                <button
+                  type="button"
+                  className="tool labelled"
+                  onClick={startExtract}
+                  title="Save the selected SQL as a reusable fragment"
+                >
+                  <Puzzle size={14} aria-hidden="true" />
+                  Selection to fragment
+                </button>
               )}
-              {stored && !stored.columns.length && (
-                <p className="studio-muted">
-                  Nothing stored yet for these parameters.
-                  {draft.refreshSeconds
-                    ? ' The scheduler will run it shortly.'
-                    : editor
-                      ? ' Run and store it, or set a refresh interval.'
-                      : ''}
-                </p>
-              )}
-              {publicUrl && draft.visibility !== 'private' && (
-                <p className="studio-muted api-hint">
-                  JSON:{' '}
-                  <code>
-                    {publicUrl}?network={network}
-                  </code>
-                  <button
-                    type="button"
-                    className="studio-icon-button"
-                    aria-label="Copy the API address"
-                    onClick={() =>
-                      void navigator.clipboard?.writeText(
-                        `${window.location.origin}${publicUrl}?network=${network}`,
-                      )
-                    }
-                  >
-                    <Copy size={12} aria-hidden="true" />
-                  </button>
-                </p>
-              )}
-            </>
-          )}
-
-          {tab === 'versions' && (
-            <div className="versions">
-              <ol className="version-list">
-                {versions.map((version) => (
-                  <li key={version.id}>
-                    <button
-                      type="button"
-                      aria-pressed={selectedVersion === version.version}
-                      onClick={() =>
-                        setSelectedVersion(
-                          selectedVersion === version.version
-                            ? null
-                            : version.version,
-                        )
-                      }
-                    >
-                      <strong>v{version.version}</strong>
-                      <span>{version.note || 'No note'}</span>
-                      <small>
-                        {version.createdBy ?? 'unknown'} ·{' '}
-                        {when(version.createdAt)}
-                      </small>
-                    </button>
-                  </li>
-                ))}
-              </ol>
-              {selected && (
-                <div className="version-diff">
-                  <div className="version-diff-head">
-                    <span>
-                      v{selected.version} →{' '}
-                      {sqlDirty ? 'your draft' : 'current'}
-                    </span>
-                    {!readOnly && (
-                      <button
-                        type="button"
-                        className="studio-button"
-                        onClick={() => {
-                          update('sql', selected.sql);
-                          update('parameters', selected.parameters);
-                        }}
-                      >
-                        Load into editor
-                      </button>
-                    )}
-                  </div>
-                  <pre className="diff">
-                    {diffLines(selected.sql, draft.sql).map((line, index) => (
-                      <span key={index} className={`diff-${line.kind}`}>
-                        {line.kind === 'added'
-                          ? '+ '
-                          : line.kind === 'removed'
-                            ? '- '
-                            : '  '}
-                        {line.text}
-                        {'\n'}
-                      </span>
-                    ))}
-                  </pre>
-                </div>
+              {!creating && (
+                <button
+                  type="button"
+                  className="tool"
+                  title="Versions"
+                  aria-label="Versions"
+                  onClick={() => setTab('versions')}
+                >
+                  <History size={15} aria-hidden="true" />
+                </button>
               )}
             </div>
+          </header>
+          {extractHint && (
+            <p className="studio-muted extract-hint">{extractHint}</p>
           )}
-        </div>
-
-        {editor && !creating && !query?.archivedAt && (
-          <div className="workbench-foot">
-            <span className="inline-field">
-              <GitFork size={14} aria-hidden="true" />
-              <input
-                className="studio-input"
-                value={forkSlug}
-                placeholder="new-slug"
-                aria-label="Slug for the fork"
-                onChange={(event) => setForkSlug(event.target.value)}
-              />
-              <button
-                type="button"
-                className="studio-button"
-                disabled={!forkSlug}
-                onClick={() => void fork()}
-              >
-                Fork
-              </button>
-            </span>
-            <span className="results-spacer" />
-            {confirmArchive ? (
-              <span className="inline-field">
-                <span>Archive this query? Its history is kept.</span>
-                <button
-                  type="button"
-                  className="studio-button danger"
-                  onClick={() => void archive()}
-                >
-                  Archive
+          {extracting && (
+            <form
+              className="extract-form"
+              onSubmit={(event) => void extract(event)}
+            >
+              <p>
+                Save the selection as a fragment, used here as{' '}
+                <code>{`{{> ${extractSlug || 'slug'}}}`}</code>.{' '}
+                {isRelation(extracting.text)
+                  ? 'It is a query, so it stands in for a table.'
+                  : 'It is an expression, so it stands in for a value; write {{$name}} in it for each argument.'}
+              </p>
+              <pre>
+                {extracting.text.trim().split('\n').slice(0, 6).join('\n')}
+              </pre>
+              <div className="extract-fields">
+                <input
+                  className="studio-input mono"
+                  aria-label="Fragment slug"
+                  placeholder="slug, e.g. vpn-clients"
+                  pattern="[a-z0-9][a-z0-9\-]*"
+                  required
+                  value={extractSlug}
+                  onChange={(event) => setExtractSlug(event.target.value)}
+                />
+                <input
+                  className="studio-input"
+                  aria-label="Fragment title"
+                  placeholder="Title (optional)"
+                  value={extractTitle}
+                  onChange={(event) => setExtractTitle(event.target.value)}
+                />
+                <button type="submit" className="studio-button primary">
+                  Save fragment
                 </button>
                 <button
                   type="button"
                   className="studio-button"
-                  onClick={() => setConfirmArchive(false)}
+                  onClick={() => setExtracting(null)}
                 >
                   Cancel
                 </button>
-              </span>
-            ) : (
+              </div>
+              {extractError && <p className="studio-error">{extractError}</p>}
+            </form>
+          )}
+
+          <SqlEditor
+            ref={sqlEditor}
+            label="SQL"
+            value={draft.sql}
+            onChange={(sql) => update('sql', sql)}
+            onRun={() => void run()}
+            onSave={() => void save()}
+            readOnly={readOnly}
+            completions={completions}
+            columns={columnsByTable}
+            height={readOnly ? 260 : 340}
+          />
+          <div className="editor-foot">
+            {networks.length > 1 || network !== 'all' ? (
+              <fieldset className="network-switch">
+                <legend className="sr-only">Network</legend>
+                {networks.length > 1 && (
+                  <button
+                    type="button"
+                    aria-pressed={network === 'all'}
+                    className={network === 'all' ? 'active' : ''}
+                    onClick={() => setNetwork('all')}
+                  >
+                    All
+                  </button>
+                )}
+                {networks.map((entry) => (
+                  <button
+                    key={entry.id}
+                    type="button"
+                    aria-pressed={network === entry.id}
+                    className={
+                      network === entry.id ||
+                      (networks.length === 1 && network === 'all')
+                        ? 'active'
+                        : ''
+                    }
+                    onClick={() => setNetwork(entry.id)}
+                  >
+                    {entry.label}
+                  </button>
+                ))}
+              </fieldset>
+            ) : null}
+            <div className="param-chips">
+              {draft.parameters.map((parameter) => (
+                <label key={parameter.name} className="chip param">
+                  <span>{parameter.name}</span>
+                  <input
+                    value={values[parameter.name] ?? ''}
+                    placeholder={
+                      parameter.default === undefined ||
+                      parameter.default === null
+                        ? 'value'
+                        : String(parameter.default as string)
+                    }
+                    aria-label={`Value of ${parameter.name}`}
+                    onChange={(event) =>
+                      setValues((current) => ({
+                        ...current,
+                        [parameter.name]: event.target.value,
+                      }))
+                    }
+                  />
+                </label>
+              ))}
+              {!readOnly && missing.length > 0 && (
+                <button
+                  type="button"
+                  className="chip warn"
+                  onClick={() => setParamsOpen(true)}
+                >
+                  <Wand2 size={13} aria-hidden="true" />
+                  {missing.map((name) => `{{${name}}}`).join(', ')} undeclared
+                </button>
+              )}
+              {(!readOnly || draft.parameters.length > 0) && (
+                <button
+                  type="button"
+                  className="chip ghost"
+                  aria-expanded={paramsOpen}
+                  title="Parameters: names, types and defaults"
+                  onClick={() => setParamsOpen(!paramsOpen)}
+                >
+                  <Settings2 size={13} aria-hidden="true" />
+                  {draft.parameters.length ? 'Parameters' : 'Add a parameter'}
+                </button>
+              )}
+            </div>
+            <span className="results-spacer" />
+            {editor && (
+              <div className="split-button menu-anchor">
+                <button
+                  type="button"
+                  className="studio-button primary"
+                  onClick={() => void run()}
+                  disabled={running}
+                  title="Run and preview, storing nothing (Cmd/Ctrl+Enter)"
+                >
+                  <Play size={14} aria-hidden="true" />
+                  {running ? 'Running…' : 'Run'}
+                </button>
+                {hasStored && !query?.archivedAt && (
+                  <button
+                    type="button"
+                    className="studio-button primary caret"
+                    aria-label="More ways to run"
+                    aria-expanded={runMenu}
+                    onClick={() => setRunMenu(!runMenu)}
+                  >
+                    <ChevronDown size={14} aria-hidden="true" />
+                  </button>
+                )}
+                {runMenu && (
+                  <div className="menu right">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setRunMenu(false);
+                        void run();
+                      }}
+                    >
+                      <Play size={13} aria-hidden="true" />
+                      <span>
+                        Run
+                        <small>Preview up to 10,000 rows; nothing stored</small>
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      disabled={storing || sqlDirty}
+                      onClick={() => {
+                        setRunMenu(false);
+                        setTab('results');
+                        setResultMode('stored');
+                        void store();
+                      }}
+                    >
+                      <Database size={13} aria-hidden="true" />
+                      <span>
+                        Run and store
+                        <small>
+                          {sqlDirty
+                            ? 'Save first: stored results come from saved versions'
+                            : 'Replace the stored result its charts are drawn from'}
+                        </small>
+                      </span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+          {paramsOpen && (
+            <section className="parameters" aria-label="Parameters">
+              <div className="parameters-head">
+                <h3>Parameters</h3>
+                {!readOnly && missing.length > 0 && (
+                  <button
+                    type="button"
+                    className="studio-button"
+                    onClick={() =>
+                      update('parameters', [
+                        ...draft.parameters,
+                        ...missing.map((name) => ({
+                          name,
+                          type: 'text' as ParameterType,
+                        })),
+                      ])
+                    }
+                  >
+                    <Wand2 size={13} aria-hidden="true" /> Declare{' '}
+                    {missing.map((name) => `{{${name}}}`).join(', ')}
+                  </button>
+                )}
+                {!readOnly && (
+                  <button
+                    type="button"
+                    className="studio-button"
+                    onClick={() =>
+                      update('parameters', [
+                        ...draft.parameters,
+                        {
+                          name: `param_${draft.parameters.length + 1}`,
+                          type: 'text',
+                        },
+                      ])
+                    }
+                  >
+                    <Plus size={13} aria-hidden="true" /> Add
+                  </button>
+                )}
+              </div>
+              {draft.parameters.length === 0 ? (
+                <p className="studio-muted">
+                  None. Write <code>{'{{name}}'}</code> in the SQL to add one.
+                </p>
+              ) : (
+                <table className="parameter-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Name</th>
+                      <th scope="col">Type</th>
+                      <th scope="col">Default</th>
+                      <th scope="col">Value for this run</th>
+                      {!readOnly && (
+                        <th scope="col">
+                          <span className="sr-only">Remove</span>
+                        </th>
+                      )}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {draft.parameters.map((parameter, index) => {
+                      const change = (patch: Partial<ParameterDefinition>) =>
+                        update(
+                          'parameters',
+                          draft.parameters.map((entry, at) =>
+                            at === index ? { ...entry, ...patch } : entry,
+                          ),
+                        );
+                      return (
+                        <tr key={index}>
+                          <td>
+                            <input
+                              className="studio-input mono"
+                              value={parameter.name}
+                              disabled={readOnly}
+                              aria-label="Parameter name"
+                              onChange={(event) =>
+                                change({ name: event.target.value })
+                              }
+                            />
+                          </td>
+                          <td>
+                            <select
+                              className="studio-input"
+                              value={parameter.type}
+                              disabled={readOnly}
+                              aria-label="Parameter type"
+                              onChange={(event) =>
+                                change({
+                                  type: event.target.value as ParameterType,
+                                })
+                              }
+                            >
+                              {PARAMETER_TYPES.map((type) => (
+                                <option key={type} value={type}>
+                                  {type}
+                                </option>
+                              ))}
+                            </select>
+                            {parameter.type === 'enum' && (
+                              <input
+                                className="studio-input"
+                                placeholder="option, option"
+                                value={(parameter.options ?? []).join(', ')}
+                                disabled={readOnly}
+                                aria-label="Enum options"
+                                onChange={(event) =>
+                                  change({
+                                    options: event.target.value
+                                      .split(',')
+                                      .map((option) => option.trim())
+                                      .filter(Boolean),
+                                  })
+                                }
+                              />
+                            )}
+                          </td>
+                          <td>
+                            <input
+                              className="studio-input"
+                              value={
+                                parameter.default === undefined ||
+                                parameter.default === null
+                                  ? ''
+                                  : String(parameter.default as string)
+                              }
+                              disabled={readOnly}
+                              placeholder="none"
+                              aria-label="Parameter default"
+                              onChange={(event) => {
+                                const { default: _, ...rest } = parameter;
+                                update(
+                                  'parameters',
+                                  draft.parameters.map((entry, at) =>
+                                    at === index
+                                      ? event.target.value === ''
+                                        ? rest
+                                        : {
+                                            ...rest,
+                                            default: event.target.value,
+                                          }
+                                      : entry,
+                                  ),
+                                );
+                              }}
+                            />
+                          </td>
+                          <td>
+                            <input
+                              className="studio-input"
+                              value={values[parameter.name] ?? ''}
+                              placeholder="default"
+                              aria-label={`Value of ${parameter.name}`}
+                              onChange={(event) =>
+                                setValues((current) => ({
+                                  ...current,
+                                  [parameter.name]: event.target.value,
+                                }))
+                              }
+                            />
+                          </td>
+                          {!readOnly && (
+                            <td>
+                              <button
+                                type="button"
+                                className="studio-icon-button"
+                                aria-label={`Remove ${parameter.name}`}
+                                onClick={() =>
+                                  update(
+                                    'parameters',
+                                    draft.parameters.filter(
+                                      (_, at) => at !== index,
+                                    ),
+                                  )
+                                }
+                              >
+                                <Trash2 size={14} aria-hidden="true" />
+                              </button>
+                            </td>
+                          )}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </section>
+          )}
+        </section>
+
+        <section className="card results-card" aria-label="Query results">
+          <div className="result-tabs" role="tablist" aria-label="Results">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === 'results'}
+              onClick={() => setTab('results')}
+            >
+              <Table2 size={14} aria-hidden="true" /> Query results
+            </button>
+            {charts?.map((chart) => {
+              const Icon = TYPE_ICONS[chart.type];
+              return (
+                <button
+                  key={chart.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={tab === `chart:${chart.id}`}
+                  title={chart.title}
+                  onClick={() => setTab(`chart:${chart.id}`)}
+                >
+                  <Icon size={14} aria-hidden="true" />
+                  <span>{chart.title}</span>
+                </button>
+              );
+            })}
+            {!creating && (
               <button
                 type="button"
-                className="studio-button"
-                onClick={() => setConfirmArchive(true)}
+                role="tab"
+                aria-selected={tab === 'versions'}
+                onClick={() => setTab('versions')}
               >
-                <Archive size={13} aria-hidden="true" /> Archive
+                <History size={14} aria-hidden="true" /> Versions
+              </button>
+            )}
+            <span className="results-spacer" />
+            {editor && hasStored && !query?.archivedAt && (
+              <button
+                type="button"
+                role="tab"
+                className="new-chart"
+                aria-selected={tab === 'new'}
+                onClick={() => setTab('new')}
+              >
+                <Plus size={14} aria-hidden="true" /> New chart
               </button>
             )}
           </div>
-        )}
+
+          <div className="workbench-panel" role="tabpanel">
+            {tab === 'results' && (
+              <>
+                {hasStored && (
+                  <fieldset className="segmented">
+                    <legend className="sr-only">Which result</legend>
+                    <button
+                      type="button"
+                      aria-pressed={resultMode === 'stored'}
+                      onClick={() => setResultMode('stored')}
+                    >
+                      Stored result
+                    </button>
+                    <button
+                      type="button"
+                      aria-pressed={resultMode === 'preview'}
+                      onClick={() => setResultMode('preview')}
+                    >
+                      Preview
+                    </button>
+                  </fieldset>
+                )}
+                {hasStored && resultMode === 'stored' ? (
+                  <>
+                    <div className="stored-head">
+                      {stored?.networks.map((entry) => (
+                        <span
+                          key={entry.id}
+                          className={`badge ${entry.status}${entry.stale ? ' warn' : ''}`}
+                          title={entry.lastAttempt?.error ?? undefined}
+                        >
+                          {entry.id}: {entry.status}
+                          {entry.status === 'ready' &&
+                            ` · ${entry.rowCount?.toLocaleString()} rows · ${when(entry.finishedAt)}`}
+                          {entry.stale && ' · stale'}
+                          {entry.timebase === 'estimated' &&
+                            ' · estimated time'}
+                          {entry.lastAttempt?.status === 'failed' &&
+                            ` · last run failed`}
+                        </span>
+                      ))}
+                      <span className="results-spacer" />
+                      <button
+                        type="button"
+                        className="studio-button"
+                        onClick={() => setStoredRevision((value) => value + 1)}
+                      >
+                        <RefreshCw size={13} aria-hidden="true" /> Reload
+                      </button>
+                      {editor && !query?.archivedAt && (
+                        <button
+                          type="button"
+                          className="studio-button primary"
+                          disabled={storing || sqlDirty}
+                          title={
+                            sqlDirty
+                              ? 'Save first: stored results come from saved versions'
+                              : undefined
+                          }
+                          onClick={() => void store()}
+                        >
+                          <Play size={13} aria-hidden="true" />
+                          {storing ? 'Running…' : 'Run and store now'}
+                        </button>
+                      )}
+                    </div>
+                    {stored?.networks.some(
+                      (entry) => entry.lastAttempt?.error,
+                    ) && (
+                      <ul className="attempt-errors">
+                        {stored.networks
+                          .filter((entry) => entry.lastAttempt?.error)
+                          .map((entry) => (
+                            <li key={entry.id} className="studio-error">
+                              {entry.id}: {entry.lastAttempt?.error}
+                            </li>
+                          ))}
+                      </ul>
+                    )}
+                    <ErrorBox error={storeError} />
+                    <ErrorBox error={storedError} />
+                    {stored && stored.columns.length > 0 && (
+                      <ResultsTable
+                        columns={stored.columns}
+                        rows={stored.rows}
+                        name={`${draft.slug}-v${stored.version}`}
+                      />
+                    )}
+                    {stored && !stored.columns.length && (
+                      <p className="studio-muted">
+                        Nothing stored yet for these parameters.
+                        {draft.refreshSeconds
+                          ? ' The scheduler will run it shortly.'
+                          : editor
+                            ? ' Run and store it, or set a refresh interval.'
+                            : ''}
+                      </p>
+                    )}
+                    {publicUrl && draft.visibility !== 'private' && (
+                      <p className="studio-muted api-hint">
+                        JSON:{' '}
+                        <code>
+                          {publicUrl}?network={network}
+                        </code>
+                        <button
+                          type="button"
+                          className="studio-icon-button"
+                          aria-label="Copy the API address"
+                          onClick={() =>
+                            void navigator.clipboard?.writeText(
+                              `${window.location.origin}${publicUrl}?network=${network}`,
+                            )
+                          }
+                        >
+                          <Copy size={12} aria-hidden="true" />
+                        </button>
+                      </p>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <ErrorBox error={previewError} />
+                    {preview && (
+                      <ResultsTable
+                        columns={preview.columns}
+                        rows={preview.rows}
+                        name={draft.slug || 'preview'}
+                        footer={
+                          <>
+                            {preview.truncated && (
+                              <span className="badge warn">
+                                First {preview.rowCount.toLocaleString()} rows
+                              </span>
+                            )}
+                            {preview.networks.map((entry) => (
+                              <span
+                                key={entry.id}
+                                className={`badge${entry.error ? ' warn' : ''}`}
+                                title={entry.error}
+                              >
+                                {entry.id}:{' '}
+                                {entry.error
+                                  ? 'failed'
+                                  : `${entry.rowCount.toLocaleString()} in ${entry.durationMs} ms`}
+                                {entry.timebase === 'estimated' &&
+                                  ' · estimated time'}
+                              </span>
+                            ))}
+                          </>
+                        }
+                      />
+                    )}
+                    {!preview && !previewError && (
+                      <p className="studio-muted">
+                        {running
+                          ? 'Running…'
+                          : 'Run the SQL to preview up to 10,000 rows. Nothing is stored.'}
+                      </p>
+                    )}
+                  </>
+                )}
+              </>
+            )}
+
+            {tab.startsWith('chart:') &&
+              slug &&
+              (openChart ? (
+                <VisualizationsPanel
+                  key={openChart.id}
+                  slug={slug}
+                  editor={editor}
+                  network={network}
+                  chart={openChart}
+                  onSaved={savedChart}
+                  onDeleted={(id) => {
+                    setCharts((list) =>
+                      (list ?? []).filter((entry) => entry.id !== id),
+                    );
+                    setTab('results');
+                  }}
+                />
+              ) : (
+                <p className="studio-muted">
+                  {charts === null
+                    ? 'Loading…'
+                    : 'This chart no longer exists.'}
+                </p>
+              ))}
+
+            {tab === 'new' && slug && (
+              <VisualizationsPanel
+                key="new"
+                slug={slug}
+                editor={editor}
+                network={network}
+                chart={null}
+                onSaved={savedChart}
+                onDeleted={() => setTab('results')}
+              />
+            )}
+
+            {tab === 'versions' && (
+              <div className="versions">
+                <ol className="version-list">
+                  {versions.map((version) => (
+                    <li key={version.id}>
+                      <button
+                        type="button"
+                        aria-pressed={selectedVersion === version.version}
+                        onClick={() =>
+                          setSelectedVersion(
+                            selectedVersion === version.version
+                              ? null
+                              : version.version,
+                          )
+                        }
+                      >
+                        <strong>v{version.version}</strong>
+                        <span>{version.note || 'No note'}</span>
+                        <small>
+                          {version.createdBy ?? 'unknown'} ·{' '}
+                          {when(version.createdAt)}
+                        </small>
+                      </button>
+                    </li>
+                  ))}
+                </ol>
+                {selected && (
+                  <div className="version-diff">
+                    <div className="version-diff-head">
+                      <span>
+                        v{selected.version} →{' '}
+                        {sqlDirty ? 'your draft' : 'current'}
+                      </span>
+                      {!readOnly && (
+                        <button
+                          type="button"
+                          className="studio-button"
+                          onClick={() => {
+                            update('sql', selected.sql);
+                            update('parameters', selected.parameters);
+                          }}
+                        >
+                          Load into editor
+                        </button>
+                      )}
+                    </div>
+                    <pre className="diff">
+                      {diffLines(selected.sql, draft.sql).map((line, index) => (
+                        <span key={index} className={`diff-${line.kind}`}>
+                          {line.kind === 'added'
+                            ? '+ '
+                            : line.kind === 'removed'
+                              ? '- '
+                              : '  '}
+                          {line.text}
+                          {'\n'}
+                        </span>
+                      ))}
+                    </pre>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </section>
       </section>
+
+      {aboutOpen && !creating && (
+        <aside className="workbench-about" aria-label="About this query">
+          <h2>About this query</h2>
+          <section>
+            <h3>Description</h3>
+            {readOnly ? (
+              <p className={draft.description ? '' : 'studio-muted'}>
+                {draft.description || 'No description.'}
+              </p>
+            ) : (
+              <textarea
+                className="studio-input"
+                rows={3}
+                value={draft.description}
+                placeholder="What this query answers"
+                onChange={(event) => update('description', event.target.value)}
+              />
+            )}
+          </section>
+          <section>
+            <h3>
+              Data sources{' '}
+              <span className="count">
+                {tables.length + usedFragments.length}
+              </span>
+            </h3>
+            <ul className="about-list">
+              {tables.map((name) => (
+                <li key={name}>
+                  <Table2 size={13} aria-hidden="true" />
+                  <code>{name}</code>
+                </li>
+              ))}
+              {usedFragments.map((name) => (
+                <li key={name}>
+                  <Puzzle size={13} aria-hidden="true" />
+                  <Link href={`/queries/${name}`}>
+                    <code>{name}</code>
+                  </Link>
+                </li>
+              ))}
+              {!tables.length && !usedFragments.length && (
+                <li className="studio-muted">
+                  {editor ? 'No tables named yet.' : 'Listed for editors.'}
+                </li>
+              )}
+            </ul>
+          </section>
+          {isFragment && dependents && (
+            <section>
+              <h3>
+                Used by <span className="count">{dependents.length}</span>
+              </h3>
+              <ul className="about-list">
+                {dependents.map((entry) => (
+                  <li key={entry.slug}>
+                    {entry.kind === 'fragment' ? (
+                      <Puzzle size={13} aria-hidden="true" />
+                    ) : (
+                      <Database size={13} aria-hidden="true" />
+                    )}
+                    <Link href={`/queries/${entry.slug}`}>{entry.slug}</Link>
+                    <small>
+                      {entry.direct ? '' : 'through a fragment'}
+                      {entry.charts > 0 &&
+                        `${entry.direct ? '' : ' · '}${entry.charts} chart${entry.charts === 1 ? '' : 's'}`}
+                    </small>
+                  </li>
+                ))}
+                {!dependents.length && (
+                  <li className="studio-muted">Not used by any query yet.</li>
+                )}
+              </ul>
+            </section>
+          )}
+          {hasStored && (
+            <section>
+              <h3>
+                Dashboards <span className="count">{dashboards.length}</span>
+              </h3>
+              <ul className="about-list">
+                {dashboards.map((entry) => (
+                  <li key={entry.slug}>
+                    <LayoutDashboard size={13} aria-hidden="true" />
+                    <Link href={`/dashboards/${entry.slug}`}>
+                      {entry.title}
+                    </Link>
+                    <small>
+                      {entry.charts} chart{entry.charts === 1 ? '' : 's'}
+                    </small>
+                  </li>
+                ))}
+                {!dashboards.length && (
+                  <li className="studio-muted">On no dashboard yet.</li>
+                )}
+              </ul>
+            </section>
+          )}
+          {versions.length > 0 && (
+            <section>
+              <h3>
+                History <span className="count">{versions.length}</span>
+              </h3>
+              <ol className="about-list">
+                {versions.slice(0, 5).map((version) => (
+                  <li key={version.id}>
+                    <button
+                      type="button"
+                      className="studio-link"
+                      onClick={() => {
+                        setTab('versions');
+                        setSelectedVersion(version.version);
+                      }}
+                    >
+                      v{version.version}
+                    </button>
+                    <span className="about-note">
+                      {version.note || 'No note'}
+                    </span>
+                    <small>{ago(version.createdAt)}</small>
+                  </li>
+                ))}
+              </ol>
+            </section>
+          )}
+        </aside>
+      )}
     </main>
   );
 }

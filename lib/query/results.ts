@@ -39,7 +39,7 @@ function rowLimit(): number {
   return Number.isFinite(value) && value > 0 ? value : 5_000_000;
 }
 
-function quote(identifier: string): string {
+export function quote(identifier: string): string {
   return `"${identifier.replaceAll('"', '""')}"`;
 }
 
@@ -150,6 +150,14 @@ export async function materialize(options: {
              )`,
           );
           created = true;
+          // Hand-written chart SQL reads results as a separate, read-only
+          // role. Granting per table keeps that working even where the role
+          // was set up after the schema's default privileges were.
+          await db
+            .query(
+              `GRANT SELECT ON ${qualified(table)} TO arrakis_results_reader`,
+            )
+            .catch(() => undefined);
         }
         if (!rows.length) return;
         const arrays: unknown[][] = [
@@ -292,21 +300,29 @@ export type ResultPage = {
   limit: number;
 };
 
+export type NetworkStatus = ResultPage['networks'][number];
+
+export type Located = {
+  version: QueryVersion;
+  parameters: { values: Record<string, unknown>; hash: string };
+  networks: NetworkStatus[];
+  /** Ready tables that share one shape, in target order. */
+  tables: Array<{ network: string; table: string; columns: Column[] }>;
+};
+
 /**
- * Reads a stored result. Never runs anything: a result that does not exist
- * yet is reported as pending.
+ * Finds the stored tables behind a query's result on each target network,
+ * with each network's status. Never runs anything.
  *
- * Across several networks the stored tables are stacked under a leading
- * `network` column, which requires them to have the same columns.
+ * A network whose table has different columns from the first ready one is
+ * reported as failed and left out, so stacking the rest stays well-formed.
  */
-export async function readResult(options: {
+export async function locateResults(options: {
   query: QueryRecord;
   version?: QueryVersion;
   targets: NetworkConfig[];
   supplied: Record<string, unknown>;
-  limit: number;
-  offset: number;
-}): Promise<ResultPage> {
+}): Promise<Located> {
   const { query, targets, supplied } = options;
   const version = options.version ?? query.current;
   if (!version) throw notFound(`Query "${query.slug}" has no version`);
@@ -326,129 +342,158 @@ export async function readResult(options: {
   );
   const key = parameterKey(compiled, supplied);
   const db = await appDb();
+  const { rows: found } = await db.query<ResultRow>(
+    `SELECT network, table_name, columns, row_count, truncated, inputs_hash,
+            timebase, finished_at, duration_ms, parameters, attempt_status,
+            attempt_error, attempt_finished_at, attempt_started_at
+     FROM query_results
+     WHERE query_version_id = $1 AND parameters_hash = $2 AND network = ANY ($3)`,
+    [version.id, key.hash, targets.map((network) => network.id)],
+  );
+  const byNetwork = new Map(found.map((row) => [row.network, row]));
 
+  const networks: NetworkStatus[] = [];
+  const ready: Located['tables'] = [];
+  for (const network of targets) {
+    const row = byNetwork.get(network.id);
+    const isReady = Boolean(row?.table_name && row.columns);
+    const current = await inputsFingerprint(compiled, network);
+    networks.push({
+      id: network.id,
+      status: isReady
+        ? 'ready'
+        : row?.attempt_status === 'failed'
+          ? 'failed'
+          : 'pending',
+      rowCount: row?.row_count === null || !row ? null : Number(row.row_count),
+      truncated: row?.truncated ?? false,
+      finishedAt: row?.finished_at?.toISOString() ?? null,
+      durationMs: row?.duration_ms ?? null,
+      timebase: row?.timebase ?? null,
+      stale: isReady && row?.inputs_hash !== current,
+      lastAttempt: row?.attempt_status
+        ? {
+            status: row.attempt_status,
+            at:
+              (
+                row.attempt_finished_at ?? row.attempt_started_at
+              )?.toISOString() ?? null,
+            error: row.attempt_error,
+          }
+        : null,
+    });
+    if (isReady && row?.table_name && row.columns) {
+      ready.push({
+        network: network.id,
+        table: row.table_name,
+        columns: row.columns,
+      });
+    }
+  }
+
+  const signature = (columns: Column[]) =>
+    JSON.stringify(columns.map((column) => [column.name, column.type]));
+  const shape = ready.length ? signature(ready[0].columns) : null;
+  const tables = ready.filter((entry) => signature(entry.columns) === shape);
+  for (const entry of ready) {
+    if (signature(entry.columns) === shape) continue;
+    const status = networks.find((network) => network.id === entry.network);
+    if (status) {
+      status.status = 'failed';
+      status.lastAttempt = {
+        status: 'failed',
+        at: status.finishedAt,
+        error: 'Returned different columns from the other networks',
+      };
+    }
+  }
+  return { version, parameters: key, networks, tables };
+}
+
+/**
+ * SQL for the stored rows, ordered as the query returned them: one table, or
+ * several stacked under a leading `network` column. Column names are the
+ * storage names. Network ids are checked identifiers (lowercase, digits,
+ * dashes), so they are inlined as literals and the relation needs no binds.
+ */
+export function storedRelation(
+  tables: Located['tables'],
+  multi: boolean,
+): { sql: string; columns: Array<{ name: string; type: Column['type'] }> } {
+  if (!tables.length)
+    throw new Error('storedRelation needs at least one table');
+  const columns = tables[0].columns;
+  // A query that names a column `network` itself keeps it; the stacked
+  // relation cannot add a second one.
+  if (columns.some((column) => column.name === 'network')) multi = false;
+  const names = columns.map((column) => quote(column.column ?? column.name));
+  const select = tables
+    .map((entry, index) => {
+      if (!/^[a-z0-9-]+$/.test(entry.network)) {
+        throw new Error(`Unexpected network id ${entry.network}`);
+      }
+      return `SELECT ${multi ? `'${entry.network}'::text AS network, ${index} AS arrakis_network_order, ` : ''}arrakis_row, ${names.join(', ')} FROM ${qualified(entry.table)}`;
+    })
+    .join('\nUNION ALL\n');
+  return {
+    sql: `SELECT ${multi ? 'network, ' : ''}${names.join(', ')} FROM (${select}) AS stored ORDER BY ${multi ? 'arrakis_network_order, ' : ''}arrakis_row`,
+    columns: [
+      ...(multi ? [{ name: 'network', type: 'text' as const }] : []),
+      ...columns.map((column) => ({
+        name: column.column ?? column.name,
+        type: column.type,
+      })),
+    ],
+  };
+}
+
+/**
+ * Reads a stored result. Never runs anything: a result that does not exist
+ * yet is reported as pending.
+ *
+ * Across several networks the stored tables are stacked under a leading
+ * `network` column, which requires them to have the same columns.
+ */
+export async function readResult(options: {
+  query: QueryRecord;
+  version?: QueryVersion;
+  targets: NetworkConfig[];
+  supplied: Record<string, unknown>;
+  limit: number;
+  offset: number;
+}): Promise<ResultPage> {
+  const db = await appDb();
+  const multi = options.targets.length > 1;
   for (let attempt = 0; ; attempt += 1) {
-    const { rows: found } = await db.query<ResultRow>(
-      `SELECT network, table_name, columns, row_count, truncated, inputs_hash,
-              timebase, finished_at, duration_ms, parameters, attempt_status,
-              attempt_error, attempt_finished_at, attempt_started_at
-       FROM query_results
-       WHERE query_version_id = $1 AND parameters_hash = $2 AND network = ANY ($3)`,
-      [version.id, key.hash, targets.map((network) => network.id)],
-    );
-    const byNetwork = new Map(found.map((row) => [row.network, row]));
-
+    const located = await locateResults(options);
     const page: ResultPage = {
-      query: query.slug,
-      version: version.version,
-      networks: [],
-      parameters: key.values,
+      query: options.query.slug,
+      version: located.version.version,
+      networks: located.networks,
+      parameters: located.parameters.values,
       columns: [],
       rows: [],
       offset: options.offset,
       limit: options.limit,
     };
-    const readable: Array<{
-      network: string;
-      table: string;
-      columns: Column[];
-    }> = [];
-    for (const network of targets) {
-      const row = byNetwork.get(network.id);
-      const ready = Boolean(row?.table_name && row.columns);
-      const current = await inputsFingerprint(compiled, network);
-      page.networks.push({
-        id: network.id,
-        status: ready
-          ? 'ready'
-          : row?.attempt_status === 'failed'
-            ? 'failed'
-            : 'pending',
-        rowCount:
-          row?.row_count === null || !row ? null : Number(row.row_count),
-        truncated: row?.truncated ?? false,
-        finishedAt: row?.finished_at?.toISOString() ?? null,
-        durationMs: row?.duration_ms ?? null,
-        timebase: row?.timebase ?? null,
-        stale: ready && row?.inputs_hash !== current,
-        lastAttempt: row?.attempt_status
-          ? {
-              status: row.attempt_status,
-              at:
-                (
-                  row.attempt_finished_at ?? row.attempt_started_at
-                )?.toISOString() ?? null,
-              error: row.attempt_error,
-            }
-          : null,
-      });
-      if (ready && row?.table_name && row.columns) {
-        readable.push({
-          network: network.id,
-          table: row.table_name,
-          columns: row.columns,
-        });
-      }
-    }
-    if (!readable.length) return page;
-
-    const multi = targets.length > 1;
-    const signature = (columns: Column[]) =>
-      JSON.stringify(columns.map((column) => [column.name, column.type]));
-    const shape = signature(readable[0].columns);
-    const consistent = readable.filter(
-      (entry) => signature(entry.columns) === shape,
-    );
-    for (const entry of readable) {
-      if (signature(entry.columns) !== shape) {
-        const status = page.networks.find(
-          (network) => network.id === entry.network,
-        );
-        if (status) {
-          status.status = 'failed';
-          status.lastAttempt = {
-            status: 'failed',
-            at: status.finishedAt,
-            error: 'Returned different columns from the other networks',
-          };
-        }
-      }
-    }
-
-    const columns = readable[0].columns;
-    const select = consistent
-      .map(
-        (entry, index) =>
-          `SELECT ${multi ? `$${index + 3}::text AS network, ${index} AS arrakis_network_order, ` : ''}arrakis_row, ${entry.columns
-            .map((column) => quote(column.column ?? ''))
-            .join(', ')} FROM ${qualified(entry.table)}`,
-      )
-      .join('\nUNION ALL\n');
+    if (!located.tables.length) return page;
+    const relation = storedRelation(located.tables, multi);
     try {
       const { rows } = await db.query({
-        text: `${select}
-               ORDER BY ${multi ? 'arrakis_network_order, ' : ''}arrakis_row
-               LIMIT $1 OFFSET $2`,
-        values: [
-          options.limit,
-          options.offset,
-          ...(multi ? consistent.map((entry) => entry.network) : []),
-        ],
+        text: `${relation.sql} LIMIT $1 OFFSET $2`,
+        values: [options.limit, options.offset],
         rowMode: 'array',
         // Dates as stored, not shifted into the server's time zone.
         types: TYPES,
       });
+      const columns = located.tables[0].columns;
       page.columns = multi
         ? [
             { name: 'network', type: 'text' },
             ...columns.map(({ name, type }) => ({ name, type })),
           ]
         : columns.map(({ name, type }) => ({ name, type }));
-      page.rows = (rows as unknown[][]).map((row) => {
-        // Drop the bookkeeping columns: the order index and the row number.
-        const values = multi ? [row[0], ...row.slice(3)] : row.slice(1);
-        return values.map(toJsonValue);
-      });
+      page.rows = (rows as unknown[][]).map((row) => row.map(toJsonValue));
       return page;
     } catch (error) {
       // 42P01: a swap dropped the table between reading its name and reading
@@ -492,4 +537,53 @@ export async function pruneResults(): Promise<void> {
     if (Number.isFinite(created) && created > hourAgo) continue;
     await db.query(`DROP TABLE IF EXISTS ${qualified(name)}`);
   }
+}
+
+export type RunState = {
+  query: string;
+  /** A refresh of its current version is under way on one of the networks. */
+  running: boolean;
+  /** When its newest stored result finished. */
+  finishedAt: string | null;
+  /** Its last attempt failed on one of the networks. */
+  failed: boolean;
+};
+
+/**
+ * Whether each of these queries is being run right now, for a dashboard to
+ * show live: one cheap read of the results table, no compiling. A run that
+ * claimed its row more than 15 minutes ago counts as abandoned, as the claim
+ * itself does.
+ */
+export async function runStates(
+  slugs: string[],
+  networks: string[],
+): Promise<RunState[]> {
+  if (!slugs.length) return [];
+  const db = await appDb();
+  const { rows } = await db.query<{
+    slug: string;
+    running: boolean | null;
+    finished_at: Date | null;
+    failed: boolean | null;
+  }>(
+    `SELECT q.slug,
+            bool_or(r.attempt_status = 'running'
+                    AND r.attempt_started_at > now() - interval '15 minutes') AS running,
+            max(r.finished_at) AS finished_at,
+            bool_or(r.attempt_status = 'failed') AS failed
+     FROM queries q
+     LEFT JOIN query_results r
+       ON r.query_version_id = q.current_version_id
+      AND r.network = ANY ($2)
+     WHERE q.slug = ANY ($1)
+     GROUP BY q.slug`,
+    [slugs, networks],
+  );
+  return rows.map((row) => ({
+    query: row.slug,
+    running: Boolean(row.running),
+    finishedAt: row.finished_at?.toISOString() ?? null,
+    failed: Boolean(row.failed),
+  }));
 }

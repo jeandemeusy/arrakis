@@ -49,33 +49,33 @@
 :root {
   color-scheme: light;
 
-  /* Ground and panels. */
-  --paper: #f2efe7;
-  --surface: #fffdf8;
-  --surface-alt: #f4f1e8;
-  --surface-veil: rgb(255 253 248 / 0.85);
-  --on-ink: #f6f3ea;
+  /* Ground and panels: a calm, near-neutral page of white cards. */
+  --paper: #f6f6f4;
+  --surface: #fff;
+  --surface-alt: #f3f3f1;
+  --surface-veil: rgb(255 255 255 / 0.85);
+  --on-ink: #fff;
 
   /* Text. */
-  --ink: #111315;
-  --ink-soft: #35332f;
-  --muted: #6a6760;
-  --muted-2: #55534e;
-  --muted-3: #98958e;
-  --footer-muted: #7f858b;
+  --ink: #1b1c1f;
+  --ink-soft: #3a3b40;
+  --muted: #6c6e74;
+  --muted-2: #55575d;
+  --muted-3: #9b9da2;
+  --footer-muted: #7f828a;
 
   /* Accents. Mirrored in `app/chart-theme.ts` for the plots. */
   --yellow: #ffd84d;
-  --accent-2: #8d4f68;
-  --accent-3: #4c8f7b;
+  --accent-2: #e2643f;
+  --accent-3: #6bbaa2;
 
   /* Rules and separators. */
-  --line: #d7d2c7;
-  --line-soft: #ece8de;
-  --line-strong: #c3bfb4;
+  --line: #e2e2de;
+  --line-soft: #eeeeeb;
+  --line-strong: #c7c7c2;
 
   /* A relay with no place in a chart's key still needs a swatch. */
-  --swatch-unknown: #b8b4aa;
+  --swatch-unknown: #b9bbc0;
 
   /* Rules drawn over the accent band, where a grey has too little contrast. */
   --rule-strong: rgb(0 0 0 / 0.3);
@@ -89,23 +89,40 @@
   --warn: #d8a916;
   --warn-halo: rgb(216 169 22 / 0.12);
   --warn-ink: #5f4700;
-  --danger: #7a4a5e;
-  --overlay: rgb(17 19 21 / 0.5);
+  --danger: #b03a2e;
+  --overlay: rgb(17 19 21 / 0.35);
 
-  /* Faces. The display face carries headings and every figure. */
-  --font-sans: 'Arial', 'Helvetica', sans-serif;
-  --font-display: 'Georgia', 'Times New Roman', serif;
+  /* Faces: the system's own sans for text and figures alike. */
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', roboto,
+    'Helvetica Neue', arial, sans-serif;
+  --font-display: var(--font-sans);
   --font-mono: ui-monospace, 'SFMono-Regular', menlo, monaco, consolas, monospace;
-  --display-weight: 400;
+  --display-weight: 600;
+
+  /* A tile's title: quiet here, a poster headline in the neubrutal style. */
+  --tile-title-size: 15px;
 
   /* Shape. A tile's border, its corner, and what it casts. */
-  --tile-border: 0;
+  --tile-border: 1px;
   --tile-border-color: var(--line);
-  --tile-shadow: none;
+  --tile-shadow: 0 1px 2px rgb(0 0 0 / 0.04);
   --control-border: 1px;
-  --radius: 0px;
+  --radius: 8px;
   --radius-pill: 999px;
   --shadow-sm: none;
+
+  /* Controls and cards, as the dashboard editor draws them: soft corners, a
+     faint tint on hover, a ring on focus, and a lifted shadow for anything
+     that floats over the page (menus, drawers, pickers). */
+  --radius-control: 9px;
+  --radius-card: 14px;
+  --hover: color-mix(in srgb, var(--ink) 6%, transparent);
+  --pressed: color-mix(in srgb, var(--ink) 8%, transparent);
+  --focus-ring: 0 0 0 3px color-mix(in srgb, var(--ink) 10%, transparent);
+  --shadow-pop:
+    0 12px 32px rgb(0 0 0 / 0.08),
+    0 1px 2px rgb(0 0 0 / 0.05);
 
   /* One horizontal inset for every full-width band, so nothing drifts out of line. */
   --gutter: clamp(24px, 5vw, 76px);
@@ -114,7 +131,7 @@
   --seam: 1px;
 
   /* One gap between tiles, horizontally and vertically, everywhere. */
-  --grid-gap: 4px;
+  --grid-gap: 14px;
 }
 
 * {
@@ -275,29 +292,26 @@ main {
  * looks, so it should not itself be the loudest thing in the bar.
  */
 .style-switch {
-  display: flex;
-  border: 0;
+  display: inline-flex;
+  gap: 2px;
   margin: 0;
-  padding: 0;
+  padding: 3px;
   min-inline-size: 0;
+  border: var(--control-border) solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--surface-alt);
 }
 
 .style-switch button {
+  padding: 4px 11px;
+  border: 0;
+  border-radius: var(--radius-pill);
   background: none;
-  border: var(--control-border) solid var(--line);
-  border-radius: var(--radius);
-  padding: 5px 11px;
-  font: inherit;
-  font-size: 10px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
   color: var(--muted);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 500;
   cursor: pointer;
-}
-
-/* The pair share one rule between them rather than drawing two side by side. */
-.style-switch button + button {
-  margin-left: calc(var(--control-border) * -1);
 }
 
 .style-switch button:hover {
@@ -305,9 +319,11 @@ main {
 }
 
 .style-switch button.active {
-  background: var(--ink);
-  border-color: var(--ink);
-  color: var(--on-ink);
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.08),
+    0 0 0 1px var(--line);
 }
 
 .intro {
@@ -410,32 +426,41 @@ main {
   min-inline-size: 0;
 }
 
-/* A fieldset for the grouping semantics, without the browser's box. */
+/* A fieldset for the grouping semantics, drawn as one segmented pill. */
 .network-switch {
-  display: flex;
+  display: inline-flex;
   flex-wrap: wrap;
-  gap: 6px;
-  border: 0;
+  gap: 2px;
   margin: 0;
-  padding: 0;
+  padding: 3px;
   min-inline-size: 0;
+  border: var(--control-border) solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
 }
 
 .network-switch button {
-  background: none;
-  border: var(--control-border) solid var(--line);
+  padding: 5px 12px;
+  border: 0;
   border-radius: var(--radius-pill);
-  padding: 5px 13px;
-  font: inherit;
-  font-size: 11px;
-  letter-spacing: 0.06em;
+  background: none;
   color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
   cursor: pointer;
+  transition:
+    background 120ms ease,
+    color 120ms ease;
+}
+
+.network-switch button:hover:not(.active) {
+  background: var(--hover);
+  color: var(--ink);
 }
 
 .network-switch button.active {
   background: var(--ink);
-  border-color: var(--ink);
   color: var(--on-ink);
 }
 
@@ -688,12 +713,32 @@ main {
   grid-column: span 4;
 }
 
+.span-5 {
+  grid-column: span 5;
+}
+
 .span-6 {
   grid-column: span 6;
 }
 
+.span-7 {
+  grid-column: span 7;
+}
+
 .span-8 {
   grid-column: span 8;
+}
+
+.span-9 {
+  grid-column: span 9;
+}
+
+.span-10 {
+  grid-column: span 10;
+}
+
+.span-11 {
+  grid-column: span 11;
 }
 
 .span-12 {
@@ -701,8 +746,14 @@ main {
 }
 
 @media (width <= 900px) {
-  /* Halves become full width; thirds and quarters pair up. */
+  /* Halves and wider become full width; thirds and quarters pair up. */
+  .span-5,
   .span-6,
+  .span-7,
+  .span-8,
+  .span-9,
+  .span-10,
+  .span-11,
   .span-12 {
     grid-column: span 12;
   }
@@ -801,7 +852,7 @@ main {
 
 .chart-title h3 {
   font-family: var(--font-display);
-  font-size: 24px;
+  font-size: var(--tile-title-size);
   font-weight: var(--display-weight);
   margin: 8px 0 0;
 }
@@ -1329,13 +1380,16 @@ main {
   width: min(1180px, 92vw);
   max-height: 88vh;
   border: var(--control-border) solid var(--line);
+  border-radius: var(--radius-card);
   background: var(--surface);
   color: var(--ink);
   padding: 24px 26px 28px;
+  box-shadow: var(--shadow-pop);
 }
 
 .modal::backdrop {
   background: var(--overlay);
+  backdrop-filter: blur(3px);
 }
 
 .modal-head {
@@ -1374,17 +1428,19 @@ main {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
   padding: 0;
   background: none;
-  border: var(--control-border) solid var(--line);
-  color: var(--ink);
+  border: var(--control-border) solid transparent;
+  border-radius: max(var(--radius-control) - 1px, 0px);
+  color: var(--muted);
   cursor: pointer;
 }
 
 .modal-head button:hover {
-  border-color: var(--ink);
+  background: var(--hover);
+  color: var(--ink);
 }
 
 /* The tooltip is placed from the cursor, so the frame is its containing block. */
@@ -1977,6 +2033,7 @@ footer .source-link {
   --font-sans: 'Arial Black', 'Helvetica Neue', 'Arial', sans-serif;
   --font-display: 'Arial Black', 'Helvetica Neue', 'Arial', sans-serif;
   --display-weight: 900;
+  --tile-title-size: 24px;
 
   /* Shape: outlined, square, and casting a solid shadow. */
   --tile-border: 3px;
@@ -1986,6 +2043,12 @@ footer .source-link {
   --radius: 0px;
   --radius-pill: 0px;
   --shadow-sm: 3px 3px 0 #000;
+  --radius-control: 0px;
+  --radius-card: 0px;
+  --hover: var(--yellow);
+  --pressed: var(--yellow);
+  --focus-ring: 3px 3px 0 #000;
+  --shadow-pop: 6px 6px 0 #000;
 
   /* Room for the shadow a tile now casts; at 4px it fell on its neighbour. */
   --grid-gap: 18px;
@@ -2299,5 +2362,295 @@ footer .source-link {
 @media (width <= 560px) {
   [data-style='neubrutal'] {
     --grid-gap: 10px;
+  }
+}
+
+/*
+ * Tiles in menu mode — the studio's dashboards. A Dune-like card: the title
+ * with the query it comes from, the body, and a footer row with how fresh the
+ * data is and a `•••` menu for the actions, so nothing floats over the figure.
+ */
+.tile-subtitle {
+  margin-left: 8px;
+  color: var(--muted);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  vertical-align: 0.1em;
+}
+
+/* Chart and table tiles: a compact header, the plot, a quiet note. */
+.chart-card.menu-mode:not(.metric) {
+  min-height: 0;
+  padding: 16px 20px 10px;
+}
+
+.chart-card.menu-mode .chart-title {
+  min-height: 0;
+  margin-bottom: 10px;
+}
+
+.chart-card.menu-mode .chart-title h3 {
+  margin-top: 0;
+}
+
+.chart-card.menu-mode .tile-note {
+  margin: 10px 0 0;
+  padding: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.chart-card.menu-mode.metric {
+  container-type: inline-size;
+  justify-content: flex-start;
+  gap: 4px;
+  min-height: 200px;
+  padding: 18px 20px 12px;
+}
+
+.chart-card.menu-mode.metric > span {
+  order: 0;
+  display: block;
+  overflow: hidden;
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-overflow: ellipsis;
+  text-transform: none;
+  white-space: nowrap;
+}
+
+.chart-card.menu-mode.metric > span .tile-subtitle {
+  font-size: 13px;
+  vertical-align: 0;
+}
+
+.chart-card.menu-mode.metric > span .tile-flag {
+  margin-left: 8px;
+}
+
+/* The figure fits its tile: sized by the tile's width, never wrapped. */
+.chart-card.menu-mode.metric > strong {
+  margin-top: auto;
+  overflow: hidden;
+  font-size: clamp(24px, 14cqi, 58px);
+  line-height: 1.05;
+  text-align: center;
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+
+[data-style] .chart-card.menu-mode.metric > p {
+  margin: 4px 0 auto;
+  padding: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.35;
+  text-align: center;
+}
+
+.tile-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.tile-foot-end .tile-meta {
+  margin-top: 0;
+}
+
+.tile-fresh {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.tile-fresh.fresh {
+  background: rgb(46 139 87 / 0.1);
+  color: #237048;
+}
+
+.tile-fresh.stale {
+  background: var(--warn-halo);
+  color: var(--warn-ink);
+}
+
+.tile-fresh.failed {
+  background: rgb(192 57 43 / 0.1);
+  color: #b03a2e;
+}
+
+.tile-menu {
+  position: relative;
+}
+
+.tile-menu > button {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.tile-menu > button:hover,
+.tile-menu > button[aria-expanded='true'] {
+  background: var(--surface-alt);
+  color: var(--ink);
+}
+
+.tile-menu-list {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 4px);
+  z-index: 20;
+  display: grid;
+  min-width: 190px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 10px 28px rgb(0 0 0 / 0.14);
+}
+
+.tile-menu-list > a,
+.tile-menu-list > button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.tile-menu-list > a:hover,
+.tile-menu-list > button:hover {
+  background: var(--surface-alt);
+}
+
+.tile-menu-list svg {
+  color: var(--muted);
+}
+
+[data-style='neubrutal'] .tile-menu-list {
+  border: 3px solid #000;
+  border-radius: 0;
+  box-shadow: 5px 5px 0 #000;
+}
+
+[data-style='neubrutal'] .tile-fresh {
+  border: 2px solid #000;
+  border-radius: 0;
+  font-weight: 700;
+}
+
+/* The neubrutal style keeps its toggles as separate outlined blocks. */
+[data-style='neubrutal'] .network-switch,
+[data-style='neubrutal'] .style-switch {
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+}
+
+[data-style='neubrutal'] .style-switch {
+  gap: 0;
+}
+
+[data-style='neubrutal'] .network-switch button,
+[data-style='neubrutal'] .style-switch button {
+  border: var(--control-border) solid var(--ink);
+  background: var(--surface);
+  color: var(--ink);
+}
+
+[data-style='neubrutal'] .network-switch button.active {
+  background: var(--ink);
+  color: var(--on-ink);
+}
+
+[data-style='neubrutal'] .style-switch button.active {
+  background: var(--ink);
+  color: var(--on-ink);
+  box-shadow: none;
+}
+
+/* A tile busy in the background: its age gives way to what it is doing, and
+   a chart being recomputed fades a little, still readable, until it redraws. */
+.tile-fresh.running,
+.tile-fresh.updating {
+  background: color-mix(in srgb, var(--ink) 7%, transparent);
+  color: var(--ink-soft);
+}
+
+.tile-fresh.running {
+  background: color-mix(in srgb, #4f509b 12%, transparent);
+  color: #3f408a;
+}
+
+.tile-fresh.running svg,
+.tile-fresh.updating svg {
+  animation: tile-spin 0.9s linear infinite;
+}
+
+@keyframes tile-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.chart-card.is-updating .chart-frame,
+.chart-card.is-updating.metric > strong,
+.chart-card.is-updating.metric > p {
+  opacity: 0.45;
+  transition: opacity 160ms ease;
+}
+
+.chart-card .chart-frame,
+.chart-card.metric > strong {
+  transition: opacity 240ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tile-fresh.running svg,
+  .tile-fresh.updating svg {
+    animation-duration: 2.4s;
+  }
+}
+
+/* A narrow number tile keeps a busy pill to its spinner. */
+@container (max-width: 210px) {
+  .tile-fresh.running .tile-fresh-label,
+  .tile-fresh.updating .tile-fresh-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
   }
 }

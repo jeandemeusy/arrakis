@@ -1,19 +1,18 @@
 import type { Metadata } from 'next';
 
+import { NavProvider } from './nav';
 import { SessionProvider } from './session';
-import { StudioBar } from './studio-bar';
+import { Sidebar, StudioBanner } from './sidebar';
 import './studio.css';
 
 export const metadata: Metadata = {
-  title: { template: '%s · Arrakis studio', default: 'Arrakis studio' },
-  // Editing surfaces are not something a search engine should index.
-  robots: { index: false, follow: false },
+  title: { template: '%s · Arrakis', default: 'Arrakis' },
 };
 
 /**
- * The studio: where queries are written, versioned and run, and where the
- * exits are configured. Readable by anyone for public queries; editing needs
- * the password.
+ * Every page but the classic dashboard: the dashboards, the queries behind
+ * them and the settings, with the sidebar beside them. Readable by anyone for
+ * what is public; editing needs the password.
  */
 export default function StudioLayout({
   children,
@@ -22,15 +21,20 @@ export default function StudioLayout({
 }) {
   return (
     <SessionProvider>
-      <div className="studio">
-        <a className="skip-link" href="#studio-content">
-          Skip to content
-        </a>
-        <StudioBar />
-        <div id="studio-content" className="studio-content">
-          {children}
+      <NavProvider>
+        <div className="studio studio-shell">
+          <a className="skip-link" href="#studio-content">
+            Skip to content
+          </a>
+          <Sidebar />
+          <div className="studio-main">
+            <StudioBanner />
+            <div id="studio-content" className="studio-content">
+              {children}
+            </div>
+          </div>
         </div>
-      </div>
+      </NavProvider>
     </SessionProvider>
   );
 }

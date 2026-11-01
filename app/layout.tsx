@@ -45,7 +45,9 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" data-style={DEFAULT_STYLE}>
+    // The script below may restyle <html> before React hydrates it, on
+    // purpose; only this element's own attributes are exempt from the check.
+    <html lang="en" data-style={DEFAULT_STYLE} suppressHydrationWarning>
       <head>
         <script
           // oxlint-disable-next-line react/no-danger -- a literal built from constants above

@@ -2,7 +2,10 @@ import type { Metadata } from 'next';
 
 import { LoginForm } from './login-form';
 
-export const metadata: Metadata = { title: 'Unlock editing' };
+export const metadata: Metadata = {
+  title: 'Unlock editing',
+  robots: { index: false, follow: false },
+};
 
 export default async function LoginPage({
   searchParams,
@@ -15,6 +18,6 @@ export default async function LoginPage({
   const target =
     typeof next === 'string' && next.startsWith('/') && !next.startsWith('//')
       ? next
-      : '/queries';
+      : '/';
   return <LoginForm next={target} />;
 }

@@ -143,18 +143,18 @@ export function QueryList() {
                     <p className="studio-muted">{query.description}</p>
                   )}
                 </td>
-                <td>{query.kind}</td>
-                <td>
+                <td className="quiet-cell">{query.kind}</td>
+                <td className="badges">
                   <span className={`badge ${query.visibility}`}>
                     {query.visibility}
                   </span>
                   {query.official && (
-                    <span className="badge ready">official</span>
+                    <span className="badge official">official</span>
                   )}
                 </td>
                 <td>{every(query.refreshSeconds)}</td>
                 <td>{query.version ? `v${query.version}` : '—'}</td>
-                <td>{age(query.updatedAt)}</td>
+                <td className="quiet-cell nowrap">{age(query.updatedAt)}</td>
               </tr>
             ))}
           </tbody>

@@ -52,7 +52,13 @@ export type TestDatabases = {
   writable: string;
 };
 
-export async function createTestDatabases(): Promise<TestDatabases> {
+/**
+ * `prefix` names every database and role, so suites running in parallel
+ * processes each get their own set.
+ */
+export async function createTestDatabases(
+  prefix = 'arrakis_t',
+): Promise<TestDatabases> {
   if (!adminUrl) throw new Error('TEST_ADMIN_DATABASE_URL is not set');
   const fixture = await readFile(
     path.join(
@@ -64,23 +70,35 @@ export async function createTestDatabases(): Promise<TestDatabases> {
   );
   await admin(adminUrl, async (client) => {
     for (const database of [
-      'arrakis_t_app',
-      'arrakis_t_jura',
-      'arrakis_t_dev',
+      `${prefix}_app`,
+      `${prefix}_jura`,
+      `${prefix}_dev`,
     ]) {
       await client.query(`DROP DATABASE IF EXISTS ${database} WITH (FORCE)`);
     }
-    for (const role of ['arrakis_t', 'arrakis_t_ro', 'arrakis_t_rw']) {
+    for (const role of [prefix, `${prefix}_ro`, `${prefix}_rw`]) {
       await client.query(`DROP ROLE IF EXISTS ${role}`);
     }
-    await client.query("CREATE ROLE arrakis_t LOGIN PASSWORD 'app'");
-    await client.query("CREATE ROLE arrakis_t_ro LOGIN PASSWORD 'ro'");
-    await client.query("CREATE ROLE arrakis_t_rw LOGIN PASSWORD 'rw'");
-    await client.query('CREATE DATABASE arrakis_t_app OWNER arrakis_t');
-    await client.query('CREATE DATABASE arrakis_t_jura');
-    await client.query('CREATE DATABASE arrakis_t_dev');
+    await client.query(`CREATE ROLE ${prefix} LOGIN PASSWORD 'app'`);
+    await client.query(`CREATE ROLE ${prefix}_ro LOGIN PASSWORD 'ro'`);
+    await client.query(`CREATE ROLE ${prefix}_rw LOGIN PASSWORD 'rw'`);
+    await client.query(`CREATE DATABASE ${prefix}_app OWNER ${prefix}`);
+    // The role SQL visualizations run as is cluster-wide and may already exist
+    // from an earlier run; ADMIN on it is what lets the app's migration grant
+    // it to itself, as a CREATEROLE app role would in production.
+    await client.query(`
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'arrakis_results_reader') THEN
+          CREATE ROLE arrakis_results_reader NOLOGIN;
+        END IF;
+      END $$`);
+    await client.query(
+      `GRANT arrakis_results_reader TO ${prefix} WITH ADMIN OPTION`,
+    );
+    await client.query(`CREATE DATABASE ${prefix}_jura`);
+    await client.query(`CREATE DATABASE ${prefix}_dev`);
   });
-  for (const database of ['arrakis_t_jura', 'arrakis_t_dev']) {
+  for (const database of [`${prefix}_jura`, `${prefix}_dev`]) {
     await admin(withDatabase(adminUrl, database), async (client) => {
       await client.query(fixture);
       await client.query('REVOKE CREATE ON SCHEMA public FROM PUBLIC');
@@ -90,32 +108,32 @@ export async function createTestDatabases(): Promise<TestDatabases> {
       await client.query(
         'GRANT CONNECT ON DATABASE ' +
           database +
-          ' TO arrakis_t_ro, arrakis_t_rw',
+          ` TO ${prefix}_ro, ${prefix}_rw`,
       );
       await client.query(
-        'GRANT USAGE ON SCHEMA public TO arrakis_t_ro, arrakis_t_rw',
+        `GRANT USAGE ON SCHEMA public TO ${prefix}_ro, ${prefix}_rw`,
       );
       await client.query(
-        'GRANT SELECT ON ALL TABLES IN SCHEMA public TO arrakis_t_ro, arrakis_t_rw',
+        `GRANT SELECT ON ALL TABLES IN SCHEMA public TO ${prefix}_ro, ${prefix}_rw`,
       );
-      await client.query('GRANT INSERT ON log TO arrakis_t_rw');
+      await client.query(`GRANT INSERT ON log TO ${prefix}_rw`);
     });
   }
   // The dev index differs from jura by one extra client redemption, so the two
   // networks' results can be told apart.
-  await admin(withDatabase(adminUrl, 'arrakis_t_dev'), (client) =>
+  await admin(withDatabase(adminUrl, `${prefix}_dev`), (client) =>
     client.query(`
       INSERT INTO channel_state (channel_id, published_block, published_tx_index,
         published_log_index, epoch, ticket_index, balance, status)
       VALUES (1, 39700000, 1, 0, 1, 1000, '\\x00', 1)`),
   );
   return {
-    appUrl: withDatabase(adminUrl, 'arrakis_t_app', 'arrakis_t', 'app'),
+    appUrl: withDatabase(adminUrl, `${prefix}_app`, prefix, 'app'),
     readOnly: {
-      jura: withDatabase(adminUrl, 'arrakis_t_jura', 'arrakis_t_ro', 'ro'),
-      dev: withDatabase(adminUrl, 'arrakis_t_dev', 'arrakis_t_ro', 'ro'),
+      jura: withDatabase(adminUrl, `${prefix}_jura`, `${prefix}_ro`, 'ro'),
+      dev: withDatabase(adminUrl, `${prefix}_dev`, `${prefix}_ro`, 'ro'),
     },
-    writable: withDatabase(adminUrl, 'arrakis_t_jura', 'arrakis_t_rw', 'rw'),
+    writable: withDatabase(adminUrl, `${prefix}_jura`, `${prefix}_rw`, 'rw'),
   };
 }
 
@@ -154,3 +172,88 @@ export function cookieFrom(response: Response): string {
 export const context = <T extends Record<string, string>>(params: T) => ({
   params: Promise.resolve(params),
 });
+
+/**
+ * An application database and two generated Blokli indexes shaped like live
+ * networks (fixtures/blokli-demo.sql), with their exits listed: accounts 13
+ * to 15 of each. For the parity check, which needs real volume to compare.
+ */
+export async function createDemoDatabases(
+  prefix: string,
+  networks: Array<{ id: string; seed: string; clients: number; head: number }>,
+): Promise<{
+  appUrl: string;
+  networks: Array<{ id: string; url: string; exits: string[] }>;
+}> {
+  if (!adminUrl) throw new Error('TEST_ADMIN_DATABASE_URL is not set');
+  const fixture = await readFile(
+    path.join(
+      path.dirname(fileURLToPath(import.meta.url)),
+      'fixtures',
+      'blokli-demo.sql',
+    ),
+    'utf8',
+  );
+  const databases = networks.map((network) => `${prefix}_${network.id}`);
+  await admin(adminUrl, async (client) => {
+    for (const database of [`${prefix}_app`, ...databases]) {
+      await client.query(`DROP DATABASE IF EXISTS ${database} WITH (FORCE)`);
+    }
+    for (const role of [prefix, `${prefix}_ro`]) {
+      await client.query(`DROP ROLE IF EXISTS ${role}`);
+    }
+    await client.query(`CREATE ROLE ${prefix} LOGIN PASSWORD 'app'`);
+    await client.query(`CREATE ROLE ${prefix}_ro LOGIN PASSWORD 'ro'`);
+    await client.query(`CREATE DATABASE ${prefix}_app OWNER ${prefix}`);
+    await client.query(`
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'arrakis_results_reader') THEN
+          CREATE ROLE arrakis_results_reader NOLOGIN;
+        END IF;
+      END $$`);
+    await client.query(
+      `GRANT arrakis_results_reader TO ${prefix} WITH ADMIN OPTION`,
+    );
+    for (const database of databases) {
+      await client.query(`CREATE DATABASE ${database}`);
+    }
+  });
+  const out: Array<{ id: string; url: string; exits: string[] }> = [];
+  for (const [index, network] of networks.entries()) {
+    const database = databases[index];
+    const exits = await admin(
+      withDatabase(adminUrl, database),
+      async (client) => {
+        await client.query(`SET demo.seed = '${network.seed}'`);
+        await client.query(`SET demo.clients = '${network.clients}'`);
+        await client.query(`SET demo.head = '${network.head}'`);
+        await client.query(fixture);
+        await client.query('REVOKE CREATE ON SCHEMA public FROM PUBLIC');
+        await client.query(
+          `REVOKE CREATE, TEMPORARY ON DATABASE ${database} FROM PUBLIC`,
+        );
+        await client.query(
+          `GRANT CONNECT ON DATABASE ${database} TO ${prefix}_ro`,
+        );
+        await client.query(`GRANT USAGE ON SCHEMA public TO ${prefix}_ro`);
+        await client.query(
+          `GRANT SELECT ON ALL TABLES IN SCHEMA public TO ${prefix}_ro`,
+        );
+        const { rows } = await client.query<{ address: string }>(
+          `SELECT '0x' || encode(chain_key, 'hex') AS address
+         FROM account WHERE id BETWEEN 13 AND 15 ORDER BY id`,
+        );
+        return rows.map((row) => row.address);
+      },
+    );
+    out.push({
+      id: network.id,
+      url: withDatabase(adminUrl, database, `${prefix}_ro`, 'ro'),
+      exits,
+    });
+  }
+  return {
+    appUrl: withDatabase(adminUrl, `${prefix}_app`, prefix, 'app'),
+    networks: out,
+  };
+}

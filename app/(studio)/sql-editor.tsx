@@ -44,6 +44,8 @@ export type Completion = {
 export type SqlEditorHandle = {
   /** Inserts text at the caret, replacing any selection, and focuses. */
   insert: (text: string) => void;
+  /** The selected text and where it is; empty text when nothing is. */
+  selection: () => { start: number; end: number; text: string };
 };
 
 type Props = {
@@ -303,6 +305,12 @@ export function SqlEditor({
           start + text.length,
           false,
         );
+      },
+      selection() {
+        const field = textarea.current;
+        if (!field) return { start: 0, end: 0, text: '' };
+        const { selectionStart: start, selectionEnd: end } = field;
+        return { start, end, text: value.slice(start, end) };
       },
     }),
     [edit, readOnly, value],

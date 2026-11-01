@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { bind, compile, type FragmentSource } from '../lib/query/compile';
+import {
+  bind,
+  compile,
+  isRelation,
+  type FragmentSource,
+} from '../lib/query/compile';
 import { parseDefinitions } from '../lib/query/params';
 import { segments } from '../lib/query/scan';
 
@@ -206,5 +211,113 @@ describe('compile', () => {
       { network: 'x' },
     );
     assert.equal((values[2] as Buffer[]).length, 2);
+  });
+});
+
+describe('fragments with arguments', () => {
+  const resolve = fragments({
+    hex: `'0x' || encode({{$value}}, 'hex')`,
+    scaled: `{{$amount}} / 10 ^ {{$decimals = 18}}`,
+    label: `{{> hex($bytes)}} || ':' || {{$suffix = 'x'}}`,
+    rows: 'SELECT * FROM t WHERE n > {{$above = 0}}',
+  });
+
+  it('inlines an expression fragment where a value goes', async () => {
+    const compiled = await compile(
+      'SELECT {{> hex(r.payer)}} AS payer FROM r',
+      [],
+      resolve,
+    );
+    assert.equal(
+      compiled.text,
+      "SELECT (\n'0x' || encode((r.payer), 'hex')\n) AS payer FROM r",
+    );
+    assert.deepEqual(compiled.fragments, [{ slug: 'hex', versionId: 'v-hex' }]);
+  });
+
+  it('takes arguments by position or by name, with defaults', async () => {
+    const positional = await compile('SELECT {{> scaled(x)}}', [], resolve);
+    assert.match(positional.text, /\(x\) \/ 10 \^ \(18\)/);
+    const named = await compile(
+      'SELECT {{> scaled(decimals => 6, amount => f(a, b))}}',
+      [],
+      resolve,
+    );
+    assert.match(named.text, /\(f\(a, b\)\) \/ 10 \^ \(6\)/);
+  });
+
+  it('forwards an argument into a nested fragment', async () => {
+    const compiled = await compile("SELECT {{> label(k, 'y')}}", [], resolve);
+    assert.match(compiled.text, /encode\(\(k\), 'hex'\)/);
+    assert.match(compiled.text, /':' \|\| \('y'\)/);
+  });
+
+  it('gives a query fragment its arguments too', async () => {
+    const compiled = await compile(
+      'SELECT * FROM {{> rows(5)}} AS r',
+      [],
+      resolve,
+    );
+    assert.match(compiled.text, /WHERE n > \(5\)/);
+  });
+
+  it('runs an expression fragment alone as one value, arguments empty', async () => {
+    const compiled = await compile(
+      `'0x' || encode({{$value}}, 'hex')`,
+      [],
+      none,
+    );
+    assert.equal(
+      compiled.text,
+      "SELECT ('0x' || encode((NULL), 'hex')) AS value",
+    );
+  });
+
+  it('says what is wrong with a call', async () => {
+    await assert.rejects(
+      compile('SELECT {{> hex(a, b)}}', [], resolve),
+      /hex takes 1 argument, given 2/,
+    );
+    await assert.rejects(
+      compile('SELECT {{> hex(bytes => a)}}', [], resolve),
+      /hex has no argument "bytes"; it takes value/,
+    );
+    await assert.rejects(
+      compile('SELECT {{> hex()}}', [], resolve),
+      /needs an argument "value"/,
+    );
+    await assert.rejects(
+      compile('SELECT {{> hex({{network}})}}', [], resolve),
+      /cannot contain a placeholder/,
+    );
+  });
+});
+
+describe('a fragment run alone', () => {
+  it('passes empty arguments on to the fragments it calls', async () => {
+    const compiled = await compile(
+      `{{> hex($bytes)}} || ':'`,
+      [],
+      fragments({ hex: `'0x' || encode({{$value}}, 'hex')` }),
+    );
+    assert.match(
+      compiled.text,
+      /^SELECT \(\(\n'0x' \|\| encode\(\(NULL\), 'hex'\)\n\) \|\| ':'\) AS value$/,
+    );
+  });
+
+  it('tells a value from a relation', () => {
+    assert.equal(isRelation('SELECT 1'), true);
+    assert.equal(
+      isRelation('-- note\nWITH a AS (SELECT 1) SELECT * FROM a'),
+      true,
+    );
+    assert.equal(isRelation('(SELECT 1) UNION (SELECT 2)'), true);
+    assert.equal(isRelation("'0x' || encode(x, 'hex')"), false);
+    assert.equal(
+      isRelation('(\n  SELECT SUM(i) FROM generate_series(0, 7) AS i\n)'),
+      false,
+    );
+    assert.equal(isRelation("(SELECT ')') "), false);
   });
 });

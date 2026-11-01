@@ -169,7 +169,7 @@ which takes the full payload from roughly 750 KiB to 80 KiB. Next does not
 compress route-handler responses itself, so this is done in `lib/http.ts` rather
 than left to whatever fronts the container.
 
-The page is rendered per request — it must not be prerendered at build time,
+The classic page (`/classic`) is rendered per request — it must not be prerendered at build time,
 where there is no index database to read and it would bake a "database
 connection pending" dashboard into the image. Because the snapshot behind it only
 changes once a minute, it is served with `s-maxage=60`, so a CDN or ingress cache
@@ -220,15 +220,49 @@ evidence that the real derivations are correct.
 ## Query store
 
 Saved, user-editable SQL is replacing the hardcoded queries in `sql/v1`. The
-backend and the studio (the editor, below) are in place; the charts and
-dashboards built on saved queries come next, and until then the page above is
-still drawn from `sql/v1`.
+backend, the studio (the editor, below), and the charts and dashboards built on
+saved queries are in place. The page drawn from `sql/v1` has moved to
+`/classic`, for comparison, until it is removed.
+
+### Navigation
+
+`/` lists the dashboards, bundled ones first. The sidebar on the left links
+Home, every dashboard — with the sections of the one on screen, highlighted as
+you scroll — Queries, and Settings (Exits; Bundled dashboards for editors),
+plus the style switch and the editing lock. It folds to icons (remembered per
+browser) and becomes a drawer on narrow screens. `/dashboards` redirects home.
+
+Two visual styles: **Editorial**, the default — a calm page of white cards with
+thin borders and the system's sans, after Dune — and **Neubrutal**, outlined
+and loud. Every colour, face and shape is a token in `app/globals.css`, with
+the charts' palettes mirrored in `app/chart-theme.ts`. Controls and cards
+share a handful of them — `--radius-control`, `--radius-card`, `--hover`,
+`--pressed`, `--focus-ring`, `--shadow-pop` — so buttons, inputs, toggles,
+menus, drawers and cards read the same on every page, and the neubrutal style
+restates the same tokens as square corners, yellow and hard shadows.
 
 ### Studio
 
 `/queries` lists saved queries and `/queries/<slug>` opens one; `/settings/networks`
-manages exits. Anyone can read public queries and their stored results; the
-**Unlock editing** link asks for the editor password, after which you can:
+manages exits. A query page is laid out the way Dune's is:
+
+- under the title, chips say what the query is — slug, visibility, refresh,
+  how it combines networks, when it last ran and how long it took (green when
+  current, amber when stale, red when the last run failed) and its version —
+  and each one that can change is the control that changes it;
+- the **Query editor** card holds the SQL, the network, parameter values as
+  chips (the gear opens their definitions), and **Run ▾**: run to preview, or
+  run and store;
+- the **Query results** card has one tab for the result (stored, or the
+  preview of the last run), one per chart drawn from it, and **Versions**;
+  **New chart** starts another;
+- **About this query** on the right lists its description, the tables and
+  fragments it reads, the queries that use it (for a fragment), the
+  dashboards showing its charts, and its latest versions. It and the schema on
+  the left fold away (remembered per browser); **⋯** holds fork and archive.
+
+Anyone can read public queries and their stored results; the **Unlock
+editing** link asks for the editor password, after which you can:
 
 - write SQL with highlighting, completion of tables, columns, fragments and
   placeholders (type `{{` for those), Cmd/Ctrl+Enter to run, Cmd/Ctrl+S to save,
@@ -241,7 +275,14 @@ manages exits. Anyone can read public queries and their stored results; the
   version with the draft and load it back; fork; archive;
 - schedule a refresh, run and store a result now, and read the stored result
   and its status per network, or download it as CSV;
-- add and remove exits, and see when each one last paid a relay.
+- turn the selected SQL into a fragment (**Selection to fragment**), which
+  saves it and puts `{{> slug}}` in its place;
+- see, on a fragment, every query that uses it — directly or through another
+  fragment — and how many charts hang off each; editing its SQL says how many
+  queries a save will rerun;
+- add and remove exits, and see when each one last paid a relay;
+- build charts on a query's stored result (a tab per chart), and arrange
+  charts from any query on dashboards.
 
 The editor is a highlighted `<textarea>` written for this repository rather
 than an editor package, so the Nix `npmDepsHash` is untouched.
@@ -261,7 +302,7 @@ NETWORKS='[{"id":"demo","label":"Demo","databaseUrl":"postgresql://blokli_reader
 ARRAKIS_EDITOR_PASSWORD_HASH=scrypt:15:8:1:…
 ```
 
-Then `npm run dev` and open <http://localhost:3000/queries>. (`dev` runs on
+Then `npm run dev` and open <http://localhost:3000/>. (`dev` runs on
 webpack, like `build`: in the Nix shell `node_modules` is symlinked into the
 Nix store, outside the project, and Turbopack refuses to resolve `next` from
 there.) Leave out
@@ -330,10 +371,19 @@ strings and comments:
 | `{{name}}` | A declared parameter, bound as `$n::type` — never pasted into the SQL. Types: `text`, `integer`, `number`, `boolean`, `date`, `timestamp`, `address`, `text[]`, `integer[]`, `address[]`, `enum`. |
 | `{{network}}` | The id of the network the query is running on. |
 | `{{exits}}` | The exits configured for that network, as `bytea[]`. |
-| `{{> slug}}` | Another saved query of kind `fragment`, inlined as a subquery: `FROM {{> client-channels}} AS c`, or `WITH c AS {{> client-channels}}`. |
+| `{{> slug}}` | Another saved query of kind `fragment`, inlined in parentheses: `FROM {{> client-channels}} AS c`, `WITH c AS {{> client-channels}}`, or — for an expression fragment — `SELECT {{> hex(address)}}`. |
+| `{{> slug(a, name => b)}}` | A fragment with arguments, given in order or by name. Each argument is an SQL expression, inlined in parentheses; it cannot contain `{{`, but `$name` passes on an argument of the fragment it is written in. |
+| `{{$name}}`, `{{$name = default}}` | Inside a fragment: an argument. A fragment run on its own uses the default, or `NULL`. |
 | `{{block_time(expr)}}` | The `timestamptz` of block `expr`, interpolated between anchor blocks timestamped over `rpcUrl` — or, without one, from the five-second cadence, in which case the result says `"timebase": "estimated"`. Sessions run in UTC, so `::date` is a UTC day. |
 
 `$1`-style parameters and a second statement are rejected before anything runs.
+
+**Fragments** are reusable SQL. One that is a query (it starts with `SELECT`,
+`WITH`, `VALUES` or `TABLE`) stands in for a table; anything else is an
+expression and stands in for a value, so the same mechanism covers a shared
+population (`vpn-clients`) and a shared formula (`uint256(balance)`). An
+expression fragment run on its own is run as `SELECT (…) AS value`, with its
+defaults. A fragment cannot use itself, directly or not.
 
 **Versions are immutable.** Saving SQL creates the next version; nothing edits
 one in place, including a hand-written `UPDATE`, which a trigger refuses.
@@ -352,10 +402,196 @@ version, a new fragment version, a different exit set. One replica leads, throug
 advisory lock in the app database; the others take over if it goes away. A
 failed run keeps the previous result serving and records the error on it.
 
+### Charts and dashboards
+
+One query, one stored result, any number of charts. A chart never reads Blokli:
+it shapes the stored rows, the server turns that into one SQL statement over
+the result table, and the chart type draws what comes out.
+
+Each chart is a tab of its query. The chart sits on top, full width, redrawn
+as you change things, with the rows behind it a click away; under it, panels
+say what it shows and how it is drawn:
+
+- **Result data** — what the chart shows (below);
+- **Chart options** — legend, stacking, normalize to percentage, total in the
+  tooltip, data labels, lines drawn as steps, and *keep series colours
+  stable*: colour each series by its name rather than its position, so a relay
+  keeps its colour across charts and as others come and go;
+- **X-axis options** — a title, reversed order, and a range selector under the
+  chart to zoom into part of it;
+- **Y-axis options** — a title, logarithmic scale, whether to include 0, a
+  minimum and maximum, and the tick format; a second panel for the right axis
+  once a series is on it;
+- **Series** — one row per series as drawn: rename it, draw it as columns, a
+  line or an area whatever the chart type (a line over bars), put it on the
+  right axis, pick its colour (the style's swatches or any colour), hide it, or
+  drag it to reorder. *Restore colours* drops the picked ones. All of it is
+  saved by series name, so it follows a series however the data changes.
+
+On a dashboard, clicking a legend entry hides that series for the moment, and
+*All* toggles them together. A share chart's labels are its series: they take
+the same names, colours and hiding.
+
+**New chart** offers starting points built from the query's own columns —
+trend over time, single number, top 10, breakdown over time, hour × weekday,
+table of rows. What a chart shows is described in one of three ways:
+
+- **Simple**, as a sentence: *show* a count, sum, average or distinct count,
+  *over* a column (a time column by hour, day, week, month, or day or week
+  depending on the range), *split* into series by another, for the *rows*
+  within the dashboard's range (or a fixed window) and matching some filters —
+  against a value, with the column's common values offered, or a dashboard
+  variable. *More* adds a trailing window (distinct users over the last 30
+  days, every day), top N, share of the total, a rank, filters on the results,
+  order and a limit. The axes follow from what you chose
+  ([`lib/viz/builder.ts`](./lib/viz/builder.ts) compiles it to steps).
+- **Steps**, the pipeline below, for what the simple form cannot say; a simple
+  chart turns into its steps in one click.
+- **SQL** over the stored result, below.
+
+While editing, a filter on an unset dashboard variable is previewed with the
+column's most common value, so the chart draws at once.
+
+| Step | Does |
+|---|---|
+| Filter | `=`, `!=`, `<`…, `contains`, `in`, null checks; against a value or a dashboard variable, optionally skipped while the variable is unset. |
+| Range | Keeps the trailing `7d`, `30d`, `12h`, `6m`… named by a variable (default `range`) or fixed in the step, counted back from the newest row or from now; `all` keeps everything. |
+| Bucket | A time to its hour, day, week or month, or to hour-of-day and day-of-week; or *day or week, by range* — daily up to 31 days, weekly beyond. |
+| Compute | `+ − × ÷` between columns or with a number; days or months between two dates. |
+| Window | `min`, `max`, `sum`, `count`, `first_value`, `row_number`, `rank` over partitions, as a new column — first-seen months for cohorts, say. |
+| Group and aggregate | `count`, `count distinct` (of one column or a combination), `sum`, `avg`, `min`, `max`. |
+| Rolling window | The same measures over the trailing N days at every date, optionally filling dates with no rows — distinct users over a week, every day. |
+| Top N + others | Keeps the N largest categories and folds the rest into one. |
+| Sort, Limit | |
+
+Every column a step names is checked against what the previous step produced,
+so a broken step says which column is missing and which exist. Values are
+bound, never pasted into the SQL. Charts are cached for a minute, keyed by the
+result tables they read, so a refresh shows straight away.
+
+Chart types: number, line, area, bar (stacked or not, split by a column),
+share, heatmap (hour × weekday fills every slot), cohort grid, and table. They
+draw with the dashboard's own tiles and palettes, in both visual styles. A
+tile names the chart and, muted beside it, the query it comes from; a number
+sizes itself to the tile; and its footer says how fresh the stored result is
+(green, amber when its query changed since, red when the last run failed),
+with a **⋯** menu to open the query, download (the image, or the data), or
+enlarge it.
+
+Changing a variable switches its control at once and changes the address
+without reloading the page. Each chart that reads the variable says
+*Updating…* (fading a little) until its new data arrives; the others are left
+alone, and only charts whose data changed are redrawn. The page also asks
+`/api/v1/dashboards/<slug>/status` every 20 seconds (every 3 while something
+runs) which of its queries are running: their charts say *Running…*, and
+redraw on their own when the run finishes.
+
+For anything the steps do not cover, a chart can be **SQL** over `{{result}}`
+(and `{{name}}` for a dashboard variable, bound as text). It runs read-only, in
+ten seconds at most, as `arrakis_results_reader`: a role that can read result
+tables and nothing else in the app database. The migration creates that role
+when the app's database user may (`CREATEROLE`, or a superuser such as the one
+`npm run dev:db` uses); otherwise SQL charts are refused with a message and step
+charts are unaffected. To set it up by hand:
+
+```sql
+CREATE ROLE arrakis_results_reader NOLOGIN;
+GRANT arrakis_results_reader TO <app user> WITH SET TRUE;   -- PostgreSQL 16+
+GRANT USAGE ON SCHEMA results TO arrakis_results_reader;
+GRANT SELECT ON ALL TABLES IN SCHEMA results TO arrakis_results_reader;
+```
+
+A **dashboard** is a grid of charts and headings, in order, each 1 to 12 columns
+wide. **Edit** turns the page into its own editor:
+
+- a bar floats at the top with *Add chart* (any chart saved on a query, found
+  as you type), *Heading*, *Variables*, *Settings* (visibility, archive), and
+  *Cancel* / *Save*, with a dot that turns amber once something changed;
+- the title, description and headings are edited where they are shown;
+- hovering a tile shows its tools: a grip to drag it elsewhere (a bar shows
+  where it will land; with the grip focused, the arrow keys move it), its
+  settings — title, note, what a click sets, when it shows — in a drawer on
+  the right, and remove;
+- drag a tile's bottom-right corner to resize it (or its right or bottom edge
+  for one direction): the width snaps to twelfths of the grid, whose columns
+  show faintly while editing, and the height to 40px steps, from 80 to 1200;
+  the tile redraws as you drag, and the arrow keys do the same on a focused
+  grip. Its **variables** are what viewers change: a time range, a network, or a
+text variable such as a selected client. A chart reads them through its steps,
+and a widget can be linked so that clicking a row or bar sets a variable here or
+on another dashboard, and can be shown only while a variable is set — which is
+how a drill-down works. Variables travel in the address
+(`/dashboards/usage?range=7d&client=0x…`), so any view can be linked to.
+Dashboards are private, unlisted or public, like queries. Every chart's title
+(and *Open the query* in its menu) opens the query it is drawn from, on that
+chart's tab — `/queries/<slug>?tab=charts&chart=<id>` — so any figure can be
+traced to its SQL; charts on a private query only link for editors.
+
+### The Gnosis VPN dashboard
+
+The classic page (now at `/classic`) is being rebuilt from saved queries. The rebuilt version ships
+as a bundle in [`db/seed/gnosis-vpn`](./db/seed/gnosis-vpn) (the SQL) and
+[`lib/seed/gnosis-vpn.ts`](./lib/seed/gnosis-vpn.ts) (the charts and layout):
+eight fragments, seven scheduled queries, about thirty charts, and two
+dashboards — `gnosis-vpn`, and `gnosis-vpn-client`, the drill-down a client
+row opens. Signed in, **Settings → Bundled dashboards → Install** writes all of it into the app
+database; from then on it is edited in the studio like anything else, and
+**Update** brings what it created back to the bundled version without
+touching anything else. Its queries refresh every five minutes.
+
+| Fragment | Is |
+|---|---|
+| `hex(value)` | bytes as `0x…` text |
+| `uint256(value)` | a 32-byte big-endian integer as an exact `numeric` |
+| `decode-win-prob(value)` | HOPR's 7-byte winning probability as a number from 0 to 1 |
+| `vpn-nodes` | announced accounts: relays and exits |
+| `vpn-clients` | accounts that never announced, with the block they were deployed in |
+| `oracle-updates` | every winning-probability and ticket-price update, raw, from the logs |
+| `vpn-redemptions` | every redemption that carried VPN traffic, with its direction |
+| `win-probability` | the winning probability in force over each range of blocks |
+
+| Query | One row per | Feeds |
+|---|---|---|
+| `vpn-traffic` | VPN redemption, upstream or downstream, dated and priced | volume, redemptions, hours, relays, client ranking, client record |
+| `client-activity` | client and day it was active or deployed | active users, new vs returning, cohorts |
+| `client-deployments` | client deployment | new clients, deployments table |
+| `recent-redemptions` | one of the 500 newest client redemptions | redemption feed |
+| `network-state` | — (one row) | active channels and balances |
+| `ticket-parameters` | — (one row, per network only) | winning probability, price, value |
+| `indexed-contracts` | contract | contracts table |
+
+Exits must be configured on the **Exits** page (`/settings/networks`, under Settings in the sidebar): downstream is what they pay,
+and with none configured there is none — nothing is guessed. A month is 31
+days (today and the thirty before), as the old page and the Dune queries
+count it; the range is a dashboard variable, so that is one edit away.
+
+**Parity.** `npm run parity` checks the bundle against the page it replaces,
+on your networks: it installs the bundle if needed, runs its queries, builds
+the old snapshot from the same index at the same moment, with the same exits
+and the same block clock, and compares every figure — the headline numbers at
+every range, every point of every series, each heatmap cell, the cohort grid,
+the client ranking, the tables and a few clients' records. It prints one line
+per figure and exits 1 if anything differs. The few deliberate changes are
+reported as such: the relay panels and daily users used to stop at 90 days
+even on "all time", and the 90-day volume chart kept its first week whole.
+
+```bash
+npm run parity                     # each network, then all of them together
+npm run parity -- --network jura   # one view
+npm run parity -- --install        # update the installed bundle first
+```
+
+For a realistic local network, `npm run dev:db -- --demo` now loads
+[`test/fixtures/blokli-demo.sql`](./test/fixtures/blokli-demo.sql): eleven
+months of a generated network — growing deployments, daytime traffic, churn,
+three exits, probing, changing oracle values. (`npm run dev:db -- reset` first
+if you created the demo database before.) It prints the three exit addresses
+to add on the Exits page.
+
 ### Exits
 
-Exit addresses are configured per network through the API (a settings page
-follows) and stored in the app database. A removal is recorded rather than
+Exit addresses are configured per network on the Exits page,
+`/settings/networks` (or through the API) and stored in the app database. A removal is recorded rather than
 deleted, so the history of what was counted as downstream stays on record.
 Adding an address that never announced on that network is allowed, with a
 warning. Queries see them only as `{{exits}}`; with none configured, nothing is
@@ -381,9 +617,22 @@ session.
 | `POST /api/v1/queries/:slug/fork` `{slug, title?}` | Private copy. |
 | `POST /api/v1/queries/:slug/run` `{network?, values?}` | Run now and store the result. |
 | `GET /api/v1/queries/:slug/results?network=&limit=&offset=&p.name=` | The stored result. Never runs anything. |
+| `GET·POST /api/v1/queries/:slug/visualizations` | Charts on a query. |
+| `GET /api/v1/visualizations` · `GET·PATCH·DELETE /api/v1/visualizations/:id` | All charts; one chart. |
+| `GET /api/v1/visualizations/:id/data?network=&v.name=` | A chart's rows, from stored results. |
+| `POST /api/v1/visualizations/preview` `{query, config, network?, vars?}` | Rows for an unsaved chart. |
+| `GET·POST /api/v1/dashboards` · `GET·PATCH·DELETE /api/v1/dashboards/:slug` | Dashboards. |
+| `PUT /api/v1/dashboards/:slug/widgets` `{widgets: [...]}` | Replace the layout. |
+| `GET /api/v1/dashboards/:slug/data?v.name=` | Every widget's rows in one call. |
 
 `network=all` (the default where accepted) stacks every network's rows under a
 leading `network` column; a query with `combine: "hidden"` has no such view.
+Charts always see a `network` column, even for one network, so a chart that
+counts or splits by network works whichever network a viewer picks.
+
+| | |
+|---|---|
+| `GET /api/v1/bundles` · `POST /api/v1/bundles` `{name}` | Bundled dashboards; install or update one. |
 
 ### Tests
 
@@ -393,7 +642,9 @@ TEST_ADMIN_DATABASE_URL=postgresql://postgres:…@localhost/postgres npm test
 
 The integration suite builds throwaway databases from
 [`test/fixtures/blokli.sql`](./test/fixtures/blokli.sql) using that superuser
-connection, and is skipped without it. Node 22.18 or newer runs the TypeScript
+connection, and is skipped without it. The parity suite generates two networks
+from [`blokli-demo.sql`](./test/fixtures/blokli-demo.sql) and requires the
+bundled dashboard to match the old snapshot on each and on both combined. Node 22.18 or newer runs the TypeScript
 directly; nothing else is needed.
 
 ## Metric definitions

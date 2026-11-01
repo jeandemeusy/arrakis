@@ -6,6 +6,7 @@ import {
   requireEditor,
   route,
 } from '@/lib/api/handler';
+import { fragmentArguments, isRelation } from '@/lib/query/compile';
 import { nudgeScheduler } from '@/lib/query/scheduler';
 import { createQuery, listQueries, type Kind } from '@/lib/query/store';
 
@@ -32,6 +33,14 @@ export const GET = route(async (request: Request) => {
     queries: queries.map(({ current, ...query }) => ({
       ...query,
       version: current?.version ?? null,
+      // How a fragment is called: its arguments, and whether it stands in
+      // for a table or for a value.
+      ...(query.kind === 'fragment' && current
+        ? {
+            arguments: fragmentArguments(current.sql).map((entry) => entry.name),
+            expression: !isRelation(current.sql),
+          }
+        : {}),
     })),
   });
 });

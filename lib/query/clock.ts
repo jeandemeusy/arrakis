@@ -26,6 +26,29 @@ export type BlockClock = {
 };
 
 const cache = new Map<string, { at: number; clock: Promise<BlockClock> }>();
+let ttl = TTL_MS;
+
+/**
+ * Keeps each network's clock for the rest of the process. For the parity
+ * check, so every result it refreshes and the snapshot it compares them with
+ * place blocks in time identically.
+ */
+export function holdClocks(): void {
+  ttl = Infinity;
+}
+
+/** A block's time in seconds, interpolated exactly as {{block_time()}} does. */
+export function timeOf(clock: BlockClock, block: number): number {
+  const { blocks, times } = clock;
+  let below = 0;
+  while (below < blocks.length && blocks[below] <= block) below += 1;
+  const at = Math.min(Math.max(below - 1, 0), blocks.length - 2);
+  const span = blocks[at + 1] - blocks[at];
+  if (span === 0) return times[at];
+  return (
+    times[at] + ((block - blocks[at]) * (times[at + 1] - times[at])) / span
+  );
+}
 
 async function bounds(
   network: NetworkConfig,
@@ -72,7 +95,7 @@ async function build(network: NetworkConfig): Promise<BlockClock> {
 
 export function blockClock(network: NetworkConfig): Promise<BlockClock> {
   const hit = cache.get(network.id);
-  if (hit && Date.now() - hit.at < TTL_MS) return hit.clock;
+  if (hit && Date.now() - hit.at < ttl) return hit.clock;
   const clock = build(network);
   cache.set(network.id, { at: Date.now(), clock });
   clock.catch(() => cache.delete(network.id));

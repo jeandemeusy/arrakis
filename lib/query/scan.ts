@@ -108,3 +108,24 @@ export function segments(sql: string): Segment[] {
   flushCode();
   return out;
 }
+
+/** Whether SQL is a query (a relation) rather than an expression. */
+export function isRelation(sql: string): boolean {
+  const code = segments(sql)
+    .filter((segment) => segment.code)
+    .map((segment) => segment.text)
+    .join(' ');
+  if (!/^[\s(]*(select|with|values|table)\b/i.test(code)) return false;
+  // `(SELECT …)` on its own is a scalar subquery — a value — while
+  // `(SELECT …) UNION (SELECT …)` is a query: only a body that is one
+  // parenthesised group from start to end reads as a value.
+  const trimmed = code.trim();
+  if (!trimmed.startsWith('(')) return true;
+  let depth = 0;
+  for (let i = 0; i < trimmed.length; i++) {
+    if (trimmed[i] === '(') depth++;
+    else if (trimmed[i] === ')' && --depth === 0)
+      return i !== trimmed.length - 1;
+  }
+  return true;
+}

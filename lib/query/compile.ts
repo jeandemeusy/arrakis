@@ -8,7 +8,9 @@ import {
   type ParameterDefinition,
   type SystemParameter,
 } from './params';
-import { segments } from './scan';
+import { isRelation, segments } from './scan';
+
+export { isRelation };
 
 /**
  * Turns a saved query's template into one parameterized statement.
@@ -20,6 +22,13 @@ import { segments } from './scan';
  *   {{> slug}}             another saved query of kind `fragment`, inlined as a
  *                          parenthesized subquery: `FROM {{> clients}} AS c`
  *                          or `WITH c AS {{> clients}}`
+ *   {{> slug(a, b)}}       a fragment with arguments. A fragment that is an
+ *                          expression rather than a query stands in for a
+ *                          value: `{{> hex(r.payer)}}`, `{{> uint256(balance)}}`.
+ *                          Named arguments work too: `{{> f(value => x)}}`.
+ *   {{$name}}              inside a fragment, one of its arguments, in the
+ *   {{$name = default}}    order they first appear; the default is used when
+ *                          a call leaves it out, or the fragment runs alone
  *   {{block_time(expr)}}   the timestamp of block number `expr`, interpolated
  *                          between sampled anchor blocks (see clock.ts)
  *
@@ -58,7 +67,8 @@ export type Compiled = {
 };
 
 const MAX_FRAGMENT_DEPTH = 8;
-const FRAGMENT = /^>\s*([a-z0-9][a-z0-9-]{0,79})$/;
+const FRAGMENT = /^>\s*([a-z0-9][a-z0-9-]{0,79})\s*(?:\(([\s\S]*)\))?$/;
+const ARGUMENT = /^\$([a-z_][a-z0-9_]{0,62})(?:\s*=\s*([\s\S]+))?$/;
 const BLOCK_TIME = /^block_time\s*\(([\s\S]+)\)$/;
 const NAME = /^[a-z_][a-z0-9_]{0,62}$/;
 
@@ -127,6 +137,87 @@ function analyse(
   return { placeholders, trailing: semicolons };
 }
 
+/**
+ * A fragment's arguments, in the order they first appear, with their
+ * defaults. Empty for SQL that cannot be read (it fails elsewhere).
+ */
+export function fragmentArguments(
+  sql: string,
+): Array<{ name: string; default?: string }> {
+  let placeholders: Placeholder[];
+  try {
+    placeholders = analyse(sql, 'Fragment').placeholders;
+  } catch {
+    return [];
+  }
+  const out: Array<{ name: string; default?: string }> = [];
+  for (const placeholder of placeholders) {
+    // An argument passed straight on to a nested fragment: `{{> f($x)}}`.
+    const call = FRAGMENT.exec(placeholder.inner)?.[2];
+    if (call && !call.includes('{{')) {
+      for (const forwarded of call.matchAll(
+        /(?:^|,|=>)\s*\$([a-z_][a-z0-9_]*)\s*(?=,|$)/g,
+      )) {
+        if (!out.some((entry) => entry.name === forwarded[1]))
+          out.push({ name: forwarded[1] });
+      }
+      continue;
+    }
+    const match = ARGUMENT.exec(placeholder.inner);
+    if (!match) continue;
+    const known = out.find((entry) => entry.name === match[1]);
+    if (!known) {
+      out.push({
+        name: match[1],
+        ...(match[2] ? { default: match[2].trim() } : {}),
+      });
+    } else if (match[2] && known.default === undefined) {
+      known.default = match[2].trim();
+    }
+  }
+  return out;
+}
+
+/** Splits `a, f(b, c), 'd,e'` at its top-level commas. */
+function splitArguments(text: string, where: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let quote: string | null = null;
+  let current = '';
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (quote) {
+      current += char;
+      if (char === quote) {
+        if (text[index + 1] === quote) {
+          current += text[index + 1];
+          index += 1;
+        } else quote = null;
+      }
+      continue;
+    }
+    if (char === "'" || char === '"') quote = char;
+    else if (char === '(' || char === '[') depth += 1;
+    else if (char === ')' || char === ']') depth -= 1;
+    if (char === ',' && depth === 0) {
+      parts.push(current.trim());
+      current = '';
+      continue;
+    }
+    current += char;
+  }
+  if (quote || depth !== 0) {
+    throw badRequest(
+      `${where}: unbalanced quotes or brackets in the arguments`,
+    );
+  }
+  if (current.trim() || parts.length) parts.push(current.trim());
+  if (parts.some((part) => !part)) {
+    throw badRequest(`${where}: an argument is empty`);
+  }
+  return parts;
+}
+
 export async function compile(
   sql: string,
   definitions: ParameterDefinition[],
@@ -150,10 +241,16 @@ export async function compile(
     return position;
   };
 
+  /**
+   * `args` holds the arguments a fragment was called with, already in SQL;
+   * null for the query itself, where an argument takes its default or NULL
+   * — which is what previewing an expression fragment alone shows.
+   */
   const expand = async (
     text: string,
     where: string,
     stack: string[],
+    args: Map<string, string> | null,
   ): Promise<string> => {
     const { placeholders, trailing } = analyse(text, where);
     let out = '';
@@ -171,6 +268,14 @@ export async function compile(
       cursor = placeholder.end;
       const { inner } = placeholder;
 
+      if (
+        inner.startsWith('>') &&
+        text.slice(placeholder.start + 2, placeholder.end).includes('{{')
+      ) {
+        throw badRequest(
+          `${where}: an argument to a fragment cannot contain a placeholder; pass $name to forward one of your own`,
+        );
+      }
       const fragment = FRAGMENT.exec(inner);
       if (fragment) {
         const slug = fragment[1];
@@ -183,17 +288,70 @@ export async function compile(
         const source = await resolveFragment(slug);
         if (!source) throw badRequest(`Unknown fragment: ${slug}`);
         fragments.push({ slug, versionId: source.versionId });
+        const declared = fragmentArguments(source.sql);
+        const given = new Map<string, string>();
+        const call = fragment[2]?.trim();
+        if (call) {
+          if (call.includes('{{')) {
+            throw badRequest(
+              `${where}: an argument to ${slug} cannot contain a placeholder; pass $name to forward one of your own`,
+            );
+          }
+          const parts = splitArguments(call, `${where}, ${slug}()`);
+          parts.forEach((part, position) => {
+            const named = /^([a-z_][a-z0-9_]*)\s*=>\s*([\s\S]+)$/.exec(part);
+            const name = named ? named[1] : declared[position]?.name;
+            if (!name || !declared.some((entry) => entry.name === name)) {
+              throw badRequest(
+                named
+                  ? `${slug} has no argument "${named[1]}"; it takes ${declared.map((entry) => entry.name).join(', ') || 'none'}`
+                  : `${slug} takes ${declared.length} argument${declared.length === 1 ? '' : 's'}, given ${parts.length}`,
+              );
+            }
+            let value = (named ? named[2] : part).trim();
+            // `$name` forwards an argument of the fragment being expanded.
+            const forwarded = /^\$([a-z_][a-z0-9_]*)$/.exec(value);
+            if (forwarded) {
+              // Run alone, a fragment's own arguments are empty.
+              const outer = args === null ? 'NULL' : args.get(forwarded[1]);
+              if (outer === undefined) {
+                throw badRequest(
+                  `${where}: no argument $${forwarded[1]} to pass on`,
+                );
+              }
+              value = outer;
+            }
+            given.set(name, value);
+          });
+        }
         // A fragment's own declarations apply unless the query declares the
         // same name itself, in which case the query's definition wins.
         for (const definition of source.parameters) {
           if (!scope.has(definition.name))
             scope.set(definition.name, definition);
         }
-        const body = await expand(source.sql, `Fragment ${slug}`, [
-          ...stack,
-          slug,
-        ]);
+        const body = await expand(
+          source.sql,
+          `Fragment ${slug}`,
+          [...stack, slug],
+          given,
+        );
         out += `(\n${body}\n)`;
+        continue;
+      }
+
+      const argument = ARGUMENT.exec(inner);
+      if (argument) {
+        const [, name, fallback] = argument;
+        const value =
+          args?.get(name) ??
+          (fallback !== undefined || args === null
+            ? (fallback?.trim() ?? 'NULL')
+            : undefined);
+        if (value === undefined) {
+          throw badRequest(`${where} needs an argument "${name}"`);
+        }
+        out += `(${value})`;
         continue;
       }
 
@@ -244,7 +402,9 @@ export async function compile(
   };
 
   for (const definition of definitions) scope.set(definition.name, definition);
-  let text = await expand(sql, 'Query', []);
+  let text = await expand(sql, 'Query', [], null);
+  // An expression fragment run on its own: one value.
+  if (!isRelation(text)) text = `SELECT (${text}) AS value`;
 
   for (const name of used) {
     const definition = scope.get(name);

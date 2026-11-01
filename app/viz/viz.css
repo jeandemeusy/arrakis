@@ -1,0 +1,370 @@
+/*
+ * Visualization bodies: what sits inside a tile. Built from the tokens in
+ * globals.css so both visual styles apply.
+ */
+
+.viz-missing {
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+.viz-missing p {
+  margin: 0;
+  max-width: 40ch;
+}
+
+.viz-number {
+  display: grid;
+  align-content: center;
+  gap: 8px;
+}
+
+.viz-number strong {
+  font-family: var(--font-display);
+  font-weight: var(--display-weight);
+  font-size: clamp(30px, 3.4vw, 48px);
+  line-height: 1;
+}
+
+.viz-number p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.viz-share {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 4px 0;
+  overflow: auto;
+  list-style: none;
+  font-size: 12px;
+}
+
+.viz-share li > button,
+.viz-share li {
+  display: grid;
+  grid-template-columns: minmax(70px, 1fr) minmax(80px, 3fr) 76px;
+  align-items: center;
+  gap: 10px;
+}
+
+.viz-share li > button {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.viz-share li > button:hover .viz-share-label {
+  text-decoration: underline;
+}
+
+.viz-share-label {
+  overflow: hidden;
+  font-family: var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.viz-share-bar {
+  height: 12px;
+  background: var(--paper);
+}
+
+.viz-share-bar i {
+  display: block;
+  height: 100%;
+  border: var(--tile-border) solid var(--tile-border-color);
+  border-width: min(var(--tile-border), 1px);
+}
+
+.viz-share-value {
+  display: grid;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.viz-share-value small {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.viz-table {
+  overflow: auto;
+  font-size: 12px;
+}
+
+.viz-table table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.viz-table th {
+  position: sticky;
+  top: 0;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--muted);
+  font-weight: 400;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.viz-table td {
+  max-width: 280px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line-soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.viz-table .numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.viz-table td.mono {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.viz-table tr.selectable {
+  cursor: pointer;
+}
+
+.viz-table tr.selectable:hover td {
+  background: var(--surface-alt);
+}
+
+.viz-table-pager {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 8px 4px 0;
+  color: var(--muted);
+}
+
+.viz-table-pager button {
+  padding: 2px 8px;
+  border: var(--control-border) solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+.viz-table-pager button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.table-card .viz-table {
+  padding: 0 16px;
+}
+
+/* A tile's title and code button lead to the query and chart behind it. */
+.tile-title-link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.tile-title-link:hover,
+.tile-title-link:focus-visible {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.chart-actions .tile-source {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: var(--control-border) solid var(--line);
+  background: var(--surface);
+  color: var(--muted);
+}
+
+.chart-actions .tile-source:hover {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+
+[data-style='neubrutal'] .chart-actions .tile-source {
+  border-color: var(--ink);
+  border-radius: 0;
+  box-shadow: var(--shadow-sm);
+}
+
+[data-style='neubrutal'] .chart-actions .tile-source:active {
+  box-shadow: none;
+  transform: translate(3px, 3px);
+}
+
+/* Line, area and bar charts with a legend: the legend beside the plot when
+   the chart itself is wide enough, under it otherwise. The outer box is the
+   container the width is read from; the inner one is laid out by it. */
+.viz-cartesian {
+  container-type: inline-size;
+}
+
+.viz-cartesian-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+}
+
+.viz-plot {
+  min-width: 0;
+}
+
+.viz-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  max-height: 72px;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+  font-size: 12px;
+}
+
+.viz-legend button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 180px;
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.viz-legend button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.viz-legend button[aria-pressed='false'] {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+.viz-legend button[aria-pressed='false'] i {
+  opacity: 0.25;
+}
+
+.viz-legend i {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+
+.viz-legend i.all {
+  background: var(--muted);
+}
+
+[data-style='neubrutal'] .viz-legend i {
+  border: 2px solid #000;
+  border-radius: 0;
+}
+
+/* Wide enough: the legend is a column on the right, as tall as the plot. */
+@container (min-width: 560px) {
+  .viz-cartesian-body {
+    grid-template-columns: minmax(0, 1fr) minmax(110px, 180px);
+  }
+
+  .viz-legend {
+    flex-direction: column;
+    flex-wrap: nowrap;
+    align-content: flex-start;
+    max-height: var(--viz-height, 320px);
+    padding-top: 12px;
+  }
+
+  .viz-legend li {
+    display: flex;
+    justify-content: flex-end;
+  }
+
+  .viz-legend button {
+    flex-direction: row-reverse;
+    font-family: var(--font-mono);
+  }
+}
+
+.viz-tip {
+  min-width: 160px;
+  max-width: 320px;
+  padding: 8px 10px;
+}
+
+.viz-tip-label {
+  margin: 0 0 6px;
+  font-weight: 600;
+}
+
+.viz-tip ul {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.viz-tip li {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.viz-tip li i {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+
+.viz-tip li span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.viz-tip li b {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.viz-tip-more,
+.viz-tip-total {
+  color: var(--muted);
+}
+
+.viz-tip-total {
+  margin-top: 3px;
+  padding-top: 4px;
+  border-top: 1px solid var(--line-soft);
+  color: var(--ink);
+}

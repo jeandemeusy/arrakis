@@ -193,3 +193,12 @@ export function integerParam(
   }
   return value;
 }
+
+/** Dashboard variables from a query string: `?v.range=30d&v.client=0x…`. */
+export function varsFromSearch(url: URL): Record<string, string> {
+  const vars: Record<string, string> = {};
+  for (const [key, value] of url.searchParams) {
+    if (key.startsWith('v.')) vars[key.slice(2)] = value;
+  }
+  return vars;
+}

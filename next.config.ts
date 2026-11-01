@@ -14,6 +14,10 @@ const nextConfig: NextConfig = {
   // `react/react-compiler` as an error, so the code was written to be eligible.
   reactCompiler: true,
 
+  // The sidebar's controls sit in the bottom-left corner, where the dev
+  // indicator would cover them.
+  devIndicators: { position: 'bottom-right' },
+
   async headers() {
     return [
       {
@@ -23,7 +27,7 @@ const nextConfig: NextConfig = {
         // it only changes once a minute, so the render is identical for every
         // visitor within that window and a cache in front should be allowed to
         // say so. Next sends `no-store` for a dynamic page, which this replaces.
-        source: '/',
+        source: '/classic',
         headers: [
           {
             key: 'cache-control',

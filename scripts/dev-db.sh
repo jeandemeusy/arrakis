@@ -3,6 +3,7 @@
 #
 #   npm run dev:db              start it (creates it on first use)
 #   npm run dev:db -- --demo    also load a synthetic Blokli index to query
+#                               (eleven months of a made-up network)
 #   npm run dev:db -- stop      stop it
 #   npm run dev:db -- reset     stop it and delete its data
 #
@@ -60,7 +61,7 @@ if [ -n "$DEMO" ]; then
 CREATE ROLE blokli_reader LOGIN;
 CREATE DATABASE blokli_demo;
 SQL
-    psql "$URL/blokli_demo" -q -v ON_ERROR_STOP=1 -f "$ROOT/test/fixtures/blokli.sql"
+    psql "$URL/blokli_demo" -q -v ON_ERROR_STOP=1 -f "$ROOT/test/fixtures/blokli-demo.sql"
     psql "$URL/blokli_demo" -q -v ON_ERROR_STOP=1 <<'SQL'
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 GRANT USAGE ON SCHEMA public TO blokli_reader;
@@ -74,4 +75,7 @@ echo
 echo "APP_DATABASE_URL=$URL/arrakis"
 if [ -n "$DEMO" ]; then
   echo "NETWORKS='[{\"id\":\"demo\",\"label\":\"Demo\",\"databaseUrl\":\"postgresql://blokli_reader@$HOST:$PORT/blokli_demo\"}]'"
+  echo
+  echo "The demo network has three exits; add them on the Exits page (/settings/networks):"
+  psql "$URL/blokli_demo" -tAc "SELECT '  0x' || encode(chain_key, 'hex') FROM account WHERE id BETWEEN 13 AND 15 ORDER BY id"
 fi

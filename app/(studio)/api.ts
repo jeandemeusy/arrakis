@@ -147,6 +147,18 @@ export type QueryRecord = {
 
 export type QuerySummary = Omit<QueryRecord, 'current'> & {
   version: number | null;
+  /** Fragments: the arguments it takes, in order. */
+  arguments?: string[];
+  /** Fragments: stands in for a value rather than a table. */
+  expression?: boolean;
+};
+
+export type Dependent = {
+  slug: string;
+  title: string;
+  kind: 'query' | 'fragment';
+  direct: boolean;
+  charts: number;
 };
 
 export type Network = { id: string; label: string };
@@ -209,4 +221,59 @@ export type ExitActivity = {
   lastBlock: string | null;
   lastAt: string | null;
   redemptions: string;
+};
+
+export type VariableType = 'range' | 'network' | 'text' | 'select';
+
+export type DashboardVariable = {
+  name: string;
+  label: string;
+  type: VariableType;
+  default?: string;
+  options?: string[];
+  /** Display names for some options, e.g. 31d → "Last 30 days". */
+  labels?: Record<string, string>;
+};
+
+export type WidgetOptions = {
+  title?: string;
+  link?: { column: string; var: string; dashboard?: string };
+  requires?: string;
+  note?: string;
+};
+
+export type SavedVisualization = {
+  id: string;
+  query: string;
+  queryTitle: string;
+  queryVisibility: Visibility;
+  title: string;
+  description: string;
+  type: import('@/lib/viz/config').VisualizationType;
+  config: import('@/lib/viz/config').VisualizationConfig;
+  updatedAt: string;
+};
+
+export type DashboardWidget = {
+  id: string;
+  kind: 'visualization' | 'text';
+  visualization: SavedVisualization | null;
+  text: string;
+  /** Columns of the 12-column grid, 1 to 12. */
+  width: number;
+  height: number;
+  options: WidgetOptions;
+};
+
+export type DashboardRecord = {
+  id: string;
+  slug: string;
+  title: string;
+  description: string;
+  visibility: Visibility;
+  variables: DashboardVariable[];
+  createdBy: string | null;
+  updatedAt: string;
+  archivedAt: string | null;
+  widgets: DashboardWidget[];
 };

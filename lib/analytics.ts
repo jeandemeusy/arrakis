@@ -151,6 +151,13 @@ const sqlCache = new Map<string, string>();
 let cached: { expiresAt: number; value: Dashboard } | undefined;
 let refreshing: Promise<Dashboard> | undefined;
 
+/** Closes the index connections, so a script or test can exit promptly. */
+export async function closeIndexPools(): Promise<void> {
+  const open = [...pools.values()];
+  pools.clear();
+  await Promise.all(open.map((pool) => pool.end()));
+}
+
 function database(network: NetworkConfig): Pool {
   let pool = pools.get(network.id);
   if (!pool) {
@@ -336,7 +343,11 @@ function estimatedClock(latestBlock: number): BlockClock {
 }
 
 /** Reads one index database into the shape the snapshot builder consumes. */
-async function queryNetwork(network: NetworkConfig): Promise<NetworkDataset> {
+export async function queryNetwork(
+  network: NetworkConfig,
+  /** A fixed block clock, for the parity check; resolved as usual otherwise. */
+  fixedClock?: { at: BlockClock; timebase: NetworkDataset['timebase'] },
+): Promise<NetworkDataset> {
   const db = database(network);
   // Handed to the redemption query so it can leave the probe traffic in the
   // database. Empty means the exits are unknown and everything has to come back.
@@ -480,9 +491,9 @@ async function queryNetwork(network: NetworkConfig): Promise<NetworkDataset> {
     .map((row) => Number(row.published_block));
   const firstBlock = earliest.length ? Math.min(...earliest) : latestBlock;
 
-  let timebase: NetworkDataset['timebase'] = 'estimated';
-  let clock = estimatedClock(latestBlock);
-  if (network.rpcUrl) {
+  let timebase: NetworkDataset['timebase'] = fixedClock?.timebase ?? 'estimated';
+  let clock = fixedClock?.at ?? estimatedClock(latestBlock);
+  if (network.rpcUrl && !fixedClock) {
     try {
       clock = await resolveBlockClock(network.rpcUrl, firstBlock, latestBlock);
       timebase = 'rpc';
@@ -600,7 +611,9 @@ async function queryNetwork(network: NetworkConfig): Promise<NetworkDataset> {
  */
 async function queryDashboard(): Promise<Dashboard> {
   const networks = resolveNetworks();
-  const results = await Promise.allSettled(networks.map(queryNetwork));
+  const results = await Promise.allSettled(
+    networks.map((network) => queryNetwork(network)),
+  );
 
   const snapshots: Record<string, AnalyticsSnapshot> = {};
   const datasets: NetworkDataset[] = [];
