@@ -84,6 +84,35 @@ describe('chart options', () => {
     );
   });
 
+  it('keeps per-column table display choices and rejects invalid widths', () => {
+    const { options } = parseConfig({
+      options: {
+        tableColumns: {
+          address: {
+            text: true,
+            monospace: true,
+            condensed: true,
+            align: 'center',
+            width: 180,
+          },
+        },
+      },
+    });
+    assert.deepEqual(options.tableColumns, {
+      address: {
+        text: true,
+        monospace: true,
+        condensed: true,
+        align: 'center',
+        width: 180,
+      },
+    });
+    assert.throws(
+      () => parseConfig({ options: { tableColumns: { id: { width: 12 } } } }),
+      /width/,
+    );
+  });
+
   it('survives a builder compiling over the chart', () => {
     const config = finalizeConfig(
       'bar',

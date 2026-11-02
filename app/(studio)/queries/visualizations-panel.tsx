@@ -27,6 +27,7 @@ import {
   type Encoding,
   type Format,
   type Options,
+  type TableColumnOptions,
   type VisualizationConfig,
   type VisualizationType,
 } from '@/lib/viz/config';
@@ -497,6 +498,20 @@ function TableColumns({
     else delete next[name];
     onChange({ [key]: Object.keys(next).length ? next : undefined });
   };
+  const setDisplay = (
+    name: string,
+    patch: Partial<TableColumnOptions>,
+  ) => {
+    const current = { ...options.tableColumns?.[name], ...patch };
+    for (const key of Object.keys(current) as Array<keyof TableColumnOptions>) {
+      if (current[key] === undefined || current[key] === false)
+        delete current[key];
+    }
+    const next = { ...options.tableColumns };
+    if (Object.keys(current).length) next[name] = current;
+    else delete next[name];
+    onChange({ tableColumns: Object.keys(next).length ? next : undefined });
+  };
   return (
     <fieldset className="table-columns">
       <legend>Columns</legend>
@@ -534,6 +549,71 @@ function TableColumns({
               </option>
             ))}
           </select>
+          <select
+            className="studio-input"
+            aria-label={`Alignment for ${column.name}`}
+            value={options.tableColumns?.[column.name]?.align ?? ''}
+            onChange={(event) =>
+              setDisplay(column.name, {
+                align: (event.target.value || undefined) as
+                  | TableColumnOptions['align']
+                  | undefined,
+              })
+            }
+          >
+            <option value="">automatic</option>
+            <option value="left">left</option>
+            <option value="center">center</option>
+            <option value="right">right</option>
+          </select>
+          <input
+            className="studio-input"
+            type="number"
+            min={40}
+            max={1000}
+            aria-label={`Width for ${column.name}`}
+            placeholder="width"
+            value={options.tableColumns?.[column.name]?.width ?? ''}
+            onChange={(event) =>
+              setDisplay(column.name, {
+                width: event.target.value ? Number(event.target.value) : undefined,
+              })
+            }
+          />
+          <label className="studio-check">
+            <input
+              type="checkbox"
+              checked={Boolean(options.tableColumns?.[column.name]?.text)}
+              onChange={(event) =>
+                setDisplay(column.name, { text: event.target.checked || undefined })
+              }
+            />
+            text
+          </label>
+          <label className="studio-check">
+            <input
+              type="checkbox"
+              checked={Boolean(options.tableColumns?.[column.name]?.monospace)}
+              onChange={(event) =>
+                setDisplay(column.name, {
+                  monospace: event.target.checked || undefined,
+                })
+              }
+            />
+            monospace
+          </label>
+          <label className="studio-check">
+            <input
+              type="checkbox"
+              checked={Boolean(options.tableColumns?.[column.name]?.condensed)}
+              onChange={(event) =>
+                setDisplay(column.name, {
+                  condensed: event.target.checked || undefined,
+                })
+              }
+            />
+            condensed
+          </label>
         </div>
       ))}
     </fieldset>

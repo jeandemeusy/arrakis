@@ -130,9 +130,14 @@
   white-space: nowrap;
 }
 
-.viz-table .numeric {
+.viz-table .numeric,
+.viz-table .align-right {
   text-align: right;
   font-variant-numeric: tabular-nums;
+}
+
+.viz-table .align-center {
+  text-align: center;
 }
 
 .viz-table td.mono {

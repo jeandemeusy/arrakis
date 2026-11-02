@@ -3174,9 +3174,14 @@ a.settings-card:focus-visible {
 
 .table-column {
   display: grid;
-  grid-template-columns: minmax(120px, 1fr) minmax(90px, 1fr) 110px;
+  grid-template-columns: minmax(120px, 1fr) repeat(4, minmax(70px, auto));
   align-items: center;
   gap: 8px;
+}
+
+.table-column .studio-check {
+  gap: 4px;
+  font-size: 11px;
 }
 
 .table-column code {

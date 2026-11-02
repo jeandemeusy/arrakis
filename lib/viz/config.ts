@@ -72,6 +72,8 @@ export type Options = {
   formats?: Record<string, Format>;
   /** Table headers to show instead of column names. */
   labels?: Record<string, string>;
+  /** Per-table-column display rules. Unset keeps the original automatic view. */
+  tableColumns?: Record<string, TableColumnOptions>;
 
   // How a line, area or bar chart is drawn. All optional: a chart without
   // them looks as it always has.
@@ -99,6 +101,16 @@ export type Options = {
   yAxis?: AxisOptions;
   /** The axis on the right, for series set to `axis: 'right'`. */
   rightAxis?: AxisOptions;
+};
+
+export type TableColumnOptions = {
+  /** A text display keeps identifiers literal rather than applying a number format. */
+  text?: boolean;
+  align?: 'left' | 'center' | 'right';
+  /** Fixed pixel width; the surrounding table scrolls when it no longer fits. */
+  width?: number;
+  monospace?: boolean;
+  condensed?: boolean;
 };
 
 export const SERIES_MARKS = ['bar', 'line', 'area'] as const;
@@ -342,6 +354,41 @@ export function parseConfig(input: unknown): VisualizationConfig {
     options.formats = formats as Record<string, Format>;
   const labels = record(optionsIn.labels, 'options.labels');
   if (Object.keys(labels).length) options.labels = labels;
+  if (optionsIn.tableColumns !== undefined && optionsIn.tableColumns !== null) {
+    if (
+      typeof optionsIn.tableColumns !== 'object' ||
+      Array.isArray(optionsIn.tableColumns)
+    )
+      throw badRequest('options.tableColumns must map columns to their display');
+    const tableColumns: Record<string, TableColumnOptions> = {};
+    for (const [column, value] of Object.entries(
+      optionsIn.tableColumns as Record<string, unknown>,
+    )) {
+      if (typeof value !== 'object' || value === null || Array.isArray(value))
+        throw badRequest(`options.tableColumns.${column} must be an object`);
+      const entry = value as Record<string, unknown>;
+      const display: TableColumnOptions = {};
+      if (entry.text) display.text = true;
+      if (entry.monospace) display.monospace = true;
+      if (entry.condensed) display.condensed = true;
+      if (entry.align !== undefined && entry.align !== null && entry.align !== '') {
+        if (
+          typeof entry.align !== 'string' ||
+          !['left', 'center', 'right'].includes(entry.align)
+        )
+          throw badRequest(`options.tableColumns.${column}.align must be left, center or right`);
+        display.align = entry.align as TableColumnOptions['align'];
+      }
+      if (entry.width !== undefined && entry.width !== null && entry.width !== '') {
+        const width = Number(entry.width);
+        if (!Number.isInteger(width) || width < 40 || width > 1_000)
+          throw badRequest(`options.tableColumns.${column}.width must be from 40 to 1000`);
+        display.width = width;
+      }
+      if (Object.keys(display).length) tableColumns[column] = display;
+    }
+    if (Object.keys(tableColumns).length) options.tableColumns = tableColumns;
+  }
   parseDrawing(optionsIn, options);
 
   const sql = string(raw.sql, 'sql');

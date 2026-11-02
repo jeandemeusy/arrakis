@@ -998,20 +998,30 @@ function Table({
   const current = Math.min(page, pages - 1);
   const numeric = (at: number) =>
     ['integer', 'bigint', 'float', 'numeric'].includes(columns[at].type);
+  const condense = (value: string) =>
+    value.length <= 12 ? value : `${value.slice(0, 6)}…${value.slice(-4)}`;
   return (
     <div className="viz-table" style={{ maxHeight: height }}>
       <table>
         <thead>
           <tr>
-            {shown.map((entry) => (
-              <th
-                key={entry.name}
-                scope="col"
-                className={numeric(entry.at) ? 'numeric' : undefined}
-              >
-                {options.labels?.[entry.name] ?? entry.name}
-              </th>
-            ))}
+            {shown.map((entry) => {
+              const display = options.tableColumns?.[entry.name];
+              const align = display?.align ?? (numeric(entry.at) ? 'right' : 'left');
+              const size = display?.width
+                ? { width: display.width, minWidth: display.width }
+                : undefined;
+              return (
+                <th
+                  key={entry.name}
+                  scope="col"
+                  className={`align-${align}`}
+                  style={size}
+                >
+                  {options.labels?.[entry.name] ?? entry.name}
+                </th>
+              );
+            })}
           </tr>
         </thead>
         <tbody>
@@ -1034,22 +1044,31 @@ function Table({
                 const value = row[entry.at];
                 const type = columns[entry.at].type;
                 const format = options.formats?.[entry.name];
-                const text =
-                  format || numeric(entry.at)
+                const display = options.tableColumns?.[entry.name];
+                const full = display?.text
+                  ? asText(value)
+                  : format || numeric(entry.at)
                     ? formatValue(value, format ?? options.format)
                     : formatCategory(value, type);
+                const text = display?.condensed ? condense(full) : full;
+                const align = display?.align ?? (numeric(entry.at) ? 'right' : 'left');
+                const size = display?.width
+                  ? { width: display.width, minWidth: display.width }
+                  : undefined;
                 return (
                   <td
                     key={entry.name}
                     className={[
-                      numeric(entry.at) ? 'numeric' : '',
-                      type === 'bytes' ? 'mono' : '',
+                      `align-${align}`,
+                      type === 'bytes' || display?.monospace ? 'mono' : '',
                     ].join(' ')}
-                    title={
-                      typeof value === 'string' && value !== text
-                        ? value
-                        : undefined
-                    }
+                    style={size}
+                    title={text !== full ? full : undefined}
+                    onCopy={(event) => {
+                      if (text === full) return;
+                      event.clipboardData.setData('text/plain', full);
+                      event.preventDefault();
+                    }}
                   >
                     {text}
                   </td>
