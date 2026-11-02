@@ -2178,9 +2178,7 @@
           "chart": "gnosis-vpn/exits-seen",
           "width": 6,
           "height": 110,
-          "options": {
-            "note": "Exits found in the service registry (gvpn:exit) or the list “exits” (Settings → Lists) that paid a relay in the window."
-          }
+          "options": {}
         },
         {
           "kind": "text",
