@@ -24,11 +24,24 @@ export type ActiveRun = {
   startedAt: string;
 };
 
-/** A row left behind by a process that died mid-run, once it can be no run. */
-const ABANDONED = "interval '2 hours'";
+/**
+ * A row left behind by a process that died mid-run, once it can be no run.
+ *
+ * Stored runs are capped at ten minutes and the scheduler already considers a
+ * fifteen-minute claim abandoned. Keeping a dead tracker for two hours made
+ * the Running now page claim that a refresh was still in progress long after
+ * it could have finished.
+ */
+const ABANDONED = "interval '15 minutes'";
 
 export async function listActiveRuns(): Promise<ActiveRun[]> {
   const db = await appDb();
+  // The monitor polls independently of the scheduler, so clear an abandoned
+  // tracker as soon as an editor opens it instead of waiting for the next
+  // housekeeping tick.
+  await db.query(
+    `DELETE FROM active_runs WHERE started_at < now() - ${ABANDONED}`,
+  );
   const { rows } = await db.query<{
     id: string;
     network: string;

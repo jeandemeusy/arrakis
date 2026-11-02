@@ -330,6 +330,32 @@ describe(
         assert.equal(after.runs.length, 0);
       });
 
+      it('forgets a tracker orphaned by a restarted web app', async () => {
+        const db = await lib.app.appDb();
+        await db.query(
+          `INSERT INTO active_runs
+             (network, pid, kind, query_slug, started_by, started_at)
+           VALUES ('jura', 1, 'schedule', 'orphaned-refresh', 'scheduler',
+                   now() - interval '16 minutes')`,
+        );
+
+        const response = await routes.runs.GET(
+          request('GET', '/api/v1/runs', { cookie }),
+          undefined,
+        );
+        assert.equal(response.status, 200);
+        assert.equal(
+          ((await body(response)).runs as Array<{ query: string }>).some(
+            (run) => run.query === 'orphaned-refresh',
+          ),
+          false,
+        );
+        const { rows } = await db.query<{ count: string }>(
+          "SELECT count(*)::text AS count FROM active_runs WHERE query_slug = 'orphaned-refresh'",
+        );
+        assert.equal(rows[0]?.count, '0');
+      });
+
       it('needs an editor to list or cancel runs', async () => {
         const list = await routes.runs.GET(
           request('GET', '/api/v1/runs'),
