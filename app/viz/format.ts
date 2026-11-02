@@ -19,6 +19,10 @@ const PERCENT = new Intl.NumberFormat('en', {
   style: 'percent',
   maximumFractionDigits: 1,
 });
+const SMALL_DECIMAL = new Intl.NumberFormat('en', {
+  notation: 'scientific',
+  maximumSignificantDigits: 3,
+});
 const DATE_TIME = new Intl.DateTimeFormat('en', {
   dateStyle: 'medium',
   timeStyle: 'short',
@@ -31,13 +35,24 @@ export function toNumber(value: unknown): number | null {
   return Number.isFinite(number) ? number : null;
 }
 
+/**
+ * Keep small non-zero values distinct from zero instead of rounding them away.
+ * Scientific notation makes the magnitude readable without an unbounded tail of
+ * zeroes, while the usual decimal formatting remains the default elsewhere.
+ */
+function decimal(value: number): string {
+  return value !== 0 && Math.abs(value) < 0.01
+    ? SMALL_DECIMAL.format(value)
+    : DECIMAL.format(value);
+}
+
 /** 18-decimal token amounts from a wei string, without losing digits first. */
 function token(value: unknown): string {
   try {
     const wei = BigInt(String(value).split('.')[0]);
     const whole = wei / 10n ** 18n;
     const fraction = Number(wei % 10n ** 18n) / 1e18;
-    return DECIMAL.format(Number(whole) + fraction);
+    return decimal(Number(whole) + fraction);
   } catch {
     return asText(value);
   }
@@ -53,7 +68,7 @@ export function formatValue(
     case 'compact':
       return number === null ? asText(value) : COMPACT.format(number);
     case 'decimal':
-      return number === null ? asText(value) : DECIMAL.format(number);
+      return number === null ? asText(value) : decimal(number);
     case 'percent':
       return number === null ? asText(value) : PERCENT.format(number);
     case 'gigabytes':
@@ -65,7 +80,7 @@ export function formatValue(
       if (number === null) return String(value as string);
       return Number.isInteger(number)
         ? INTEGER.format(number)
-        : DECIMAL.format(number);
+        : decimal(number);
   }
 }
 

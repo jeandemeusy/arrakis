@@ -203,6 +203,38 @@ describe(
       }
     });
 
+    it('calculates relayed data from redeemed ticket deltas', async () => {
+      const app = await lib.app.appDb();
+      const { rows: results } = await app.query<{ table_name: string }>(
+        `SELECT r.table_name
+           FROM query_results r
+           JOIN query_versions v ON v.id = r.query_version_id
+           JOIN queries q ON q.id = v.query_id
+          WHERE q.slug = 'vpn-traffic' AND r.network = 'jura'`,
+      );
+      assert.equal(results.length, 1);
+      const { rows } = await app.query<{
+        tickets: number;
+        gigabytes: number;
+        lowest_probability: number;
+        highest_probability: number;
+      }>(
+        `SELECT SUM(tickets)::float8 AS tickets,
+                SUM(gigabytes)::float8 AS gigabytes,
+                MIN(win_probability)::float8 AS lowest_probability,
+                MAX(win_probability)::float8 AS highest_probability
+           FROM results.${results[0].table_name}`,
+      );
+      const expected = (rows[0].tickets * 650) / 1073741824;
+      assert.ok(rows[0].gigabytes > 0);
+      assert.ok(Math.abs(rows[0].gigabytes - expected) < 1e-15);
+      assert.ok(rows[0].lowest_probability > 0);
+      assert.equal(
+        rows[0].lowest_probability,
+        rows[0].highest_probability,
+      );
+    });
+
     it('detects the exits from the service registry, with no list', async () => {
       // The fixture registers accounts 4 and 5 as gvpn:exit (5 updates its
       // metadata afterwards), a client that deregisters again, and account 7
