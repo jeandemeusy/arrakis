@@ -729,6 +729,13 @@ main {
   margin-bottom: 18px;
 }
 
+/* Dashboard tiles already provide their header inset through menu-mode. Giving
+   tables a second inset was the reason their titles sat lower than every other
+   chart in the same row. */
+.chart-card.menu-mode.table-card .chart-title {
+  padding: 0;
+}
+
 .pager {
   display: flex;
   align-items: center;

@@ -876,7 +876,14 @@ function Grid({
   const weekdays = weekdayRows;
   const rowLabel = (y: string) =>
     weekdays ? WEEKDAYS[Number(y) - 1] : formatCategory(y, columns[rowAt].type);
-  const left = cohort ? 74 : 40;
+  // Cohort labels are often dates (or other long bucket names). The previous
+  // fixed gutter only left room for a short label, so SVG clipped the beginning
+  // of longer cohorts. Reserve space from the actual labels, with a cap so one
+  // unusual value cannot squeeze the grid out of view.
+  const longestRowLabel = Math.max(...ys.map((y) => rowLabel(y).length));
+  const left = cohort
+    ? Math.min(180, Math.max(74, longestRowLabel * 7 + 16))
+    : 40;
   const top = 18;
   const cell = 22;
   const gap = 2;
