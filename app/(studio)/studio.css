@@ -3234,9 +3234,9 @@ a.settings-card:focus-visible {
    * continues alongside them.
    */
   grid-auto-flow: row dense;
-  grid-auto-rows: 40px;
+  grid-auto-rows: 4px;
   column-gap: var(--grid-gap);
-  row-gap: 0;
+  row-gap: var(--grid-gap);
   align-items: start;
 }
 
@@ -3245,19 +3245,19 @@ a.settings-card:focus-visible {
   display: flex;
   flex-direction: column;
   grid-row: span var(--cell-rows, 7);
-  height: var(--cell-outer-height);
+  align-self: start;
   min-width: 0;
 }
 
-/* Each tile fills its own reserved grid space, independently of its neighbours. */
+/* The measured card keeps its natural height; its parent reserves matching rows. */
 .dashboard-cell > .chart-card {
-  flex: 1 1 auto;
-  min-height: 0;
+  flex: 0 0 auto;
 }
 
 .dashboard-heading {
   position: relative;
-  grid-row: span 2;
+  grid-row: span var(--cell-rows, 1);
+  align-self: start;
   padding: 18px 0 4px;
   scroll-margin-top: 72px;
 }

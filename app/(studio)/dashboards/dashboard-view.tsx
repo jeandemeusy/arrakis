@@ -6,6 +6,7 @@ import {
   startTransition,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -55,19 +56,8 @@ import { HelpTip } from '../help-tip';
 import { LockedButton } from '../locked-link';
 import { ShareButton } from '../share';
 
-const GRID_ROW_HEIGHT = 40;
+const GRID_ROW_HEIGHT = 4;
 const GRID_GAP = 14;
-
-/**
- * A tile reserves enough compact grid rows for its plot plus its surrounding
- * chrome. Dense placement can then fill a shorter tile's space without making
- * its taller neighbours dictate the whole row's height.
- */
-function rowsFor(widget: DraftWidget): number {
-  if (widget.kind === 'text') return 2;
-  const chrome = widget.visualization?.type === 'number' ? 80 : 120;
-  return Math.ceil((widget.height + chrome + GRID_GAP) / GRID_ROW_HEIGHT);
-}
 
 /**
  * A dashboard: its variables across the top, its widgets on the grid below.
@@ -137,6 +127,39 @@ export function DashboardView({
   const dropRef = useRef<{ id: string; side: 'before' | 'after' } | null>(null);
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [added, setAdded] = useState<string | null>(null);
+  // Dense grid rows need to reflect the tile's actual rendered chrome: legends,
+  // notes and wrapped section text vary, so a height estimate can overlap them.
+  const tileNodes = useRef(new Map<string, HTMLElement>());
+  const [tileRows, setTileRows] = useState<Record<string, number>>({});
+
+  useLayoutEffect(() => {
+    const measure = () => {
+      const next: Record<string, number> = {};
+      for (const [id, node] of tileNodes.current) {
+        const content =
+          node.querySelector<HTMLElement>(':scope > .chart-card') ?? node;
+        const height = content.getBoundingClientRect().height;
+        if (height > 0)
+          next[id] = Math.max(
+            1,
+            Math.ceil((height + GRID_GAP) / (GRID_ROW_HEIGHT + GRID_GAP)),
+          );
+      }
+      setTileRows((current) => {
+        const ids = Object.keys(next);
+        if (
+          ids.length === Object.keys(current).length &&
+          ids.every((id) => current[id] === next[id])
+        )
+          return current;
+        return next;
+      });
+    };
+    const observer = new ResizeObserver(measure);
+    for (const node of tileNodes.current.values()) observer.observe(node);
+    measure();
+    return () => observer.disconnect();
+  }, [dashboard, draft, editing]);
 
   useEffect(() => {
     let live = true;
@@ -809,6 +832,15 @@ export function DashboardView({
                   id={anchorOf.get(widget.id)}
                   data-widget={widget.id}
                   className={`dashboard-heading span-12${editClasses}`}
+                  ref={(node) => {
+                    if (node) tileNodes.current.set(widget.id, node);
+                    else tileNodes.current.delete(widget.id);
+                  }}
+                  style={
+                    {
+                      '--cell-rows': tileRows[widget.id],
+                    } as React.CSSProperties
+                  }
                   onDragOver={editing ? dragOver(widget.id) : undefined}
                 >
                   {toolbar}
@@ -852,17 +884,19 @@ export function DashboardView({
               );
             }
             const link = widget.options.link;
-            const rows = rowsFor(widget);
             return (
               <div
                 key={widget.id}
                 data-widget={widget.id}
                 className={`dashboard-cell span-${widget.width}${editClasses}`}
+                ref={(node) => {
+                  if (node) tileNodes.current.set(widget.id, node);
+                  else tileNodes.current.delete(widget.id);
+                }}
                 style={
                   {
                     '--cell-height': `${widget.height}px`,
-                    '--cell-rows': rows,
-                    '--cell-outer-height': `${rows * GRID_ROW_HEIGHT - GRID_GAP}px`,
+                    '--cell-rows': tileRows[widget.id],
                   } as React.CSSProperties
                 }
                 onDragOver={editing ? dragOver(widget.id) : undefined}
