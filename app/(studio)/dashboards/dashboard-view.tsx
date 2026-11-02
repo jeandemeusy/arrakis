@@ -52,6 +52,7 @@ import { TileToolbar } from './tile-toolbar';
 import { ChartPicker } from './chart-picker';
 import { VariablesEditor } from './variables-editor';
 import { HelpTip } from '../help-tip';
+import { LockedButton } from '../locked-link';
 import { ShareButton } from '../share';
 
 /**
@@ -715,15 +716,14 @@ export function DashboardView({
                 );
               }}
             />
-            {user && (
-              <button
-                type="button"
-                className="studio-button"
-                onClick={startEditing}
-              >
-                <Pencil size={13} aria-hidden="true" /> Edit
-              </button>
-            )}
+            <LockedButton
+              className="studio-button"
+              title="Edit dashboard"
+              locked={user === null}
+              onClick={startEditing}
+            >
+              <Pencil size={13} aria-hidden="true" /> Edit
+            </LockedButton>
           </div>
         )}
       </header>

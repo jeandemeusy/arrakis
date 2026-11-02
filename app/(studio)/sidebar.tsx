@@ -11,11 +11,8 @@ import {
   LogIn,
   LogOut,
   Menu,
-  PackageOpen,
-  Activity,
   PanelLeftClose,
   PanelLeftOpen,
-  ListChecks,
   Settings,
   Workflow,
   X,
@@ -28,6 +25,8 @@ import { api } from './api';
 import { SearchButton } from './search';
 import { setFolded, useFolded, useNav } from './nav';
 import { useSession } from './session';
+import { LockedLink } from './locked-link';
+import { SETTINGS_PAGES } from './settings/settings-pages';
 
 /**
  * The studio's navigation: home, every dashboard (with the sections of the
@@ -44,6 +43,7 @@ function NavLink({
   active,
   className,
   onNavigate,
+  locked = false,
 }: {
   href: string;
   icon?: LucideIcon;
@@ -51,18 +51,20 @@ function NavLink({
   active: boolean;
   className?: string;
   onNavigate: () => void;
+  locked?: boolean;
 }) {
   return (
-    <Link
+    <LockedLink
       href={href}
       className={`nav-link ${className ?? ''}`}
-      aria-current={active ? 'page' : undefined}
       title={label}
       onClick={onNavigate}
+      locked={locked}
+      active={active}
     >
       {Icon && <Icon size={16} aria-hidden="true" />}
       <span>{label}</span>
-    </Link>
+    </LockedLink>
   );
 }
 
@@ -265,37 +267,18 @@ export function Sidebar() {
                 onNavigate={close}
               />
               <ul className="nav-children">
-                <li>
-                  <NavLink
-                    href="/settings/lists"
-                    icon={ListChecks}
-                    label="Lists"
-                    active={within('/settings/lists')}
-                    onNavigate={close}
-                  />
-                </li>
-                {user && (
-                  <li>
+                {SETTINGS_PAGES.map((page) => (
+                  <li key={page.href}>
                     <NavLink
-                      href="/settings/bundles"
-                      icon={PackageOpen}
-                      label="Bundles"
-                      active={within('/settings/bundles')}
+                      href={page.href}
+                      icon={page.icon}
+                      label={page.title}
+                      active={within(page.href)}
                       onNavigate={close}
+                      locked={page.editorOnly && user === null}
                     />
                   </li>
-                )}
-                {user && (
-                  <li>
-                    <NavLink
-                      href="/settings/runs"
-                      icon={Activity}
-                      label="Running now"
-                      active={within('/settings/runs')}
-                      onNavigate={close}
-                    />
-                  </li>
-                )}
+                ))}
               </ul>
             </li>
             <li>

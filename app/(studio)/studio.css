@@ -203,6 +203,37 @@
   font-weight: 600;
 }
 
+/* Locked destinations stay discoverable but never behave as links. */
+.locked-control {
+  position: relative;
+  opacity: 0.58;
+  cursor: not-allowed;
+}
+
+.locked-control:hover {
+  cursor: not-allowed;
+}
+
+.locked-control:focus-visible {
+  outline: 2px solid var(--ink-soft);
+  outline-offset: 2px;
+}
+
+.locked-indicator {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  color: var(--muted);
+}
+
+.nav-link.locked-control {
+  padding-right: 32px;
+}
+
+.studio-button.locked-control {
+  padding-right: 32px;
+}
+
 .nav-group {
   margin-top: 2px;
 }
@@ -4193,6 +4224,10 @@ a.settings-card:focus-visible {
   color: var(--muted);
   font-size: 13px;
   line-height: 1.5;
+}
+
+.settings-card.locked-control {
+  cursor: not-allowed;
 }
 
 [data-style='neubrutal'] .badge {

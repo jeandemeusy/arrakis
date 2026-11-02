@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Plus } from 'lucide-react';
 
 import { api, ApiError, type QuerySummary } from '../api';
+import { LockedLink } from '../locked-link';
 import { useSession } from '../session';
 
 function age(iso: string): string {
@@ -66,11 +67,14 @@ export function QueryList() {
               : 'Public queries behind the dashboard. Unlock editing to write your own.'}
           </p>
         </div>
-        {user && (
-          <Link className="studio-button primary" href="/queries/new">
-            <Plus size={14} aria-hidden="true" /> New query
-          </Link>
-        )}
+        <LockedLink
+          className="studio-button primary"
+          href="/queries/new"
+          title="New query"
+          locked={user === null}
+        >
+          <Plus size={14} aria-hidden="true" /> New query
+        </LockedLink>
       </header>
 
       <div className="list-controls">

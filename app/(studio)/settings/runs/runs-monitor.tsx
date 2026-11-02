@@ -33,25 +33,53 @@ export function RunsMonitor() {
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [cancelling, setCancelling] = useState<string | null>(null);
-  const [tick, setTick] = useState(0);
+  const [revision, setRevision] = useState(0);
 
   useEffect(() => {
     if (!user) return;
     let live = true;
-    api<{ runs: ActiveRun[] }>('/api/v1/runs')
-      .then(({ runs: list }) => {
+    let inFlight = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const load = async () => {
+      if (!live || document.visibilityState !== 'visible' || inFlight) return;
+      inFlight = true;
+      try {
+        const { runs: list } = await api<{ runs: ActiveRun[] }>('/api/v1/runs');
         if (!live) return;
         setRuns(list);
         setError(null);
         setNow(Date.now());
-      })
-      .catch((cause: ApiError) => live && setError(cause.message));
-    const timer = setTimeout(() => setTick((value) => value + 1), 3_000);
+      } catch (cause) {
+        if (!live) return;
+        setError((cause as ApiError).message);
+      } finally {
+        inFlight = false;
+        if (live && document.visibilityState === 'visible')
+          timer = setTimeout(() => void load(), 3_000);
+      }
+    };
+    const visibility = () => {
+      if (document.visibilityState === 'visible') {
+        setNow(Date.now());
+        void load();
+      }
+    };
+    document.addEventListener('visibilitychange', visibility);
+    void load();
     return () => {
       live = false;
-      clearTimeout(timer);
+      document.removeEventListener('visibilitychange', visibility);
+      if (timer) clearTimeout(timer);
     };
-  }, [user, tick]);
+  }, [user, revision]);
+
+  useEffect(() => {
+    if (!user) return;
+    const timer = setInterval(() => {
+      if (document.visibilityState === 'visible') setNow(Date.now());
+    }, 1_000);
+    return () => clearInterval(timer);
+  }, [user]);
 
   const cancel = async (id: string) => {
     setCancelling(id);
@@ -61,7 +89,7 @@ export function RunsMonitor() {
       setError((cause as ApiError).message);
     } finally {
       setCancelling(null);
-      setTick((value) => value + 1);
+      setRevision((value) => value + 1);
     }
   };
 
