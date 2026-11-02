@@ -4,7 +4,7 @@
   "name": "gnosis-vpn",
   "title": "Gnosis VPN",
   "description": "Who uses Gnosis VPN, how much traffic it carries and where, read from the HOPR network’s on-chain ticket redemptions.",
-  "exportedAt": "2026-11-02T21:00:51.432Z",
+  "exportedAt": "2026-11-02T21:09:55.197Z",
   "lists": [
     {
       "name": "exits",
@@ -2228,9 +2228,7 @@
           "chart": "gnosis-vpn/exits-registered",
           "width": 2,
           "height": 240,
-          "options": {
-            "note": "Detected automatically"
-          }
+          "options": {}
         },
         {
           "kind": "visualization",
@@ -2287,7 +2285,7 @@
           "kind": "visualization",
           "chart": "gnosis-vpn/feed",
           "width": 12,
-          "height": 420,
+          "height": 200,
           "options": {
             "link": {
               "var": "client",
@@ -2307,7 +2305,7 @@
           "kind": "visualization",
           "chart": "gnosis-vpn/contracts",
           "width": 12,
-          "height": 300,
+          "height": 200,
           "options": {}
         }
       ]
@@ -2392,7 +2390,7 @@
           "kind": "visualization",
           "chart": "gnosis-vpn-client/daily",
           "width": 12,
-          "height": 160,
+          "height": 200,
           "options": {
             "note": "Upstream volume over the last 2,000,000 blocks.",
             "requires": "client"
