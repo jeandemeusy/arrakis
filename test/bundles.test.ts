@@ -138,8 +138,8 @@ describe(
         JSON.stringify(await first.clone().json()),
       );
       const { report } = await body<{ report: Report }>(first);
-      // One list, sixteen queries, thirty charts, two dashboards.
-      assert.equal(report.created.length, 1 + 19 + 28 + 2);
+      // One list, twenty-two queries, thirty charts, two dashboards.
+      assert.equal(report.created.length, 1 + 22 + 30 + 2);
 
       const again = await body<{ report: Report }>(
         await post(routes.bundles, '/api/v1/bundles', { bundle: example }),
@@ -148,7 +148,7 @@ describe(
       assert.equal(
         again.report.unchanged.filter((label) => label.startsWith('chart'))
           .length,
-        28,
+        30,
       );
 
       const { rows } = await (
@@ -157,7 +157,7 @@ describe(
         `SELECT count(*)::int AS n FROM visualizations
          WHERE bundle = 'gnosis-vpn' AND archived_at IS NULL`,
       );
-      assert.equal(rows[0].n, 28);
+      assert.equal(rows[0].n, 30);
       const listed = await body<{
         bundles: Array<{ name: string; dashboards: Array<{ slug: string }> }>;
       }>(
@@ -203,6 +203,46 @@ describe(
       }
     });
 
+    it('detects the exits from the service registry, with no list', async () => {
+      // The fixture registers accounts 4 and 5 as gvpn:exit (5 updates its
+      // metadata afterwards), a client that deregisters again, and account 7
+      // with metadata that is not JSON. The list "exits" is empty.
+      const app = await lib.app.appDb();
+      const { rows } = await app.query<{ table_name: string }>(
+        `SELECT r.table_name
+           FROM query_results r
+           JOIN query_versions v ON v.id = r.query_version_id
+           JOIN queries q ON q.id = v.query_id
+          WHERE q.slug = 'exit-nodes' AND r.network = 'jura'`,
+      );
+      assert.equal(rows.length, 1);
+      const { rows: exits } = await app.query<{
+        exit: string;
+        name: string | null;
+        found_in: string;
+        vpn_server: string | null;
+        wireguard_server: string | null;
+        redemptions: string;
+      }>(
+        `SELECT exit, name, found_in, vpn_server, wireguard_server, redemptions
+           FROM results.${rows[0].table_name} ORDER BY exit`,
+      );
+      const pad = (id: number) => `0x${id.toString(16).padStart(40, '0')}`;
+      assert.deepEqual(
+        exits.map((row) => [row.exit, row.name, row.found_in]),
+        [
+          [pad(4), 'GVPN-OLD-4', 'registry'],
+          [pad(5), 'GVPN-KR-5', 'registry'],
+          [pad(7), null, 'registry'],
+        ],
+      );
+      assert.equal(exits[1].vpn_server, '172.30.0.5:8000');
+      assert.equal(exits[1].wireguard_server, '172.30.0.5:51820');
+      assert.equal(exits[2].vpn_server, null);
+      // The registered relays-paying exits make downstream traffic with no list.
+      assert.ok(exits.slice(0, 2).every((row) => Number(row.redemptions) > 0));
+    });
+
     it('exports a dashboard with what it links to, fragments first', async () => {
       const response = await routes.exported.GET(
         request('GET', '/api/v1/dashboards/gnosis-vpn/bundle', { cookie }),
@@ -222,7 +262,7 @@ describe(
         exported.dashboards.map((dashboard) => dashboard.slug),
         ['gnosis-vpn', 'gnosis-vpn-client'],
       );
-      assert.equal(exported.charts.length, 28);
+      assert.equal(exported.charts.length, 30);
       // Each query comes after every fragment it names.
       const seen = new Set<string>();
       for (const query of exported.queries) {

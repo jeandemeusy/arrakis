@@ -163,7 +163,10 @@ INSERT INTO raw_topic (name, topic) VALUES
   ('redeemed', '\xed22f34d154d253a7f6fd477439be59080a1554aa0d0642686d64223ab544c8a'),
   ('increased', '\xec21547ca1e22edc3f9b4f4e0da94638b5b94dcb18d52dcc072abe5801a8013c'),
   ('closed', '\x197bba684a6afb7ba24f1d265605414b1d0051a6e295d6ff7b6e78e870d7a7f0'),
-  ('safe', '\x83a5c31bfee49d254d95e3946d8e8434e5975382fa8b849182db9e251aaaaa26');
+  ('safe', '\x83a5c31bfee49d254d95e3946d8e8434e5975382fa8b849182db9e251aaaaa26'),
+  ('registered', '\x113517b01f8948e66b44bc59b45e47477fb89b357e7d1939b0d211dd15b698fe'),
+  ('updated', '\xd290c349227ff04b271178af5d66f5375b072d8acfecd2ffcc80ec7ea77c69f5'),
+  ('deregistered', '\xc156047b6a581b0578bc0cf242ee21ab84be919cf764ffd68ce50ded302323a7');
 
 CREATE FUNCTION pg_temp.raw_topic(name text) RETURNS bytea LANGUAGE sql STABLE AS $$
   SELECT topic FROM raw_topic WHERE raw_topic.name = $1
@@ -294,3 +297,67 @@ SELECT (SELECT min(published_block) FROM account) + id, 0, 0,
        pg_temp.raw_topic('safe'),
        pg_temp.raw_word(pg_temp.raw_contract('module:' || id)) || pg_temp.raw_word(address)
 FROM hopr_safe_contract;
+
+-- Service registry: Registered / Updated / Deregistered(bytes32 indexed serviceType,
+-- address indexed node, address indexed safe[, bytes metadata, uint48 registeredAt,
+-- uint256 burn]). The service type is 'gvpn:exit' right-padded with zeros; the data is
+-- the metadata's offset, two words, then its length and its bytes padded to words.
+CREATE FUNCTION pg_temp.raw_service(kind text, node bytea, metadata bytea) RETURNS bytea[]
+LANGUAGE sql IMMUTABLE AS $$
+  SELECT ARRAY[
+    pg_temp.raw_topic(kind)
+      || decode(rpad(encode('gvpn:exit'::bytea, 'hex'), 64, '0'), 'hex')
+      || pg_temp.raw_word(node) || pg_temp.raw_word(pg_temp.raw_contract('safe-of:' || encode(node, 'hex'))),
+    CASE WHEN kind = 'deregistered' THEN '\x'::bytea
+    ELSE pg_temp.raw_word('60') || pg_temp.raw_word('0') || pg_temp.raw_word('0')
+         || pg_temp.raw_word(to_hex(octet_length(metadata)))
+         || decode(rpad(encode(metadata, 'hex'), ((octet_length(metadata) + 31) / 32) * 64, '0'), 'hex')
+    END
+  ]
+$$;
+
+-- The exits (accounts 4-5) are registered as gvpn:exit, the node being the exit and
+-- the metadata a JSON object naming it and saying where it is reached. Account 5 updates
+-- its metadata after registering; account 6 (a client) registers and deregisters;
+-- account 7 registers with metadata that is not JSON, which costs it its name only.
+CREATE FUNCTION pg_temp.raw_exit_metadata(id integer, name text) RETURNS bytea LANGUAGE sql IMMUTABLE AS $$
+  SELECT convert_to(
+    E'{\n    "version":1,\n    "gnosis_vpn_server":"172.30.0.' || id || ':8000",\n    "wireguard_server":"172.30.0.' || id
+    || ':51820",\n    "meta":{"name":"' || name || '"}\n  }', 'UTF8')
+$$;
+INSERT INTO log (block_number, tx_index, log_index, address, topics, data)
+SELECT published_block + 500, 0, 0, pg_temp.raw_contract('service-registry'),
+       (raw_service)[1], (raw_service)[2]
+FROM (
+  SELECT account.published_block,
+         pg_temp.raw_service('registered', account.chain_key,
+           pg_temp.raw_exit_metadata(account.id, 'GVPN-OLD-' || account.id)) AS raw_service
+  FROM account WHERE id BETWEEN 4 AND 5
+) AS registered;
+INSERT INTO log (block_number, tx_index, log_index, address, topics, data)
+SELECT published_block + 600, 0, 0, pg_temp.raw_contract('service-registry'),
+       (raw_service)[1], (raw_service)[2]
+FROM (
+  SELECT account.published_block,
+         pg_temp.raw_service('updated', account.chain_key,
+           pg_temp.raw_exit_metadata(account.id, 'GVPN-KR-' || account.id)) AS raw_service
+  FROM account WHERE id = 5
+) AS updated;
+INSERT INTO log (block_number, tx_index, log_index, address, topics, data)
+SELECT published_block + 500 + step, 0, 0, pg_temp.raw_contract('service-registry'),
+       (raw_service)[1], (raw_service)[2]
+FROM (
+  SELECT account.published_block, steps.step,
+         pg_temp.raw_service(
+           CASE steps.step WHEN 0 THEN 'registered' ELSE 'deregistered' END,
+           account.chain_key, pg_temp.raw_exit_metadata(account.id, 'GVPN-GONE')) AS raw_service
+  FROM account, (VALUES (0), (1)) AS steps (step) WHERE id = 6
+) AS short_lived;
+INSERT INTO log (block_number, tx_index, log_index, address, topics, data)
+SELECT published_block + 500, 0, 0, pg_temp.raw_contract('service-registry'),
+       (raw_service)[1], (raw_service)[2]
+FROM (
+  SELECT account.published_block,
+         pg_temp.raw_service('registered', account.chain_key, convert_to('not json', 'UTF8')) AS raw_service
+  FROM account WHERE id = 7
+) AS junk;

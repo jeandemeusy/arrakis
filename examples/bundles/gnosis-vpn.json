@@ -3,12 +3,12 @@
   "version": 1,
   "name": "gnosis-vpn",
   "title": "Gnosis VPN dashboard",
-  "description": "Who uses Gnosis VPN, how much traffic it carries and where, read from the event log of a Blokli index of the HOPR network (its `log` table). Needs a Blokli database as its data source, and the exit addresses in the list \"exits\" (Settings → Lists).",
+  "description": "Who uses Gnosis VPN, how much traffic it carries and where, read from the event log of a Blokli index of the HOPR network (its `log` table). Needs a Blokli database as its data source. Exits are detected from the service registry (gvpn:exit) on networks that have one; add them to the list \"exits\" (Settings → Lists) on those that do not.",
   "lists": [
     {
       "name": "exits",
       "type": "bytes",
-      "description": "Exit node addresses, per data source. Downstream volume counts only the exits listed here."
+      "description": "Exit node addresses, per data source, for a network without a service registry or an exit missing from it. Exits registered as gvpn:exit are found without it."
     }
   ],
   "queries": [
@@ -67,11 +67,29 @@
       "combine": "concat"
     },
     {
+      "slug": "registry-entries",
+      "title": "Registered exits",
+      "description": "The gvpn:exit entries standing in the service registry.",
+      "kind": "fragment",
+      "sql": "-- The Gnosis VPN exits the service registry lists: one row per registered\n-- gvpn:exit entry that stands. The exit is the registered node: its address\n-- is what pays relays for the return path.\n--\n-- The HoprServiceRegistry emits Registered and Updated as\n-- (bytes32 indexed serviceType, address indexed node, address indexed safe,\n-- bytes metadata, uint48 registeredAt, uint256 burned) and Deregistered as\n-- (bytes32 indexed serviceType, address indexed node, address indexed safe).\n-- The topics hold the type (topic 1), the node (2) and the safe (3); the data\n-- is the offset of the metadata, two words, then its length and its bytes.\n-- An entry stands from its latest event on: Updated replaces the metadata,\n-- Deregistered ends it. The service type is its name right-padded with zeros,\n-- here 'gvpn:exit'.\n--\n-- The metadata of a gvpn:exit entry is a JSON object that says where the exit\n-- is reached, for example\n--\n--   {\"version\": 1, \"gnosis_vpn_server\": \"host:8000\",\n--    \"wireguard_server\": \"host:51820\", \"meta\": {\"name\": \"GVPN-KR-1\"}}\n--\n-- The fields are picked out by pattern, so a malformed object, or one without\n-- a field, costs that field and not the entry.\nWITH latest AS (\n  SELECT DISTINCT ON (node) node, safe, deregistered, metadata\n  FROM (\n    SELECT\n      SUBSTRING(topics FROM 77 FOR 20) AS node,\n      SUBSTRING(topics FROM 109 FOR 20) AS safe,\n      SUBSTRING(topics FROM 1 FOR 32) = '\\xc156047b6a581b0578bc0cf242ee21ab84be919cf764ffd68ce50ded302323a7'::bytea AS deregistered,\n      CASE\n        WHEN OCTET_LENGTH(data) >= 128 THEN SUBSTRING(\n          data FROM 129\n          FOR LEAST(('x' || encode(SUBSTRING(data FROM 125 FOR 4), 'hex'))::bit(32)::bigint, 2048)::int\n        )\n      END AS metadata,\n      block_number,\n      tx_index,\n      log_index\n    FROM {{> event-logs(ARRAY['\\x113517b01f8948e66b44bc59b45e47477fb89b357e7d1939b0d211dd15b698fe'::bytea, '\\xd290c349227ff04b271178af5d66f5375b072d8acfecd2ffcc80ec7ea77c69f5'::bytea, '\\xc156047b6a581b0578bc0cf242ee21ab84be919cf764ffd68ce50ded302323a7'::bytea])}} AS e\n    WHERE OCTET_LENGTH(topics) >= 128\n      AND SUBSTRING(topics FROM 33 FOR 32) = decode(rpad(encode('gvpn:exit'::bytea, 'hex'), 64, '0'), 'hex')\n  ) AS event\n  ORDER BY node, block_number DESC, tx_index DESC, log_index DESC\n),\ndescribed AS (\n  SELECT node, safe, encode(metadata, 'escape') AS metadata\n  FROM latest\n  WHERE NOT deregistered\n)\nSELECT\n  node AS address,\n  safe,\n  (regexp_match(metadata, '\"name\"\\s*:\\s*\"([^\"]*)\"'))[1] AS name,\n  (regexp_match(metadata, '\"gnosis_vpn_server\"\\s*:\\s*\"([^\"]*)\"'))[1] AS vpn_server,\n  (regexp_match(metadata, '\"wireguard_server\"\\s*:\\s*\"([^\"]*)\"'))[1] AS wireguard_server,\n  metadata\nFROM described",
+      "parameters": [],
+      "combine": "concat"
+    },
+    {
+      "slug": "exit-addresses",
+      "title": "Exit addresses",
+      "description": "The exits: registered ones plus those listed by hand.",
+      "kind": "fragment",
+      "sql": "-- The addresses of the network's Gnosis VPN exits: those the service registry\n-- lists as gvpn:exit (registry-entries, each a registered node) together with those added by hand to\n-- the list \"exits\" (Settings → Lists). The registry makes the list optional:\n-- on a network that has one, exits appear and disappear as they register and\n-- deregister; the list is for a network without a registry, or an exit that\n-- is not in it. With neither, no address is returned and nothing is counted\n-- as downstream.\n--\n-- One row per address; `in_registry` and `in_list` say where it was found.\nSELECT\n  address,\n  BOOL_OR(origin = 'registry') AS in_registry,\n  BOOL_OR(origin = 'list') AS in_list\nFROM (\n  SELECT address, 'registry' AS origin\n  FROM {{> registry-entries}} AS entry\n    UNION ALL\n  SELECT address, 'list' AS origin\n  FROM unnest({{list:exits}}) AS listed (address)\n) AS found\nGROUP BY address",
+      "parameters": [],
+      "combine": "concat"
+    },
+    {
       "slug": "vpn-nodes",
       "title": "VPN nodes",
       "description": "Fragment: every announced node (relays and exits), by address, from the announcement events.",
       "kind": "fragment",
-      "sql": "-- The network's infrastructure, relays and exits alike: every account whose\n-- latest announcement stands. Nothing on chain tells relays from exits; the\n-- exits are the ones in the list \"exits\" (Settings → Lists).\n--\n-- The Announcements contract's AddressAnnouncement(address node,\n-- string baseMultiaddr) announces and RevokeAnnouncement(address node)\n-- withdraws every announcement before it. Neither indexes its arguments, so\n-- the node is data word 0. An empty address is skipped, as Blokli skips it:\n-- its encoding is then three words, no more. Only accounts count.\nWITH account AS MATERIALIZED {{> key-bindings}}\nSELECT announced.node AS address\nFROM (\n  SELECT DISTINCT ON (node) node, revoked\n  FROM (\n    SELECT\n      SUBSTRING(data FROM 13 FOR 20) AS node,\n      SUBSTRING(topics FROM 1 FOR 32) = '\\xa4de30a528becadf82649d1395c0e30dd18ae35b5a96ce71e9295bb14bc9f3bc'::bytea AS revoked,\n      block_number,\n      tx_index,\n      log_index\n    FROM {{> event-logs(ARRAY['\\xc4df5ba16814838ab2618829d68f8623bb897302f24dbdba2279dbe45adb3d14'::bytea, '\\xa4de30a528becadf82649d1395c0e30dd18ae35b5a96ce71e9295bb14bc9f3bc'::bytea])}} AS e\n    WHERE OCTET_LENGTH(data) >= 32\n      AND (SUBSTRING(topics FROM 1 FOR 32) = '\\xa4de30a528becadf82649d1395c0e30dd18ae35b5a96ce71e9295bb14bc9f3bc'::bytea OR OCTET_LENGTH(data) > 96)\n  ) AS event\n  ORDER BY node, block_number DESC, tx_index DESC, log_index DESC\n) AS announced\nWHERE NOT announced.revoked\n  AND announced.node IN (SELECT chain_key FROM account)",
+      "sql": "-- The network's infrastructure, relays and exits alike: every account whose\n-- latest announcement stands. Announcements do not tell relays from exits; the\n-- exits are told by the service registry (registry-entries) and the list\n-- \"exits\" (Settings → Lists).\n--\n-- The Announcements contract's AddressAnnouncement(address node,\n-- string baseMultiaddr) announces and RevokeAnnouncement(address node)\n-- withdraws every announcement before it. Neither indexes its arguments, so\n-- the node is data word 0. An empty address is skipped, as Blokli skips it:\n-- its encoding is then three words, no more. Only accounts count.\nWITH account AS MATERIALIZED {{> key-bindings}}\nSELECT announced.node AS address\nFROM (\n  SELECT DISTINCT ON (node) node, revoked\n  FROM (\n    SELECT\n      SUBSTRING(data FROM 13 FOR 20) AS node,\n      SUBSTRING(topics FROM 1 FOR 32) = '\\xa4de30a528becadf82649d1395c0e30dd18ae35b5a96ce71e9295bb14bc9f3bc'::bytea AS revoked,\n      block_number,\n      tx_index,\n      log_index\n    FROM {{> event-logs(ARRAY['\\xc4df5ba16814838ab2618829d68f8623bb897302f24dbdba2279dbe45adb3d14'::bytea, '\\xa4de30a528becadf82649d1395c0e30dd18ae35b5a96ce71e9295bb14bc9f3bc'::bytea])}} AS e\n    WHERE OCTET_LENGTH(data) >= 32\n      AND (SUBSTRING(topics FROM 1 FOR 32) = '\\xa4de30a528becadf82649d1395c0e30dd18ae35b5a96ce71e9295bb14bc9f3bc'::bytea OR OCTET_LENGTH(data) > 96)\n  ) AS event\n  ORDER BY node, block_number DESC, tx_index DESC, log_index DESC\n) AS announced\nWHERE NOT announced.revoked\n  AND announced.node IN (SELECT chain_key FROM account)",
       "parameters": [],
       "combine": "concat"
     },
@@ -107,7 +125,7 @@
       "title": "VPN redemptions",
       "description": "Fragment: every ticket redemption that carried VPN traffic, upstream or downstream, with its block and tickets.",
       "kind": "fragment",
-      "sql": "-- Ticket redemptions that carried Gnosis VPN traffic, one row each.\n--\n-- Every channel event carries the channel's ticket index, and only a\n-- redemption advances it: an event whose index is above the previous event's,\n-- in the same epoch, marks a redemption on that channel. The jump is not the\n-- tickets redeemed: a client numbers a ticket for every packet and only\n-- winners are redeemed, so it estimates the packets paid for.\n--\n-- Payment follows the sender of each hop and a packet's destination is never\n-- paid, so one VPN session leaves two paid hops on chain:\n--\n--   upstream     a client — an account that never announced — paying a relay\n--   downstream   one of the network's configured exits paying a relay for\n--                the answer\n--\n-- Everything else on these channels is announced nodes probing each other,\n-- and is left out. Exits are read from the list \"exits\"; none listed means no\n-- downstream at all rather than a guess.\n--\n-- The qualifying channels are picked FIRST, so the window function runs over\n-- their events only: every predicate is a property of the channel, and the\n-- window partitions by channel, so dropping a channel cannot change the LAG of\n-- a row that survives.\nWITH node AS MATERIALIZED {{> vpn-nodes}},\nvpn_event AS (\n  SELECT\n    e.*,\n    CASE\n      WHEN e.source NOT IN (SELECT address FROM node) THEN 'upstream'\n      ELSE 'downstream'\n    END AS direction\n  FROM {{> channel-events}} AS e\n  WHERE e.destination IN (SELECT address FROM node)\n    AND (\n      e.source NOT IN (SELECT address FROM node)\n      OR e.source = ANY ({{list:exits}})\n    )\n),\nordered AS (\n  SELECT\n    direction,\n    source AS payer,\n    destination AS relay,\n    channel_id,\n    block_number,\n    tx_index,\n    log_index,\n    epoch,\n    ticket_index,\n    LAG(epoch) OVER w AS previous_epoch,\n    LAG(ticket_index) OVER w AS previous_ticket_index\n  FROM vpn_event\n  WINDOW w AS (\n    PARTITION BY channel_id\n    ORDER BY block_number, tx_index, log_index\n  )\n)\nSELECT\n  direction,\n  payer,\n  relay,\n  encode(channel_id, 'hex') AS channel,\n  block_number AS block,\n  tx_index,\n  log_index,\n  ticket_index - previous_ticket_index AS tickets\nFROM ordered\nWHERE previous_ticket_index IS NOT NULL\n  AND epoch = previous_epoch\n  AND ticket_index > previous_ticket_index",
+      "sql": "-- Ticket redemptions that carried Gnosis VPN traffic, one row each.\n--\n-- Every channel event carries the channel's ticket index, and only a\n-- redemption advances it: an event whose index is above the previous event's,\n-- in the same epoch, marks a redemption on that channel. The jump is not the\n-- tickets redeemed: a client numbers a ticket for every packet and only\n-- winners are redeemed, so it estimates the packets paid for.\n--\n-- Payment follows the sender of each hop and a packet's destination is never\n-- paid, so one VPN session leaves two paid hops on chain:\n--\n--   upstream     a client — an account that never announced — paying a relay\n--   downstream   one of the network's configured exits paying a relay for\n--                the answer\n--\n-- Everything else on these channels is announced nodes probing each other,\n-- and is left out. The exits are those the service registry lists as gvpn:exit\n-- and those in the list \"exits\" (exit-addresses); neither means no downstream\n-- at all rather than a guess.\n--\n-- The qualifying channels are picked FIRST, so the window function runs over\n-- their events only: every predicate is a property of the channel, and the\n-- window partitions by channel, so dropping a channel cannot change the LAG of\n-- a row that survives.\nWITH node AS MATERIALIZED {{> vpn-nodes}},\nexit_node AS MATERIALIZED {{> exit-addresses}},\nvpn_event AS (\n  SELECT\n    e.*,\n    CASE\n      WHEN e.source NOT IN (SELECT address FROM node) THEN 'upstream'\n      ELSE 'downstream'\n    END AS direction\n  FROM {{> channel-events}} AS e\n  WHERE e.destination IN (SELECT address FROM node)\n    AND (\n      e.source NOT IN (SELECT address FROM node)\n      OR e.source IN (SELECT address FROM exit_node)\n    )\n),\nordered AS (\n  SELECT\n    direction,\n    source AS payer,\n    destination AS relay,\n    channel_id,\n    block_number,\n    tx_index,\n    log_index,\n    epoch,\n    ticket_index,\n    LAG(epoch) OVER w AS previous_epoch,\n    LAG(ticket_index) OVER w AS previous_ticket_index\n  FROM vpn_event\n  WINDOW w AS (\n    PARTITION BY channel_id\n    ORDER BY block_number, tx_index, log_index\n  )\n)\nSELECT\n  direction,\n  payer,\n  relay,\n  encode(channel_id, 'hex') AS channel,\n  block_number AS block,\n  tx_index,\n  log_index,\n  ticket_index - previous_ticket_index AS tickets\nFROM ordered\nWHERE previous_ticket_index IS NOT NULL\n  AND epoch = previous_epoch\n  AND ticket_index > previous_ticket_index",
       "parameters": [],
       "combine": "concat"
     },
@@ -151,6 +169,16 @@
       "combine": "concat"
     },
     {
+      "slug": "exit-nodes",
+      "title": "Exits",
+      "description": "The network’s Gnosis VPN exits, where each is reached and the downstream volume it paid.",
+      "kind": "query",
+      "sql": "-- Every exit the dashboard knows, with the downstream volume it paid for.\n--\n-- The exits are those of exit-addresses, found in the service registry, the\n-- list \"exits\" or both. For a registered exit, the registry also says its name\n-- and where it is reached (the VPN server and the WireGuard server of its\n-- metadata) and which safe registered it. Volume is what the exit paid relays\n-- for the return path, all time, priced at the winning probability in force at\n-- each block as in vpn-traffic; an exit that never paid a relay has none.\nWITH registered AS MATERIALIZED {{> registry-entries}},\ntraffic AS (\n  SELECT\n    r.payer,\n    COUNT(*) AS redemptions,\n    MAX(r.block) AS last_active_block,\n    SUM(CASE WHEN w.probability > 0 THEN 650::float8 / 1073741824 / w.probability ELSE 0 END) AS gigabytes\n  FROM {{> vpn-redemptions}} AS r\n  LEFT JOIN {{> win-probability}} AS w\n    ON r.block >= w.from_block AND r.block < w.to_block\n  WHERE r.direction = 'downstream'\n  GROUP BY r.payer\n)\nSELECT\n  {{> hex(x.address)}} AS exit,\n  reg.name,\n  CASE\n    WHEN x.in_registry AND x.in_list THEN 'registry and list'\n    WHEN x.in_registry THEN 'registry'\n    ELSE 'list'\n  END AS found_in,\n  reg.vpn_server,\n  reg.wireguard_server,\n  {{> hex(reg.safe)}} AS safe,\n  COALESCE(t.gigabytes, 0) AS gigabytes,\n  COALESCE(t.redemptions, 0) AS redemptions,\n  t.last_active_block\nFROM {{> exit-addresses}} AS x\nLEFT JOIN registered AS reg ON reg.address = x.address\nLEFT JOIN traffic AS t ON t.payer = x.address\nORDER BY gigabytes DESC, exit",
+      "parameters": [],
+      "refreshSeconds": 300,
+      "combine": "concat"
+    },
+    {
       "slug": "recent-redemptions",
       "title": "Recent redemptions",
       "description": "The 500 most recent client redemptions, with their channel.",
@@ -185,7 +213,7 @@
       "title": "Indexed contracts",
       "description": "The contracts this index subscribes to, by role.",
       "kind": "query",
-      "sql": "-- The contracts this index subscribes to, named by the events they emit.\n--\n-- Blokli records one row per (contract, event topic) it watches, so the\n-- distinct addresses are the contracts indexed and the topics — 32-byte event\n-- signature hashes — say what each one is.\nWITH role (topic, name) AS (\n  VALUES\n    ('ed22f34d154d253a7f6fd477439be59080a1554aa0d0642686d64223ab544c8a', 'Channels'),\n    ('004c0177ad15bb302b4419e9ac96065d6f436e0f61972f97bbe272834c40f934', 'Channels'),\n    ('197bba684a6afb7ba24f1d265605414b1d0051a6e295d6ff7b6e78e870d7a7f0', 'Channels'),\n    ('c4df5ba16814838ab2618829d68f8623bb897302f24dbdba2279dbe45adb3d14', 'Announcements'),\n    ('11d94653de52fc143887956fe4b5e4120a850b1300ece0533dee6bd8ff91f732', 'Announcements'),\n    ('a4de30a528becadf82649d1395c0e30dd18ae35b5a96ce71e9295bb14bc9f3bc', 'Announcements'),\n    ('776da40cbf2c223552661bd48502ceb72409b3362bb0c66d8989bd7e20e4497d', 'Node safe registry'),\n    ('1eb3e9b31552ebe06015df6569e31abbec0e73a88c3ccdd9fead65c4378b4e50', 'Node safe registry'),\n    ('2c906e9f9056ce9dab322be95fe710c2ecfa369bf6bf530bc81ced25caee90e1', 'Service registry'),\n    ('38a84f1ca3cac973fcc30eeaccfd5a063993a9bd564530c4790ef60291c6b161', 'Service registry'),\n    ('d4c5e06b1ae097ba02372652a7adaa6e4a8e00be527497a3ad0ebc3f761ef3fb', 'Ticket price oracle'),\n    ('02728c4a80373f4765559dc3a046edea88186424827238bb46245668315d3800', 'Winning probability oracle'),\n    ('06b541ddaa720db2b10a4d0cdac39b8d360425fc073085fac19bc82614677987', 'wxHOPR token'),\n    ('f4caeb2d6ca8932a215a353d0703c326ec2d81fc68170f320eb2ab49e9df61f9', 'wxHOPR token'),\n    ('83a5c31bfee49d254d95e3946d8e8434e5975382fa8b849182db9e251aaaaa26', 'Node stake factory'),\n    ('141df868a6331af528e38c83b7aa03edc19be66e37ae67f9285bf4f8e3c6a1a8', 'Safe'),\n    ('442e715f626346e8c54381002da614f62bee8d27386535b2521ec8540898556e', 'Safe')\n),\ncontract AS (\n  SELECT address, ARRAY_AGG(DISTINCT encode(topic, 'hex') ORDER BY encode(topic, 'hex')) AS topics\n  FROM log_topic_info\n  GROUP BY address\n)\nSELECT\n  COALESCE(\n    (\n      SELECT role.name\n      FROM unnest(contract.topics) WITH ORDINALITY AS t (topic, position)\n      JOIN role ON role.topic = t.topic\n      ORDER BY t.position\n      LIMIT 1\n    ),\n    'Indexed contract'\n  ) AS role,\n  {{> hex(contract.address)}} AS contract\nFROM contract\nORDER BY role, contract",
+      "sql": "-- The contracts this index subscribes to, named by the events they emit.\n--\n-- Blokli records one row per (contract, event topic) it watches, so the\n-- distinct addresses are the contracts indexed and the topics — 32-byte event\n-- signature hashes — say what each one is.\nWITH role (topic, name) AS (\n  VALUES\n    ('ed22f34d154d253a7f6fd477439be59080a1554aa0d0642686d64223ab544c8a', 'Channels'),\n    ('004c0177ad15bb302b4419e9ac96065d6f436e0f61972f97bbe272834c40f934', 'Channels'),\n    ('197bba684a6afb7ba24f1d265605414b1d0051a6e295d6ff7b6e78e870d7a7f0', 'Channels'),\n    ('c4df5ba16814838ab2618829d68f8623bb897302f24dbdba2279dbe45adb3d14', 'Announcements'),\n    ('11d94653de52fc143887956fe4b5e4120a850b1300ece0533dee6bd8ff91f732', 'Announcements'),\n    ('a4de30a528becadf82649d1395c0e30dd18ae35b5a96ce71e9295bb14bc9f3bc', 'Announcements'),\n    ('776da40cbf2c223552661bd48502ceb72409b3362bb0c66d8989bd7e20e4497d', 'Node safe registry'),\n    ('1eb3e9b31552ebe06015df6569e31abbec0e73a88c3ccdd9fead65c4378b4e50', 'Node safe registry'),\n    ('2c906e9f9056ce9dab322be95fe710c2ecfa369bf6bf530bc81ced25caee90e1', 'Service registry'),\n    ('113517b01f8948e66b44bc59b45e47477fb89b357e7d1939b0d211dd15b698fe', 'Service registry'),\n    ('d290c349227ff04b271178af5d66f5375b072d8acfecd2ffcc80ec7ea77c69f5', 'Service registry'),\n    ('c156047b6a581b0578bc0cf242ee21ab84be919cf764ffd68ce50ded302323a7', 'Service registry'),\n    ('38a84f1ca3cac973fcc30eeaccfd5a063993a9bd564530c4790ef60291c6b161', 'Service registry'),\n    ('d4c5e06b1ae097ba02372652a7adaa6e4a8e00be527497a3ad0ebc3f761ef3fb', 'Ticket price oracle'),\n    ('02728c4a80373f4765559dc3a046edea88186424827238bb46245668315d3800', 'Winning probability oracle'),\n    ('06b541ddaa720db2b10a4d0cdac39b8d360425fc073085fac19bc82614677987', 'wxHOPR token'),\n    ('f4caeb2d6ca8932a215a353d0703c326ec2d81fc68170f320eb2ab49e9df61f9', 'wxHOPR token'),\n    ('83a5c31bfee49d254d95e3946d8e8434e5975382fa8b849182db9e251aaaaa26', 'Node stake factory'),\n    ('141df868a6331af528e38c83b7aa03edc19be66e37ae67f9285bf4f8e3c6a1a8', 'Safe'),\n    ('442e715f626346e8c54381002da614f62bee8d27386535b2521ec8540898556e', 'Safe')\n),\ncontract AS (\n  SELECT address, ARRAY_AGG(DISTINCT encode(topic, 'hex') ORDER BY encode(topic, 'hex')) AS topics\n  FROM log_topic_info\n  GROUP BY address\n)\nSELECT\n  COALESCE(\n    (\n      SELECT role.name\n      FROM unnest(contract.topics) WITH ORDINALITY AS t (topic, position)\n      JOIN role ON role.topic = t.topic\n      ORDER BY t.position\n      LIMIT 1\n    ),\n    'Indexed contract'\n  ) AS role,\n  {{> hex(contract.address)}} AS contract\nFROM contract\nORDER BY role, contract",
       "parameters": [],
       "refreshSeconds": 3600,
       "combine": "concat"
@@ -445,7 +473,7 @@
         "steps": [],
         "encoding": {},
         "options": {
-          "caption": "configured exits seen paying a relay"
+          "caption": "exits seen paying a relay"
         },
         "builder": {
           "filters": [
@@ -1150,6 +1178,63 @@
           ]
         }
       }
+    },
+    {
+      "key": "gnosis-vpn/exits-registered",
+      "query": "exit-nodes",
+      "title": "Exits registered",
+      "description": "",
+      "type": "number",
+      "config": {
+        "steps": [],
+        "encoding": {
+          "y": ["exits"]
+        },
+        "options": {
+          "format": "number",
+          "caption": "gvpn:exit entries in the service registry"
+        },
+        "sql": "SELECT COUNT(*) AS exits FROM {{result}} WHERE found_in LIKE 'registry%'"
+      }
+    },
+    {
+      "key": "gnosis-vpn/exits",
+      "query": "exit-nodes",
+      "title": "Exits",
+      "description": "",
+      "type": "table",
+      "config": {
+        "steps": [],
+        "encoding": {},
+        "options": {
+          "columns": [
+            "name",
+            "exit",
+            "found_in",
+            "vpn_server",
+            "wireguard_server",
+            "gigabytes",
+            "redemptions",
+            "last_active_block"
+          ],
+          "labels": {
+            "found_in": "found in",
+            "vpn_server": "VPN server",
+            "wireguard_server": "WireGuard",
+            "gigabytes": "downstream (GB)",
+            "last_active_block": "last paid in block"
+          },
+          "pageSize": 20
+        },
+        "builder": {
+          "sort": [
+            {
+              "column": "gigabytes",
+              "desc": true
+            }
+          ]
+        }
+      }
     }
   ],
   "dashboards": [
@@ -1274,7 +1359,7 @@
           "width": 6,
           "height": 110,
           "options": {
-            "note": "Exits are listed per data source under Settings → Lists (exits)."
+            "note": "Exits found in the service registry (gvpn:exit) or the list “exits” (Settings → Lists) that paid a relay in the window."
           }
         },
         {
@@ -1369,6 +1454,30 @@
             "note": "Price ÷ probability, for one remaining hop",
             "requires": "network"
           }
+        },
+        {
+          "kind": "text",
+          "text": "Exits",
+          "width": 12,
+          "height": 80,
+          "options": {
+            "note": "Exits are detected from the service registry: every node registered there as gvpn:exit, until it deregisters. Its metadata names it and says where it is reached. Add an address to the list “exits” (Settings → Lists) for a network without a registry. Volume is what each exit paid relays for the return path, all time."
+          }
+        },
+        {
+          "kind": "visualization",
+          "chart": "gnosis-vpn/exits-registered",
+          "width": 4,
+          "height": 110,
+          "options": {
+            "note": "Detected automatically"
+          }
+        },
+        {
+          "kind": "visualization",
+          "chart": "gnosis-vpn/exits",
+          "width": 8,
+          "height": 330
         },
         {
           "kind": "text",

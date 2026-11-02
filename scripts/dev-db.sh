@@ -85,7 +85,7 @@ echo "APP_DATABASE_URL=$URL/arrakis"
 if [ -n "$BLOKLI" ]; then
   echo "DATA_SOURCES='[{\"id\":\"demo\",\"label\":\"Demo\",\"databaseUrl\":\"postgresql://blokli_reader@$HOST:$PORT/blokli_demo\"}]'"
   echo
-  echo "Then import examples/bundles/gnosis-vpn.json under Settings → Bundles,"
-  echo "and add the demo network's three exits to the list \"exits\" (Settings → Lists):"
-  psql "$URL/blokli_demo" -tAc "SELECT '  0x' || encode(chain_key, 'hex') FROM account WHERE id BETWEEN 13 AND 15 ORDER BY id"
+  echo "Then import examples/bundles/gnosis-vpn.json under Settings → Bundles."
+  echo "The demo network's three exits are registered in its service registry, so"
+  echo "they are found without being added to the list \"exits\" (Settings → Lists)."
 fi

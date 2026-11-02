@@ -46,8 +46,8 @@ ARRAKIS_EDITOR_PASSWORD_HASH=scrypt:15:8:1:…
 
 Then `npm run dev`, open <http://localhost:3000/>, unlock editing, import
 [`examples/bundles/gnosis-vpn.json`](./examples/bundles/gnosis-vpn.json) under
-**Settings → Bundles** for ready-made dashboards, and add the three exit
-addresses `dev:db` printed to the list `exits` under **Settings → Lists**.
+**Settings → Bundles** for ready-made dashboards. The demo index registers its
+three exits in a service registry, so the bundle finds them on its own.
 `--blokli` rebuilds the demo index each time it is given, dated up to today.
 `npm run dev:db -- stop` stops the database and `-- reset` deletes it.
 
@@ -368,7 +368,11 @@ describes the format.
 
 An example ships in [`examples/bundles`](./examples/bundles):
 [`gnosis-vpn.json`](./examples/bundles/gnosis-vpn.json), the Gnosis VPN
-dashboards for a Blokli index of the HOPR network (it reads the list `exits`).
+dashboards for a Blokli index of the HOPR network. It detects the Gnosis VPN
+exits itself from the network's service registry (entries of type `gvpn:exit`:
+the registered node is the exit, its JSON metadata names it and says where it
+is reached); the list `exits` adds any the
+registry lacks, or stands in on a network without one.
 They read the raw event log (Blokli's `log` table) and decode the events in
 SQL; apart from that, only the last indexed block (`chain_info`) and the
 contract list (`log_topic_info`) come from Blokli's own tables.
