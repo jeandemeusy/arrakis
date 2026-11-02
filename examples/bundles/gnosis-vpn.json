@@ -4,7 +4,7 @@
   "name": "gnosis-vpn",
   "title": "Gnosis VPN",
   "description": "Who uses Gnosis VPN, how much traffic it carries and where, read from the HOPR network’s on-chain ticket redemptions.",
-  "exportedAt": "2026-11-02T15:36:43.170Z",
+  "exportedAt": "2026-11-02T16:12:15.735Z",
   "lists": [
     {
       "name": "exits",
@@ -120,7 +120,7 @@
       "kind": "query",
       "sql": "-- Each block in which each VPN client was active, with its deployment block.\n--\n-- A client (vpn-clients) is active in a block when a relay redeemed one of its\n-- tickets there, or when it was deployed there — so a new client counts at\n-- once rather than only after its first redemption. One row per client and\n-- block:\n--\n--   kind            `deployed` in its deployment block, `redeemed` otherwise\n--   redemptions     0 in a deployment block with no traffic\n--   deployed_block  the client's deployment block, on every row\n--   head_block      the last block indexed\n--\n-- Feeds the active-client counts and the deployment cohorts.\nWITH deployment AS (\n  SELECT client, deployed_block FROM {{> vpn-clients}} AS clients\n),\nredeemed AS (\n  SELECT r.payer AS client, r.block, COUNT(*) AS redemptions\n  FROM {{> vpn-redemptions}} AS r\n  WHERE r.direction = 'upstream'\n  GROUP BY 1, 2\n),\nactive AS (\n  SELECT client, block, redemptions FROM redeemed\n  UNION ALL\n  SELECT client, deployed_block, 0 FROM deployment\n)\nSELECT\n  {{> hex(active.client)}} AS client,\n  active.block,\n  deployment.deployed_block,\n  CASE WHEN active.block = deployment.deployed_block THEN 'deployed' ELSE 'redeemed' END AS kind,\n  SUM(active.redemptions)::integer AS redemptions,\n  {{> indexed-block}} AS head_block\nFROM active\nLEFT JOIN deployment ON deployment.client = active.client\nGROUP BY active.client, active.block, deployment.deployed_block\nORDER BY active.block, client",
       "parameters": [],
-      "refreshSeconds": 300,
+      "refreshSeconds": 900,
       "rowLimit": null,
       "combine": "concat",
       "timeoutSeconds": null
@@ -162,7 +162,7 @@
       "kind": "query",
       "sql": "-- Every Gnosis VPN redemption, by block, converted to data volume.\n--\n-- One row per redemption from vpn-redemptions: upstream (a client paying a\n-- relay) and downstream (a configured exit paying a relay for the answer).\n-- Most of the dashboard is drawn from this one result: volume, redemptions,\n-- the relay breakdowns, the client ranking and each client's own record.\n--\n-- Volume: a redemption pays for one winning ticket, and with winning\n-- probability p a winner stands for 1/p tickets of 650 bytes each, so it\n-- accounts for 650 / (2^30 × p) GB at the p in force at its block. Before the\n-- oracle's first update p is unknown, and the redemption counts with no volume.\n--\n-- Time is the block number. The event log keeps no block times, and a time\n-- estimated from block counts drifts, so none is given. `head_block`, the last\n-- block indexed, is where the dashboard's \"last N blocks\" windows end.\nSELECT\n  r.block,\n  {{> indexed-block}} AS head_block,\n  r.direction,\n  {{> hex(r.payer)}} AS payer,\n  {{> hex(r.relay)}} AS relay,\n  r.tickets,\n  COALESCE(w.probability, 0) AS win_probability,\n  CASE\n    WHEN w.probability > 0 THEN 650::float8 / 1073741824 / w.probability\n    ELSE 0\n  END AS gigabytes\nFROM {{> vpn-redemptions}} AS r\nLEFT JOIN {{> win-probability}} AS w\n  ON r.block >= w.from_block AND r.block < w.to_block\nORDER BY r.block, r.tx_index, r.log_index",
       "parameters": [],
-      "refreshSeconds": 300,
+      "refreshSeconds": 900,
       "rowLimit": null,
       "combine": "concat",
       "timeoutSeconds": null
@@ -174,7 +174,7 @@
       "kind": "query",
       "sql": "-- Every VPN client deployment (vpn-clients), newest first: the block its key\n-- binding was made in.\nSELECT\n  deployed_block AS block,\n  {{> hex(client)}} AS client,\n  {{> indexed-block}} AS head_block\nFROM {{> vpn-clients}} AS clients\nORDER BY deployed_block DESC, account_id DESC",
       "parameters": [],
-      "refreshSeconds": 300,
+      "refreshSeconds": 900,
       "rowLimit": null,
       "combine": "concat",
       "timeoutSeconds": null
@@ -196,7 +196,7 @@
       "kind": "query",
       "sql": "-- The network as it stands at the last indexed block: one row.\n--\n-- All but the block is read from the event log: accounts from their key\n-- bindings, safes from the stake factory's NewHoprNodeStakeModuleForSafe\n-- (address module, address safe) — the safe is data word 1 — and each channel\n-- as its latest event left it. Balances are wei, as exact numerics.\nWITH latest AS (\n  SELECT DISTINCT ON (e.channel_id) e.status, e.balance\n  FROM {{> channel-events}} AS e\n  ORDER BY e.channel_id, e.block_number DESC, e.tx_index DESC, e.log_index DESC\n),\nopen_channel AS (\n  SELECT {{> uint256(balance)}} AS wei FROM latest WHERE status = 1\n),\nhead AS (\n  SELECT {{> indexed-block}} AS indexed_block\n)\nSELECT\n  head.indexed_block,\n  (SELECT COUNT(*) FROM {{> key-bindings}} AS account) AS accounts,\n  (\n    SELECT COUNT(DISTINCT SUBSTRING(data FROM 45 FOR 20))\n    FROM {{> event-logs(ARRAY['\\x83a5c31bfee49d254d95e3946d8e8434e5975382fa8b849182db9e251aaaaa26'::bytea])}} AS e\n    WHERE OCTET_LENGTH(data) >= 64\n  ) AS safes,\n  (SELECT COUNT(*) FROM open_channel) AS open_channels,\n  COALESCE((SELECT ROUND(SUM(wei)) FROM open_channel), 0) AS channel_balance\nFROM head",
       "parameters": [],
-      "refreshSeconds": 300,
+      "refreshSeconds": 900,
       "rowLimit": null,
       "combine": "concat",
       "timeoutSeconds": null
@@ -208,7 +208,7 @@
       "kind": "query",
       "sql": "-- The oracle values as they stand: winning probability, ticket price, and\n-- what a ticket is worth for one remaining hop (price ÷ probability). One row.\n--\n-- The newest update of each in {{> oracle-updates}}, so the figures match the\n-- history the volume is priced with; both are null when the oracle has never\n-- been indexed. Per network only: each network sets its own price and\n-- probability, so a combined figure would be a fiction.\nWITH latest_probability AS (\n  SELECT {{> decode-win-prob(value)}} AS value\n  FROM {{> oracle-updates}} AS oracle\n  WHERE kind = 'win-prob'\n  ORDER BY block_number DESC, tx_index DESC, log_index DESC\n  LIMIT 1\n),\nlatest_price AS (\n  SELECT {{> uint256(value)}} AS wei\n  FROM {{> oracle-updates}} AS oracle\n  WHERE kind = 'ticket-price'\n  ORDER BY block_number DESC, tx_index DESC, log_index DESC\n  LIMIT 1\n)\nSELECT\n  (SELECT value FROM latest_probability) AS win_probability,\n  (SELECT ROUND(wei) FROM latest_price) AS ticket_price,\n  (\n    SELECT ROUND(latest_price.wei / latest_probability.value::numeric)\n    FROM latest_price, latest_probability\n    WHERE latest_probability.value > 0\n  ) AS ticket_value",
       "parameters": [],
-      "refreshSeconds": 600,
+      "refreshSeconds": 21600,
       "rowLimit": null,
       "combine": "hidden",
       "timeoutSeconds": null
@@ -220,7 +220,7 @@
       "kind": "query",
       "sql": "-- Every exit the dashboard knows, with the downstream volume it paid for.\n--\n-- The exits are those of exit-addresses, found in the service registry, the\n-- list \"exits\" or both. For a registered exit, the registry also says its name\n-- and where it is reached (the VPN server and the WireGuard server of its\n-- metadata) and which safe registered it. Volume is what the exit paid relays\n-- for the return path, all time, priced at the winning probability in force at\n-- each block as in vpn-traffic; an exit that never paid a relay has none.\nWITH registered AS MATERIALIZED {{> registry-entries}},\ntraffic AS (\n  SELECT\n    r.payer,\n    COUNT(*) AS redemptions,\n    MAX(r.block) AS last_active_block,\n    SUM(CASE WHEN w.probability > 0 THEN 650::float8 / 1073741824 / w.probability ELSE 0 END) AS gigabytes\n  FROM {{> vpn-redemptions}} AS r\n  LEFT JOIN {{> win-probability}} AS w\n    ON r.block >= w.from_block AND r.block < w.to_block\n  WHERE r.direction = 'downstream'\n  GROUP BY r.payer\n)\nSELECT\n  reg.name,\n  {{> hex(x.address)}} AS exit,\n  CASE\n    WHEN x.in_registry AND x.in_list THEN 'registry and list'\n    WHEN x.in_registry THEN 'registry'\n    ELSE 'list'\n  END AS found_in,\n  reg.vpn_server,\n  reg.wireguard_server,\n  {{> hex(reg.safe)}} AS safe,\n  COALESCE(t.gigabytes, 0) AS gigabytes,\n  COALESCE(t.redemptions, 0) AS redemptions,\n  t.last_active_block\nFROM {{> exit-addresses}} AS x\nLEFT JOIN registered AS reg ON reg.address = x.address\nLEFT JOIN traffic AS t ON t.payer = x.address\nORDER BY gigabytes DESC, exit",
       "parameters": [],
-      "refreshSeconds": 300,
+      "refreshSeconds": 21600,
       "rowLimit": null,
       "combine": "concat",
       "timeoutSeconds": null
@@ -232,7 +232,7 @@
       "kind": "query",
       "sql": "-- The 500 most recent client redemptions, with the channel they were on.\n--\n-- The same population as the upstream rows of vpn-traffic — a client paying\n-- an announced relay — but read newest first and capped, because it is the\n-- only result that needs the channel id, and carrying a 64-character id on\n-- every row of the full history would cost far more than this feed shows.\nSELECT\n  r.block,\n  {{> hex(r.payer)}} AS client,\n  {{> hex(r.relay)}} AS relay,\n  '0x' || r.channel AS channel,\n  r.tickets\nFROM {{> vpn-redemptions}} AS r\nWHERE r.direction = 'upstream'\nORDER BY r.block DESC, r.tx_index DESC, r.log_index DESC\nLIMIT 500",
       "parameters": [],
-      "refreshSeconds": 300,
+      "refreshSeconds": 900,
       "rowLimit": null,
       "combine": "concat",
       "timeoutSeconds": null
@@ -849,30 +849,11 @@
       }
     },
     {
-      "key": "gnosis-vpn/retention",
-      "query": "client-activity",
-      "title": "Cohort retention",
-      "description": "",
-      "type": "cohort",
-      "config": {
-        "sql": "-- Clients grouped by the 500,000-block bin they were deployed in (bins start\n-- at multiples of 500,000), and for each bin since, the share of the group a\n-- relay redeemed tickets for. The last bin is the one holding the head block.\nWITH member AS (\n  SELECT DISTINCT network, client, deployed_block / 500000 AS cohort\n  FROM {{result}}\n),\nsize AS (\n  SELECT cohort, COUNT(*) AS clients FROM member GROUP BY cohort\n),\nactive AS (\n  SELECT DISTINCT network, client, block / 500000 AS bin\n  FROM {{result}}\n  WHERE redemptions > 0\n),\nhead AS (\n  SELECT MAX(head_block) / 500000 AS bin FROM {{result}}\n),\ngrid AS (\n  SELECT size.cohort, size.clients, offset_bin\n  FROM size, head,\n       generate_series(0, (head.bin - size.cohort)::integer) AS offset_bin\n)\nSELECT TO_CHAR(grid.cohort * 500000, 'FM999,999,999,999') || ' · ' || grid.clients AS cohort,\n       grid.offset_bin AS bins_later,\n       COUNT(active.client)::float8 / grid.clients AS share\nFROM grid\nJOIN member ON member.cohort = grid.cohort\nLEFT JOIN active\n  ON active.network = member.network\n AND active.client = member.client\n AND active.bin = grid.cohort + grid.offset_bin\nGROUP BY grid.cohort, grid.clients, grid.offset_bin\nORDER BY grid.cohort, grid.offset_bin",
-        "steps": [],
-        "options": {
-          "format": "percent"
-        },
-        "encoding": {
-          "x": "bins_later",
-          "row": "cohort",
-          "value": "share"
-        }
-      }
-    },
-    {
       "key": "gnosis-vpn/relayer-share",
       "query": "vpn-traffic",
       "title": "Relayer concentration",
       "description": "",
-      "type": "share",
+      "type": "pie",
       "config": {
         "steps": [
           {
@@ -906,16 +887,6 @@
             ]
           },
           {
-            "n": 20,
-            "by": "gigabytes",
-            "op": "top",
-            "sum": [
-              "gigabytes"
-            ],
-            "column": "relay",
-            "others": "Other relayers"
-          },
-          {
             "by": [
               {
                 "desc": true,
@@ -926,10 +897,12 @@
           }
         ],
         "builder": {
-          "top": {
-            "n": 20,
-            "others": "Other relayers"
-          },
+          "sort": [
+            {
+              "desc": true,
+              "column": "gigabytes"
+            }
+          ],
           "groups": [
             {
               "column": "relay"
@@ -960,6 +933,7 @@
           ]
         },
         "options": {
+          "donut": true,
           "format": "gigabytes",
           "formats": {
             "gigabytes": "gigabytes"
@@ -2220,19 +2194,10 @@
         {
           "kind": "visualization",
           "chart": "gnosis-vpn/daily-users",
-          "width": 6,
-          "height": 280,
+          "width": 12,
+          "height": 200,
           "options": {
             "note": "Client deployments in each bin of blocks."
-          }
-        },
-        {
-          "kind": "visualization",
-          "chart": "gnosis-vpn/retention",
-          "width": 6,
-          "height": 280,
-          "options": {
-            "note": "Read a row left to right: it follows the clients deployed in one 500,000-block bin, and each square is the share of them relaying traffic that many bins later. Bin 0 is an activation rate. Not affected by the window."
           }
         },
         {
