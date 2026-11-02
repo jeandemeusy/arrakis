@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 
-import { DashboardList } from './dashboards/dashboard-list';
+import { Home } from './home';
 
 export const metadata: Metadata = {
   title: { absolute: 'Arrakis' },
@@ -10,5 +10,5 @@ export const metadata: Metadata = {
 
 /** Home: every dashboard, the bundled ones first. */
 export default function HomePage() {
-  return <DashboardList />;
+  return <Home />;
 }

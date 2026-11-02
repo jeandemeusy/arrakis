@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 
 import { Workbench } from '../workbench';
+import { Favorite, Visit } from '../../personal';
 
 type Props = {
   params: Promise<{ slug: string }>;
@@ -8,7 +9,10 @@ type Props = {
 };
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
-  return { title: (await params).slug, robots: { index: false, follow: false } };
+  return {
+    title: (await params).slug,
+    robots: { index: false, follow: false },
+  };
 }
 
 export default async function QueryPage({ params, searchParams }: Props) {
@@ -20,11 +24,17 @@ export default async function QueryPage({ params, searchParams }: Props) {
   // `?tab=charts&chart=<id>` opens one of its charts: where a dashboard tile
   // links to.
   return (
-    <Workbench
-      key={slug}
-      slug={slug}
-      initialTab={one(search.tab)}
-      initialChart={one(search.chart)}
-    />
+    <>
+      <Visit item={{ kind: 'query', slug }} />
+      <div className="personal-page-action">
+        <Favorite item={{ kind: 'query', slug }} />
+      </div>
+      <Workbench
+        key={slug}
+        slug={slug}
+        initialTab={one(search.tab)}
+        initialChart={one(search.chart)}
+      />
+    </>
   );
 }

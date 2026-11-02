@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 
 import { DashboardView } from '../dashboard-view';
+import { Favorite, Visit } from '../../personal';
 
 type Props = {
   params: Promise<{ slug: string }>;
@@ -21,11 +22,17 @@ export default async function DashboardPage({ params, searchParams }: Props) {
     if (typeof value === 'string' && key !== 'edit') initial[key] = value;
   }
   return (
-    <DashboardView
-      key={slug}
-      slug={slug}
-      initialVars={initial}
-      initialEditing={search.edit === '1'}
-    />
+    <>
+      <Visit item={{ kind: 'dashboard', slug }} />
+      <div className="personal-page-action">
+        <Favorite item={{ kind: 'dashboard', slug }} />
+      </div>
+      <DashboardView
+        key={slug}
+        slug={slug}
+        initialVars={initial}
+        initialEditing={search.edit === '1'}
+      />
+    </>
   );
 }

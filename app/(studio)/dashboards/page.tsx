@@ -1,6 +1,6 @@
-import { permanentRedirect } from 'next/navigation';
+import { DashboardList } from './dashboard-list';
 
 /** The dashboards list is the home page now; old links still land there. */
 export default function DashboardsPage() {
-  permanentRedirect('/');
+  return <DashboardList />;
 }

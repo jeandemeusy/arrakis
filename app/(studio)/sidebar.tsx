@@ -190,10 +190,13 @@ export function Sidebar() {
               />
             </li>
             <li className="nav-group">
-              <span className="nav-heading" title="Dashboards">
-                <LayoutDashboard size={16} aria-hidden="true" />
-                <span>Dashboards</span>
-              </span>
+              <NavLink
+                href="/dashboards"
+                icon={LayoutDashboard}
+                label="Dashboards"
+                active={pathname === '/dashboards'}
+                onNavigate={close}
+              />
               <ul className="nav-children">
                 {dashboards?.map((entry) => {
                   const here = currentDashboard === entry.slug;
