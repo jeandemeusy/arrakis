@@ -40,6 +40,9 @@ jobs:
           extra-conf: |
             accept-flake-config = true
 
+      - name: Verify Nix npm dependency hash
+        run: sh scripts/check-npm-deps-hash.sh
+
       - name: Type check and lint
         run: |
           nix develop --command npx tsc --noEmit

@@ -443,6 +443,13 @@ directory, and `.env.local` (git-ignored) is
 sourced for `DATA_SOURCES` and friends. Without direnv, `nix develop`
 gives the same shell. Without Nix, install Node 22.13 or newer by hand.
 
+After changing `package.json` or `package-lock.json`, refresh the Nix dependency
+pin before committing:
+
+```bash
+npm run nix:refresh-deps
+```
+
 ### Build and run
 
 ```bash
