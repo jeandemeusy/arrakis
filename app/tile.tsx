@@ -2,6 +2,7 @@
 
 import {
   cloneElement,
+  isValidElement,
   useEffect,
   useRef,
   useState,
@@ -455,8 +456,25 @@ export function Tile({
 }: TileProps) {
   const dialog = useRef<HTMLDialogElement>(null);
   const frame = useRef<HTMLDivElement>(null);
+  const [frameHeight, setFrameHeight] = useState<number | null>(null);
   const palette = usePalette();
   const open = expanded === id;
+
+  useEffect(() => {
+    const node = frame.current;
+    if (!node?.closest('.dashboard-cell')) return;
+    const measure = () => {
+      const legend = node.querySelector<HTMLElement>('.viz-legend');
+      const plot = node.querySelector<HTMLElement>('.viz-plot');
+      const below = legend && plot && legend.offsetTop >= plot.offsetTop + plot.offsetHeight;
+      const height = node.clientHeight - (below ? legend.offsetHeight + 8 : 0);
+      if (height > 0) setFrameHeight(height);
+    };
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    measure();
+    return () => observer.disconnect();
+  }, [chart, children]);
 
   useEffect(() => {
     const node = dialog.current;
@@ -496,7 +514,13 @@ export function Tile({
 
   const body = (
     <div className="chart-frame" ref={frame}>
-      {broken ? unavailable : (chart ?? children)}
+      {broken
+        ? unavailable
+        : frameHeight && chart
+          ? cloneElement(chart, { height: frameHeight })
+          : frameHeight && isValidElement<{ height?: number }>(children)
+            ? cloneElement(children, { height: frameHeight })
+            : (chart ?? children)}
     </div>
   );
 

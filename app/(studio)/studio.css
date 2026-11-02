@@ -3261,6 +3261,17 @@ a.settings-card:focus-visible {
   height: calc(var(--cell-height, 280px) + 200px);
 }
 
+.dashboard-cell > .chart-card.menu-mode:not(.metric) > .chart-frame {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: auto;
+  margin-bottom: 0;
+}
+
+.dashboard-cell > .chart-card.menu-mode:not(.metric) > :not(.chart-frame) {
+  flex-shrink: 0;
+}
+
 .dashboard-heading {
   position: relative;
   grid-row: span var(--cell-rows, 1);
