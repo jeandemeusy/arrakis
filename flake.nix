@@ -62,7 +62,7 @@
           };
 
           # Refresh with: nix run nixpkgs#prefetch-npm-deps -- package-lock.json
-          npmDepsHash = "sha256-qWvtLBjGvO5h+5inlQBwkgAupWEHJSmFyOjlZepkTXo=";
+          npmDepsHash = "sha256-uR/JUsFF2AfYEmNTKY4E6zVTsBsN1zw+Gbl13O1ERXo=";
 
           env = {
             NEXT_STANDALONE = "1";
