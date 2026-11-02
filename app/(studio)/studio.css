@@ -3227,24 +3227,37 @@ a.settings-card:focus-visible {
 }
 
 .dashboard-grid {
-  align-items: stretch;
+  /*
+   * A compact row unit plus dense auto-placement makes this a masonry-like
+   * twelve-column grid. Each cell claims just enough rows for its own height,
+   * so a short tile can sit below another short tile while a neighbouring chart
+   * continues alongside them.
+   */
+  grid-auto-flow: row dense;
+  grid-auto-rows: 40px;
+  column-gap: var(--grid-gap);
+  row-gap: 0;
+  align-items: start;
 }
 
 .dashboard-cell {
   position: relative;
   display: flex;
   flex-direction: column;
+  grid-row: span var(--cell-rows, 7);
+  height: var(--cell-outer-height);
   min-width: 0;
 }
 
-/* The tile fills what the row leaves below the edit controls, so tiles in one
-   row share a height whether or not the controls are showing. */
+/* Each tile fills its own reserved grid space, independently of its neighbours. */
 .dashboard-cell > .chart-card {
   flex: 1 1 auto;
+  min-height: 0;
 }
 
 .dashboard-heading {
   position: relative;
+  grid-row: span 2;
   padding: 18px 0 4px;
   scroll-margin-top: 72px;
 }

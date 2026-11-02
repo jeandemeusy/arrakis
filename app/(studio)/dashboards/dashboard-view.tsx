@@ -55,6 +55,20 @@ import { HelpTip } from '../help-tip';
 import { LockedButton } from '../locked-link';
 import { ShareButton } from '../share';
 
+const GRID_ROW_HEIGHT = 40;
+const GRID_GAP = 14;
+
+/**
+ * A tile reserves enough compact grid rows for its plot plus its surrounding
+ * chrome. Dense placement can then fill a shorter tile's space without making
+ * its taller neighbours dictate the whole row's height.
+ */
+function rowsFor(widget: DraftWidget): number {
+  if (widget.kind === 'text') return 2;
+  const chrome = widget.visualization?.type === 'number' ? 80 : 120;
+  return Math.ceil((widget.height + chrome + GRID_GAP) / GRID_ROW_HEIGHT);
+}
+
 /**
  * A dashboard: its variables across the top, its widgets on the grid below.
  *
@@ -838,6 +852,7 @@ export function DashboardView({
               );
             }
             const link = widget.options.link;
+            const rows = rowsFor(widget);
             return (
               <div
                 key={widget.id}
@@ -846,6 +861,8 @@ export function DashboardView({
                 style={
                   {
                     '--cell-height': `${widget.height}px`,
+                    '--cell-rows': rows,
+                    '--cell-outer-height': `${rows * GRID_ROW_HEIGHT - GRID_GAP}px`,
                   } as React.CSSProperties
                 }
                 onDragOver={editing ? dragOver(widget.id) : undefined}
