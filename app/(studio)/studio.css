@@ -3254,6 +3254,13 @@ a.settings-card:focus-visible {
   flex: 0 0 auto;
 }
 
+/* A widget's saved height is a standard, not a minimum. Reserve shared chrome
+   for its title, legend, note and footer so equal configured sizes always
+   render as equal cards. */
+.dashboard-cell > .chart-card.menu-mode:not(.metric) {
+  height: calc(var(--cell-height, 280px) + 200px);
+}
+
 .dashboard-heading {
   position: relative;
   grid-row: span var(--cell-rows, 1);
@@ -3533,7 +3540,7 @@ a.settings-card:focus-visible {
 /* A number tile follows its widget's height, as a chart's plot does: the
    figure's room, plus the title above and the footer below. */
 .dashboard-cell > .chart-card.menu-mode.metric {
-  min-height: calc(var(--cell-height, 120px) + 80px);
+  height: calc(var(--cell-height, 120px) + 80px);
 }
 
 /* Resizing a tile while editing: grips on its right edge, bottom edge and
