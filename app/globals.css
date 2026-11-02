@@ -1634,15 +1634,20 @@ main {
   }
 }
 
-/* A narrow number tile keeps a busy pill to its spinner. */
+/* A narrow number tile keeps status available without letting its footer spill
+   past the card: the icon retains the status name for assistive technology. */
 @container (max-width: 210px) {
-  .tile-fresh.running .tile-fresh-label,
-  .tile-fresh.updating .tile-fresh-label {
+  .tile-fresh .tile-fresh-label {
     position: absolute;
     width: 1px;
     height: 1px;
     overflow: hidden;
     clip-path: inset(50%);
     white-space: nowrap;
+  }
+
+  .tile-fresh {
+    gap: 0;
+    padding-inline: 8px;
   }
 }

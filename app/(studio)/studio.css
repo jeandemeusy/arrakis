@@ -2840,6 +2840,26 @@ button.chip {
   width: 150px;
 }
 
+/* A preview's window choices reuse the dashboard switch, where a wide bar is
+   appropriate. Its long range labels must not be forced into the compact
+   column-field width, which made the pill wrap into a tall circle. Keep one
+   horizontal row and let a genuinely narrow editor scroll it instead. */
+.viz-vars .studio-field.compact:has(.network-switch) {
+  width: fit-content;
+  max-width: 100%;
+}
+
+.viz-vars .network-switch {
+  flex-wrap: nowrap;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.viz-vars .network-switch button {
+  flex: none;
+  white-space: nowrap;
+}
+
 .viz-preview {
   padding: 18px;
   border: var(--tile-border) solid var(--tile-border-color);
