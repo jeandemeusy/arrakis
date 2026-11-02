@@ -4,7 +4,7 @@
   "name": "gnosis-vpn",
   "title": "Gnosis VPN",
   "description": "Who uses Gnosis VPN, how much traffic it carries and where, read from the HOPR network’s on-chain ticket redemptions.",
-  "exportedAt": "2026-11-02T16:12:15.735Z",
+  "exportedAt": "2026-11-02T16:35:32.786Z",
   "lists": [
     {
       "name": "exits",
@@ -796,6 +796,7 @@
           {
             "as": "period",
             "op": "bucket",
+            "size": 500,
             "unit": "auto",
             "column": "block"
           },
@@ -823,8 +824,7 @@
         "builder": {
           "groups": [
             {
-              "as": "period",
-              "unit": "auto",
+              "size": 500,
               "column": "block"
             }
           ],
@@ -1156,6 +1156,7 @@
             "name",
             "exit",
             "found_in",
+            "network",
             "gigabytes"
           ],
           "pageSize": 20,
@@ -1163,6 +1164,12 @@
             "exit": {
               "text": true,
               "monospace": true
+            },
+            "network": {
+              "width": 50
+            },
+            "gigabytes": {
+              "width": 50
             }
           }
         },
@@ -1295,9 +1302,6 @@
           ]
         },
         "options": {
-          "labels": {
-            "block": "deployed in block"
-          },
           "columns": [
             "block",
             "client"
@@ -1981,56 +1985,8 @@
             "op": "sort"
           }
         ],
-        "builder": {
-          "sort": [
-            {
-              "desc": true,
-              "column": "gigabytes"
-            }
-          ],
-          "share": {
-            "as": "share",
-            "of": "redemptions"
-          },
-          "groups": [
-            {
-              "column": "relay"
-            }
-          ],
-          "filters": [
-            {
-              "value": {
-                "literal": "upstream"
-              },
-              "column": "direction",
-              "operator": "="
-            },
-            {
-              "value": {
-                "var": "client"
-              },
-              "column": "payer",
-              "operator": "="
-            }
-          ],
-          "measures": [
-            {
-              "as": "redemptions",
-              "fn": "count"
-            },
-            {
-              "as": "gigabytes",
-              "fn": "sum",
-              "label": "upstream",
-              "format": "gigabytes",
-              "columns": [
-                "gigabytes"
-              ]
-            }
-          ]
-        },
         "options": {
-          "format": "percent",
+          "format": "number",
           "labels": {
             "gigabytes": "upstream"
           },
