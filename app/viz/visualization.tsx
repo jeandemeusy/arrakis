@@ -1045,12 +1045,15 @@ function Table({
                 const type = columns[entry.at].type;
                 const format = options.formats?.[entry.name];
                 const display = options.tableColumns?.[entry.name];
+                const raw = asText(value);
                 const full = display?.text
-                  ? asText(value)
+                  ? raw
+                  : /^0x[0-9a-f]{16,}$/i.test(raw)
+                    ? raw
                   : format || numeric(entry.at)
                     ? formatValue(value, format ?? options.format)
                     : formatCategory(value, type);
-                const text = display?.condensed ? condense(full) : full;
+                const text = display?.text && display.condensed ? condense(full) : full;
                 const align = display?.align ?? (numeric(entry.at) ? 'right' : 'left');
                 const size = display?.width
                   ? { width: display.width, minWidth: display.width }
@@ -1061,9 +1064,10 @@ function Table({
                     className={[
                       `align-${align}`,
                       type === 'bytes' || display?.monospace ? 'mono' : '',
+                      display?.width ? 'fixed' : '',
                     ].join(' ')}
                     style={size}
-                    title={text !== full ? full : undefined}
+                    title={text !== full || display?.width ? full : undefined}
                     onCopy={(event) => {
                       if (text === full) return;
                       event.clipboardData.setData('text/plain', full);

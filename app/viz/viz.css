@@ -122,12 +122,17 @@
 }
 
 .viz-table td {
-  max-width: 280px;
   padding: 6px 10px;
   border-bottom: 1px solid var(--line-soft);
+  white-space: nowrap;
+}
+
+/* An unconfigured identifier remains whole and may widen the scrollable table.
+   A deliberate fixed-width column clips cleanly instead of spilling into the
+   next cell. */
+.viz-table td.fixed {
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .viz-table .numeric,

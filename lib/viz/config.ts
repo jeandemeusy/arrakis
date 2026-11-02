@@ -431,7 +431,7 @@ export function finalizeConfig(
       (options as Record<string, unknown>)[key] = merged;
     else delete options[key];
   }
-  if (compiled.options.columns) options.columns = compiled.options.columns;
+  if (compiled.options.columns && !options.columns) options.columns = compiled.options.columns;
   else if (type !== 'table') delete options.columns;
   return {
     steps: compiled.steps,

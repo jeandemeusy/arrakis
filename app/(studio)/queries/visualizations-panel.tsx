@@ -7,8 +7,10 @@ import {
   ChartLine,
   ChartBarDecreasing,
   ChartPie,
+  ChevronDown,
   Code2,
   Grid3x3,
+  GripVertical,
   Hash,
   ListTree,
   Rows3,
@@ -477,16 +479,33 @@ function TableColumns({
   columns: ScopeColumn[];
   onChange: (patch: Partial<Options>) => void;
 }) {
-  const shown = options.columns?.length
-    ? options.columns
+  const [dragging, setDragging] = useState<string | null>(null);
+  const [drop, setDrop] = useState<{ name: string; after: boolean } | null>(null);
+  const configured = options.columns;
+  const shown = configured?.length
+    ? configured
     : columns.map((column) => column.name);
-  const toggle = (name: string, on: boolean) => {
-    const next = columns
-      .map((column) => column.name)
-      .filter((entry) => (entry === name ? on : shown.includes(entry)));
+  const ordered = [
+    ...shown,
+    ...columns.map((column) => column.name).filter((name) => !shown.includes(name)),
+  ];
+  const storeColumns = (next: string[]) => {
+    const original = columns.map((column) => column.name);
     onChange({
-      columns: next.length === columns.length ? undefined : next,
+      columns:
+        next.length === original.length &&
+        next.every((name, index) => name === original[index])
+          ? undefined
+          : next,
     });
+  };
+  const toggle = (name: string, on: boolean) => {
+    storeColumns(ordered.filter((entry) => entry === name ? on : shown.includes(entry)));
+  };
+  const move = (name: string, to: number) => {
+    const next = ordered.filter((entry) => entry !== name);
+    next.splice(Math.max(0, Math.min(to, next.length)), 0, name);
+    storeColumns(next.filter((entry) => shown.includes(entry)));
   };
   const setRecord = (
     key: 'labels' | 'formats',
@@ -513,10 +532,64 @@ function TableColumns({
     onChange({ tableColumns: Object.keys(next).length ? next : undefined });
   };
   return (
+    <details className="builder-more table-columns-disclosure">
+      <summary>
+        <ChevronDown size={14} aria-hidden="true" /> Columns
+      </summary>
     <fieldset className="table-columns">
-      <legend>Columns</legend>
-      {columns.map((column) => (
-        <div key={column.name} className="table-column">
+      <legend className="sr-only">Columns</legend>
+      <p className="table-columns-hint">Choose and arrange the columns shown in the table.</p>
+      {ordered.map((name, index) => {
+        const column = columns.find((entry) => entry.name === name);
+        if (!column) return null;
+        const display = options.tableColumns?.[column.name];
+        const displayType = display?.text
+          ? `text${display.monospace ? '-mono' : ''}${display.condensed ? '-short' : ''}`
+          : (options.formats?.[column.name] ?? '');
+        return (
+        <div
+          key={column.name}
+          className={`table-column${dragging === name ? ' dragging' : ''}${drop?.name === name ? (drop.after ? ' drop-after' : ' drop-before') : ''}`}
+          onDragOver={(event) => {
+            if (!dragging || dragging === name) return;
+            event.preventDefault();
+            const rect = event.currentTarget.getBoundingClientRect();
+            setDrop({ name, after: event.clientY >= rect.top + rect.height / 2 });
+          }}
+          onDrop={(event) => {
+            event.preventDefault();
+            const dragged = event.dataTransfer.getData('text/plain');
+            if (dragged && dragged !== column.name) {
+              const target = index + (drop?.name === name && drop.after ? 1 : 0);
+              move(dragged, target - (ordered.indexOf(dragged) < target ? 1 : 0));
+            }
+            setDragging(null);
+            setDrop(null);
+          }}
+        >
+          <button
+            type="button"
+            className="drag-handle"
+            draggable
+            aria-label={`Move ${column.name}; arrow keys move it`}
+            onDragStart={(event) => {
+              event.dataTransfer.effectAllowed = 'move';
+              event.dataTransfer.setData('text/plain', column.name);
+              setDragging(column.name);
+            }}
+            onDragEnd={() => { setDragging(null); setDrop(null); }}
+            onKeyDown={(event) => {
+              if (event.key === 'ArrowUp' && index > 0) {
+                event.preventDefault();
+                move(column.name, index - 1);
+              } else if (event.key === 'ArrowDown' && index < ordered.length - 1) {
+                event.preventDefault();
+                move(column.name, index + 1);
+              }
+            }}
+          >
+            <GripVertical size={14} aria-hidden="true" />
+          </button>
           <label className="studio-check">
             <input
               type="checkbox"
@@ -525,7 +598,7 @@ function TableColumns({
             />
             <code>{column.name}</code>
           </label>
-          <input
+          <label className="table-column-field"><span>Header</span><input
             className="studio-input"
             aria-label={`Header for ${column.name}`}
             placeholder="header"
@@ -533,23 +606,36 @@ function TableColumns({
             onChange={(event) =>
               setRecord('labels', column.name, event.target.value)
             }
-          />
-          <select
+          /></label>
+          <label className="table-column-field"><span>Display</span><select
             className="studio-input"
             aria-label={`Format for ${column.name}`}
-            value={options.formats?.[column.name] ?? ''}
-            onChange={(event) =>
-              setRecord('formats', column.name, event.target.value)
-            }
+            value={displayType}
+            onChange={(event) => {
+              const value = event.target.value;
+              const text = value.startsWith('text');
+              const formats = { ...options.formats };
+              if (text || !value) delete formats[column.name];
+              else formats[column.name] = value as Format;
+              const tableColumns = { ...options.tableColumns };
+              const next = { ...display, text: text || undefined, monospace: value.includes('-mono') || undefined, condensed: value.includes('-short') || undefined };
+              if (Object.values(next).some((entry) => entry !== undefined)) tableColumns[column.name] = next;
+              else delete tableColumns[column.name];
+              onChange({ formats: Object.keys(formats).length ? formats : undefined, tableColumns: Object.keys(tableColumns).length ? tableColumns : undefined });
+            }}
           >
             <option value="">default</option>
+            <option value="text">text</option>
+            <option value="text-mono">text · monospace</option>
+            <option value="text-short">text · condensed</option>
+            <option value="text-mono-short">text · monospace, condensed</option>
             {FORMATS.map((format) => (
               <option key={format} value={format}>
                 {format}
               </option>
             ))}
-          </select>
-          <select
+          </select></label>
+          <label className="table-column-field"><span>Align</span><select
             className="studio-input"
             aria-label={`Alignment for ${column.name}`}
             value={options.tableColumns?.[column.name]?.align ?? ''}
@@ -565,8 +651,8 @@ function TableColumns({
             <option value="left">left</option>
             <option value="center">center</option>
             <option value="right">right</option>
-          </select>
-          <input
+          </select></label>
+          <label className="table-column-field"><span>Width (px)</span><input
             className="studio-input"
             type="number"
             min={40}
@@ -579,44 +665,12 @@ function TableColumns({
                 width: event.target.value ? Number(event.target.value) : undefined,
               })
             }
-          />
-          <label className="studio-check">
-            <input
-              type="checkbox"
-              checked={Boolean(options.tableColumns?.[column.name]?.text)}
-              onChange={(event) =>
-                setDisplay(column.name, { text: event.target.checked || undefined })
-              }
-            />
-            text
-          </label>
-          <label className="studio-check">
-            <input
-              type="checkbox"
-              checked={Boolean(options.tableColumns?.[column.name]?.monospace)}
-              onChange={(event) =>
-                setDisplay(column.name, {
-                  monospace: event.target.checked || undefined,
-                })
-              }
-            />
-            monospace
-          </label>
-          <label className="studio-check">
-            <input
-              type="checkbox"
-              checked={Boolean(options.tableColumns?.[column.name]?.condensed)}
-              onChange={(event) =>
-                setDisplay(column.name, {
-                  condensed: event.target.checked || undefined,
-                })
-              }
-            />
-            condensed
-          </label>
+          /></label>
         </div>
-      ))}
+        );
+      })}
     </fieldset>
+    </details>
   );
 }
 

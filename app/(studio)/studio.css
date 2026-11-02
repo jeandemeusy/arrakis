@@ -3160,10 +3160,20 @@ a.settings-card:focus-visible {
 .table-columns {
   display: grid;
   flex-basis: 100%;
-  gap: 4px;
+  min-width: 0;
+  gap: 10px;
   margin: 0;
-  padding: 8px 10px;
-  border: var(--control-border) solid var(--line);
+  padding: 0;
+  border: 0;
+}
+
+.table-columns-disclosure {
+  flex-basis: 100%;
+  min-width: 0;
+}
+
+.table-columns-disclosure[open] .table-columns {
+  margin-top: 10px;
 }
 
 .table-columns legend {
@@ -3173,15 +3183,61 @@ a.settings-card:focus-visible {
 }
 
 .table-column {
+  position: relative;
   display: grid;
-  grid-template-columns: minmax(120px, 1fr) repeat(4, minmax(70px, auto));
+  grid-template-columns: 24px repeat(2, minmax(0, 1fr));
   align-items: center;
   gap: 8px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-alt);
 }
 
-.table-column .studio-check {
+.table-columns-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.table-column > .studio-check {
+  grid-column: 2 / -1;
+  min-width: 0;
+}
+
+.table-column-field {
+  display: grid;
+  grid-column: span 1;
   gap: 4px;
+  min-width: 0;
+  color: var(--muted);
   font-size: 11px;
+}
+
+.table-column-field:nth-of-type(2),
+.table-column-field:nth-of-type(4) {
+  grid-column: 2;
+}
+
+.table-column.dragging { opacity: 0.45; }
+
+.table-column.drop-before::before,
+.table-column.drop-after::after {
+  content: '';
+  position: absolute;
+  right: 4px;
+  left: 4px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--accent-2);
+}
+
+.table-column.drop-before::before { top: -7px; }
+.table-column.drop-after::after { bottom: -7px; }
+
+.table-column .drag-handle {
+  justify-self: center;
 }
 
 .table-column code {
@@ -5312,4 +5368,21 @@ a.settings-card:focus-visible {
   gap: 6px;
   font-size: 12px;
   white-space: nowrap;
+}
+
+/* Keep the arrow away from the edge and reserve space for long labels across
+   the studio's ordinary dropdowns. Chips have their own compact arrow. */
+.studio select:not([multiple], .chip select) {
+  appearance: none;
+  padding-right: 32px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5 6 6.5 11 1.5' fill='none' stroke='%23888' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+}
+
+@media (forced-colors: active) {
+  .studio select:not([multiple], .chip select) {
+    appearance: auto;
+    background-image: none;
+  }
 }
