@@ -25,6 +25,7 @@ import {
   Settings2,
   SlidersHorizontal,
   Type,
+  FileText,
   X,
 } from 'lucide-react';
 import { asText } from '@/lib/viz/text';
@@ -72,6 +73,7 @@ import { LockedButton } from '../locked-link';
 import { ShareButton } from '../share';
 import { ago } from '../time';
 import { SavedViews } from './saved-views';
+import { TextTile } from './text-tile';
 
 type EditSettings = {
   title: string;
@@ -508,7 +510,7 @@ export function DashboardView({
   // The headings are the dashboard's sections: anchors here, links in the
   // sidebar.
   const headings = (dashboard?.widgets ?? []).filter(
-    (widget) => widget.kind === 'text',
+    (widget) => widget.kind === 'text' && !widget.options.textStyle,
   );
   const headingIds = sectionIds(headings.map((widget) => widget.text));
   const anchorOf = new Map(
@@ -631,7 +633,7 @@ export function DashboardView({
     const layout = widget.options.layout;
     if (!layout || hidden(widget)) return [];
     const width = responsiveSpan(
-      widget.kind === 'text' ? 12 : widget.width,
+      widget.kind === 'text' && !widget.options.textStyle ? 12 : widget.width,
       gridViewport,
     );
     return [
@@ -720,7 +722,7 @@ export function DashboardView({
           column: layout?.column ?? 0,
           row: Math.ceil(bottom / gridSize.step),
           unit: 'cells',
-          ...(widget.kind === 'visualization' && layout?.rows ? { rows: layout.rows } : {}),
+          ...((widget.kind === 'visualization' || widget.options.textStyle) && layout?.rows ? { rows: layout.rows } : {}),
         },
       },
     });
@@ -748,6 +750,17 @@ export function DashboardView({
       width: 12,
       height: 80,
       options: {},
+    });
+  const addText = () =>
+    addWidget({
+      id: `new-${crypto.randomUUID()}`,
+      local: true,
+      kind: 'text',
+      visualization: null,
+      text: 'Add your text here.',
+      width: 4,
+      height: 240,
+      options: { textStyle: 'plain' },
     });
 
   const endDrag = () => {
@@ -784,7 +797,7 @@ export function DashboardView({
           height: gridRows(
             rect.height,
             gridSize.gap,
-            widget.kind === 'text' ? 1 : gridSize.step,
+            widget.kind === 'text' && !widget.options.textStyle ? 1 : gridSize.step,
           ),
         },
       ];
@@ -814,7 +827,7 @@ export function DashboardView({
                     column: box.column,
                     row: Math.round(box.row / gridSize.step),
                     unit: 'cells',
-                    ...(widget.kind === 'visualization'
+                    ...(widget.kind === 'visualization' || widget.options.textStyle
                       ? {
                           rows: Math.max(
                             1,
@@ -924,7 +937,7 @@ export function DashboardView({
     // natural height. Snap within that section instead of to the page origin.
     const headingIds = new Set(
       draft
-        ?.filter((widget) => widget.kind === 'text')
+        ?.filter((widget) => widget.kind === 'text' && !widget.options.textStyle)
         .map((widget) => widget.id),
     );
     const row = snapSectionRow(
@@ -1052,6 +1065,10 @@ export function DashboardView({
           >
             <Type size={15} aria-hidden="true" />
             <span className="edit-label">Heading</span>
+          </button>
+          <button type="button" className="edit-bar-button" title="Add a text tile" onClick={addText}>
+            <FileText size={15} aria-hidden="true" />
+            <span className="edit-label">Text</span>
           </button>
           <button
             type="button"
@@ -1190,19 +1207,18 @@ export function DashboardView({
       </header>
       {saveError && <p className="studio-error">{saveError}</p>}
 
-      {!editing && <SavedViews slug={slug} vars={Object.fromEntries(dashboard.variables.map((variable) => [variable.name, vars[variable.name]]))} editable={Boolean(user)} onApply={(values) => {
+      <VariableBar
+        variables={variables}
+        vars={vars}
+        networks={networks}
+        actions={!editing && dashboard.variables.length > 0 ? <SavedViews slug={slug} variables={dashboard.variables} networks={networks} vars={Object.fromEntries(dashboard.variables.map((variable) => [variable.name, vars[variable.name]]))} editable={Boolean(user)} onApply={(values) => {
         const next = Object.fromEntries(dashboard.variables.map((variable) => [variable.name, values[variable.name]]));
         requestedRef.current = next;
         setRequested(next);
         const params = new URLSearchParams();
         for (const [key, value] of Object.entries(next)) if (value) params.set(key, value);
         window.history.replaceState(window.history.state, '', `/dashboards/${slug}${params.size ? `?${params}` : ''}`);
-      }} />}
-
-      <VariableBar
-        variables={variables}
-        vars={vars}
-        networks={networks}
+      }} /> : undefined}
         freshnessSummary={(() => {
           const entries = data?.widgets ?? [];
           const networks = entries.flatMap((entry) =>
@@ -1256,7 +1272,9 @@ export function DashboardView({
             if (hidden(widget)) return null;
             const label =
               widget.kind === 'text'
-                ? widget.text || 'heading'
+                ? widget.options.textStyle
+                  ? widget.text.split('\n')[0].replace(/^#+\s*/, '').trim().slice(0, 60) || 'text tile'
+                  : widget.text || 'heading'
                 : (widget.options.title ??
                   widget.visualization?.title ??
                   'chart');
@@ -1285,6 +1303,25 @@ export function DashboardView({
             const editClasses = editing
               ? ` editing${selected === widget.id ? ' selected' : ''}${dragging === widget.id ? ' is-dragged' : ''}${added === widget.id ? ' just-added' : ''}`
               : '';
+            if (widget.kind === 'text' && widget.options.textStyle) {
+              const renderedHeight = gridTileHeight(
+                widget.options.layout?.unit === 'cells' && widget.options.layout.rows
+                  ? widget.options.layout.rows * gridSize.step - gridSize.gap
+                  : widget.height,
+                gridSize.gap,
+                gridSize.step,
+              );
+              return (
+                <div key={widget.id} data-widget={widget.id}
+                  className={`dashboard-cell span-${widget.width}${widget.options.layout ? ' has-layout' : ''}${editClasses}`}
+                  ref={(node) => { if (node) tileNodes.current.set(widget.id, node); else tileNodes.current.delete(widget.id); }}
+                  style={{ '--cell-rows': tileRows[widget.id], '--layout-column': (resolvedLayout.get(widget.id)?.column ?? 0) + 1, '--layout-row': (resolvedLayout.get(widget.id)?.row ?? 0) + 1, '--layout-width': resolvedLayout.get(widget.id)?.width ?? widget.width, '--tile-height': `${renderedHeight}px` } as React.CSSProperties}>
+                  {toolbar}
+                  {editing && draft && <ResizeHandles width={widget.width} height={widget.height} rows={Math.round((renderedHeight + gridSize.gap) / gridSize.step)} gridStep={gridSize.step} onResize={(size) => resizeSpatial(widget, size)} />}
+                  <TextTile text={widget.text} style={widget.options.textStyle} editing={editing} onChange={(text) => updateWidget({ ...widget, text })} onStyle={(textStyle) => updateWidget({ ...widget, options: { ...widget.options, textStyle } })} />
+                </div>
+              );
+            }
             if (widget.kind === 'text') {
               return (
                 <section

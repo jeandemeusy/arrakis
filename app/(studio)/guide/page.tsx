@@ -393,12 +393,25 @@ export default function GuidePage() {
               travel in the address, so any view can be linked to.
             </p>
             <p>
+              Use <strong>Views</strong> beside the filters to save a named set
+              of selections, return to it later, or replace it with the current
+              filters. Saved views are available to everyone who can open the
+              dashboard; they do not freeze its data.
+            </p>
+            <p>
               <strong>Edit</strong> turns the page into its own editor: add
               charts from any query, add headings, drag a tile by its grip to
               move it, drag its corner to resize it, and open its settings to
               rename it or make a click on it set a variable, here or on another
               dashboard. That is how a drill-down works: click a row, and a
               second dashboard opens filtered on it.
+            </p>
+            <p>
+              Add a <strong>Text</strong> tile for context alongside your charts.
+              Drag and resize it on the same grid, choose plain or card
+              appearance, and use Markdown for headings, lists, emphasis, code
+              and links. Text that does not fit can be scrolled within the tile.
+              Section headings remain full-width and appear in the sidebar.
             </p>
           </Section>
 

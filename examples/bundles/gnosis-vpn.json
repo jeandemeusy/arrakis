@@ -4,7 +4,7 @@
   "name": "gnosis-vpn",
   "title": "Gnosis VPN",
   "description": "Who uses Gnosis VPN, how much traffic it carries and where, read from the HOPR network’s on-chain ticket redemptions.",
-  "exportedAt": "2026-11-03T17:31:55.952Z",
+  "exportedAt": "2026-11-03T20:45:23.355Z",
   "lists": [
     {
       "name": "exits",
@@ -2136,7 +2136,7 @@
           "width": 12,
           "height": 80,
           "options": {
-            "note": "A user is a VPN client — an account that bound a key but never announced an address, so it is not relay infrastructure. Upstream volume is derived from the redemptions on client channels, priced at the winning probability in force at each block; downstream is what the configured exits pay relays for the return path.",
+            "note": "Start with active clients and estimated traffic in the selected window. The left-hand figures use all indexed history: downstream per upstream and exits seen paying a relay.",
             "layout": {
               "row": 2,
               "unit": "cells",
@@ -2208,7 +2208,7 @@
           "width": 12,
           "height": 80,
           "options": {
-            "note": "Who showed up, and when each client first appeared, block by block.",
+            "note": "New clients are key bindings for accounts classified as clients. The bars show when those bindings were indexed; they do not establish first VPN use.",
             "layout": {
               "row": 7,
               "unit": "cells",
@@ -2219,7 +2219,7 @@
         {
           "kind": "visualization",
           "chart": "gnosis-vpn/daily-users",
-          "width": 12,
+          "width": 8,
           "height": 200,
           "options": {
             "note": "Client deployments in each bin of blocks.",
@@ -2237,7 +2237,7 @@
           "width": 12,
           "height": 80,
           "options": {
-            "note": "Estimated client traffic carried by each relay.",
+            "note": "Follow the estimated traffic to the relay that was paid. The donut uses upstream traffic; use Direction to change the time-series breakdown.",
             "layout": {
               "row": 12,
               "unit": "cells",
@@ -2281,7 +2281,7 @@
           "width": 12,
           "height": 80,
           "options": {
-            "note": "The oracle values that convert redemptions into traffic, as they stand now. Each network sets its own, so pick one network to see them.",
+            "note": "Current oracle values for one selected network. Historical traffic estimates use the winning probability in force at each redemption, rather than today’s value.",
             "layout": {
               "row": 17,
               "unit": "cells",
@@ -2343,7 +2343,7 @@
           "width": 12,
           "height": 80,
           "options": {
-            "note": "Exits are detected from the service registry: every node registered there as gvpn:exit, until it deregisters. Its metadata names it and says where it is reached. Add an address to the list “exits” (Settings → Lists) for a network without a registry. Volume is what each exit paid relays for the return path, all time.",
+            "note": "Compare the exit nodes known from the service registry or the configured exits list. The table’s downstream volume covers all indexed history.",
             "layout": {
               "row": 20,
               "unit": "cells",
@@ -2386,7 +2386,7 @@
           "width": 12,
           "height": 80,
           "options": {
-            "note": "Who used the network and when each client first appeared. Volume is upstream only — the traffic the client itself paid for. Pick a client to open its record.",
+            "note": "Move from the network picture to individual records. The ranking uses the selected window; the deployment list is ordered by block across indexed history.",
             "layout": {
               "row": 23,
               "unit": "cells",
@@ -2438,7 +2438,7 @@
           "width": 12,
           "height": 80,
           "options": {
-            "note": "The latest client redemptions, newest first. Upstream only — a downstream redemption is paid by an exit and names no client.",
+            "note": "Inspect up to 500 recent upstream redemption events. Select a client to open its record; downstream payments are made by exits and do not identify a client.",
             "layout": {
               "row": 29,
               "unit": "cells",
@@ -2471,6 +2471,7 @@
           "width": 12,
           "height": 80,
           "options": {
+            "note": "The index supplies the on-chain events behind this dashboard. Coverage and freshness determine what the charts can show.",
             "layout": {
               "row": 35,
               "unit": "cells",
@@ -2485,8 +2486,8 @@
           "height": 80,
           "options": {
             "layout": {
-              "row": 35,
-              "rows": 3,
+              "row": 36,
+              "rows": 4,
               "unit": "cells",
               "column": 0
             }
@@ -2520,7 +2521,7 @@
           "width": 12,
           "height": 80,
           "options": {
-            "note": "A client leaves no trace of its own on chain: what is visible is a relay redeeming a ticket the client issued. First and last seen are the blocks that bound that trace.",
+            "note": "A client is an address identified by its key binding. Deployment is the binding block; first and last seen are the first and latest indexed upstream redemptions.",
             "layout": {
               "row": 0,
               "unit": "cells",
@@ -2577,13 +2578,27 @@
           }
         },
         {
+          "kind": "text",
+          "text": "Traffic and redemptions",
+          "width": 12,
+          "height": 80,
+          "options": {
+            "note": "How much upstream traffic this address is estimated to have paid for, and when those redemptions appeared.",
+            "layout": {
+              "row": 3,
+              "unit": "cells",
+              "column": 0
+            }
+          }
+        },
+        {
           "kind": "visualization",
           "chart": "gnosis-vpn-client/volume",
           "width": 4,
           "height": 172,
           "options": {
             "layout": {
-              "row": 3,
+              "row": 4,
               "rows": 2,
               "unit": "cells",
               "column": 0
@@ -2598,7 +2613,7 @@
           "height": 80,
           "options": {
             "layout": {
-              "row": 5,
+              "row": 6,
               "rows": 2,
               "unit": "cells",
               "column": 0
@@ -2612,9 +2627,9 @@
           "width": 8,
           "height": 160,
           "options": {
-            "note": "Upstream volume over the last 2,000,000 blocks.",
+            "note": "Estimated upstream volume per block bin in the last 2,000,000 blocks.",
             "layout": {
-              "row": 3,
+              "row": 4,
               "rows": 4,
               "unit": "cells",
               "column": 4
@@ -2623,14 +2638,28 @@
           }
         },
         {
-          "kind": "visualization",
-          "chart": "gnosis-vpn-client/relays",
+          "kind": "text",
+          "text": "Relays paid",
           "width": 12,
           "height": 80,
           "options": {
+            "note": "Each row groups upstream redemptions from this client by the relay that was paid.",
             "layout": {
-              "row": 7,
-              "rows": 3,
+              "row": 8,
+              "unit": "cells",
+              "column": 0
+            }
+          }
+        },
+        {
+          "kind": "visualization",
+          "chart": "gnosis-vpn-client/relays",
+          "width": 12,
+          "height": 280,
+          "options": {
+            "layout": {
+              "row": 9,
+              "rows": 4,
               "unit": "cells",
               "column": 0
             },

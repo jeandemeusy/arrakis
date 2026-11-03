@@ -1,6 +1,7 @@
 'use client';
 
 import { X } from 'lucide-react';
+import type { ReactNode } from 'react';
 import { type DashboardVariable, type Network } from '../api';
 import { VariableSwitch } from './variable-switch';
 
@@ -15,12 +16,14 @@ export function VariableBar({
   vars,
   networks,
   freshnessSummary,
+  actions,
   onChange,
 }: {
   variables: DashboardVariable[];
   vars: Record<string, string | undefined>;
   networks: Network[];
   freshnessSummary?: string;
+  actions?: ReactNode;
   onChange: (name: string, value: string | undefined) => void;
 }) {
   return (
@@ -126,6 +129,7 @@ export function VariableBar({
           </label>
         );
       })}
+      {actions}
       {freshnessSummary && (
         <span
           className="dashboard-freshness"

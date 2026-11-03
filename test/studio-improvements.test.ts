@@ -89,6 +89,13 @@ describe(
         ctx,
       );
       assert.equal((await list.json()).views.length, 1);
+      const updateUrl = `/api/v1/dashboards/views-test/views?id=${view.id}`;
+      assert.equal((await routes.views.PATCH(request('PATCH', updateUrl, { body: { variables: { range: '30d' } } }), ctx)).status, 401);
+      assert.equal((await routes.views.PATCH(request('PATCH', updateUrl, { cookie, body: { variables: { unknown: 'x' } } }), ctx)).status, 400);
+      const updated = await routes.views.PATCH(request('PATCH', updateUrl, { cookie, body: { variables: { range: '30d', network: 'jura' } } }), ctx);
+      assert.equal(updated.status, 200);
+      assert.equal((await updated.json()).view.variables.range, '30d');
+      assert.equal((await routes.views.PATCH(request('PATCH', '/api/v1/dashboards/views-test/views?id=not-a-uuid', { cookie, body: { variables: {} } }), ctx)).status, 400);
       assert.equal(
         (
           await routes.views.POST(

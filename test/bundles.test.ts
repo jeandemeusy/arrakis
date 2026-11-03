@@ -138,8 +138,8 @@ describe(
         JSON.stringify(await first.clone().json()),
       );
       const { report } = await body<{ report: Report }>(first);
-      // One list, twenty-two queries, thirty charts, two dashboards.
-      assert.equal(report.created.length, 1 + 22 + 30 + 2);
+      // One list, twenty-two queries, twenty-eight charts, two dashboards.
+      assert.equal(report.created.length, 1 + 22 + 28 + 2);
 
       const again = await body<{ report: Report }>(
         await post(routes.bundles, '/api/v1/bundles', { bundle: example }),
@@ -148,7 +148,7 @@ describe(
       assert.equal(
         again.report.unchanged.filter((label) => label.startsWith('chart'))
           .length,
-        30,
+        28,
       );
 
       const { rows } = await (
@@ -157,7 +157,7 @@ describe(
         `SELECT count(*)::int AS n FROM visualizations
          WHERE bundle = 'gnosis-vpn' AND archived_at IS NULL`,
       );
-      assert.equal(rows[0].n, 30);
+      assert.equal(rows[0].n, 28);
       const listed = await body<{
         bundles: Array<{ name: string; dashboards: Array<{ slug: string }> }>;
       }>(
@@ -203,7 +203,7 @@ describe(
       }
     });
 
-    it('calculates relayed data from redeemed ticket deltas', async () => {
+    it('estimates relayed data from redemptions and their winning probabilities', async () => {
       const app = await lib.app.appDb();
       const { rows: results } = await app.query<{ table_name: string }>(
         `SELECT r.table_name
@@ -214,20 +214,19 @@ describe(
       );
       assert.equal(results.length, 1);
       const { rows } = await app.query<{
-        tickets: number;
         gigabytes: number;
+        expected: number;
         lowest_probability: number;
         highest_probability: number;
       }>(
-        `SELECT SUM(tickets)::float8 AS tickets,
-                SUM(gigabytes)::float8 AS gigabytes,
+        `SELECT SUM(gigabytes)::float8 AS gigabytes,
+                SUM(CASE WHEN win_probability > 0 THEN 650::float8 / 1073741824 / win_probability ELSE 0 END)::float8 AS expected,
                 MIN(win_probability)::float8 AS lowest_probability,
                 MAX(win_probability)::float8 AS highest_probability
            FROM results.${results[0].table_name}`,
       );
-      const expected = (rows[0].tickets * 650) / 1073741824;
       assert.ok(rows[0].gigabytes > 0);
-      assert.ok(Math.abs(rows[0].gigabytes - expected) < 1e-15);
+      assert.ok(Math.abs(rows[0].gigabytes - rows[0].expected) < 1e-15);
       assert.ok(rows[0].lowest_probability > 0);
       assert.equal(
         rows[0].lowest_probability,
@@ -288,13 +287,17 @@ describe(
       const exported = await body<{
         queries: Array<{ slug: string; kind: string; sql: string }>;
         charts: unknown[];
-        dashboards: Array<{ slug: string }>;
+        dashboards: Array<{ slug: string; widgets: Array<{ kind: string; text?: string; width: number; options: { textStyle?: string } }> }>;
       }>(response);
       assert.deepEqual(
         exported.dashboards.map((dashboard) => dashboard.slug),
         ['gnosis-vpn', 'gnosis-vpn-client'],
       );
-      assert.equal(exported.charts.length, 30);
+      assert.equal(exported.charts.length, 28);
+      const narrative = exported.dashboards.map((dashboard) => dashboard.widgets.filter((widget) => widget.kind === 'text' && widget.options.textStyle));
+      assert.ok(narrative[0].length >= 10, 'overview keeps its narrative through export');
+      assert.ok(narrative[1].length >= 5, 'client record keeps its narrative through export');
+      assert.ok(narrative.every((widgets) => widgets.some((widget) => widget.width < 12)));
       // Each query comes after every fragment it names.
       const seen = new Set<string>();
       for (const query of exported.queries) {

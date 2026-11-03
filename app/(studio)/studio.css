@@ -3340,17 +3340,162 @@ a.settings-card:focus-visible {
   cursor: pointer;
 }
 
-.dashboard-saved-views,
-.dashboard-saved-views form,
-.dashboard-saved-views label {
+.saved-views-trigger span {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.saved-views-panel {
+  right: auto;
+  left: 0;
+  width: min(380px, calc(100vw - 32px));
+  max-height: min(70vh, 520px);
+  overflow: auto;
+  gap: 12px;
+  padding: 16px;
+}
+
+.saved-views-panel.align-right {
+  right: 0;
+  left: auto;
+}
+
+@media (width <= 640px) {
+  .saved-views-panel,
+  .saved-views-panel.align-right {
+    position: fixed;
+    top: 64px;
+    right: 16px;
+    left: 16px;
+    width: auto;
+  }
+}
+
+.saved-views-panel header {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
+  align-items: start;
+  justify-content: space-between;
   gap: 8px;
 }
 
-.dashboard-saved-views {
-  margin-bottom: 12px;
+.saved-views-panel header p,
+.saved-views-empty,
+.saved-view-form p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.saved-views-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.saved-views-list li {
+  padding: 2px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-control);
+}
+
+.saved-view-apply {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  padding: 8px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.saved-view-apply:hover,
+.saved-view-apply:focus-visible {
+  background: var(--hover);
+}
+
+.saved-view-apply small {
+  color: var(--muted);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.saved-view-current {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 8px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.saved-view-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 0 8px 5px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.saved-view-actions button,
+.saved-view-icon {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.saved-view-actions button:hover,
+.saved-view-icon:hover {
+  color: var(--ink);
+}
+
+.saved-view-form {
+  display: grid;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+}
+
+.saved-view-form small {
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.saved-view-form > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.saved-view-add {
+  justify-self: start;
+}
+
+.favorite-button {
+  justify-content: center;
+  width: 36px;
+  min-width: 36px;
+  padding: 0;
+}
+
+.home-item .favorite-button {
+  margin-left: auto;
 }
 
 .dashboard-folder-create,
@@ -3533,7 +3678,7 @@ a.settings-card:focus-visible {
   border: var(--control-border) solid var(--ink);
   border-radius: var(--radius-pill);
   background: var(--yellow);
-  color: var(--ink);
+  color: #171717;
   font-size: 12px;
 }
 
@@ -3635,6 +3780,102 @@ a.settings-card:focus-visible {
 .dashboard-heading p {
   margin: 6px 0 0;
   max-width: 80ch;
+}
+
+.dashboard-text-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  height: var(--tile-height, 240px);
+  min-height: 0;
+  padding: 18px;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.dashboard-text-tile.is-card {
+  border: var(--tile-border) solid var(--tile-border-color);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: var(--tile-shadow);
+}
+
+.dashboard-cell.editing > .dashboard-text-tile {
+  padding-top: 52px;
+  outline: 1px dashed var(--line-strong);
+  outline-offset: -1px;
+}
+
+.dashboard-text-tile textarea {
+  flex: 1 0 72px;
+  width: 100%;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  resize: none;
+}
+
+.text-tile-style {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.text-tile-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.text-tile-style select {
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.dashboard-text-tile small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.text-tile-content > * {
+  margin: 0 0 0.8em;
+}
+
+.text-tile-content > :last-child {
+  margin-bottom: 0;
+}
+
+.text-tile-content h2 { font-size: 1.4em; }
+
+.text-tile-content h3 { font-size: 1.2em; }
+
+.text-tile-content h4 { font-size: 1em; }
+
+.text-tile-content ul { padding-left: 1.4em; }
+
+.text-tile-content a {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+@media (width <= 1100px) {
+  .dashboard-cell:not(.editing) > .dashboard-text-tile {
+    min-height: 160px;
+  }
 }
 
 .link-fields {

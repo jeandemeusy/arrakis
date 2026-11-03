@@ -245,6 +245,7 @@ export type Variable = {
 
 export type WidgetOptions = {
   layout?: { column: number; row: number; unit?: 'cells'; rows?: number };
+  textStyle?: 'plain' | 'card';
   title?: string;
   /**
    * Clicking a row or bar sets `var` to that row's `column`, on this dashboard
@@ -642,6 +643,11 @@ function parseWidgetOptions(input: unknown, where: string): WidgetOptions {
   }
   const raw = input as Record<string, unknown>;
   const options: WidgetOptions = {};
+  if (raw.textStyle !== undefined) {
+    if (raw.textStyle !== 'plain' && raw.textStyle !== 'card')
+      throw badRequest(`${where}.options.textStyle must be plain or card`);
+    options.textStyle = raw.textStyle;
+  }
   if (raw.layout !== undefined) {
     const layout = raw.layout as Record<string, unknown> | null;
     if (
@@ -744,7 +750,7 @@ export async function replaceWidgets(
     const options = parseWidgetOptions(entry.options, where);
     if (
       options.layout &&
-      options.layout.column + (kind === 'text' ? 12 : width) > 12
+      options.layout.column + (kind === 'text' && !options.textStyle ? 12 : width) > 12
     )
       throw badRequest(`${where}.options.layout extends beyond the grid`);
     return {

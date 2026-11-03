@@ -681,6 +681,20 @@ describe(
           );
           assert.equal(response.status, status, `width ${width}`);
         }
+        const textTile = await routes.widgets.PUT(
+          request('PUT', '/api/v1/dashboards/usage/widgets', {
+            cookie,
+            body: { widgets: [{ kind: 'text', text: '# Context\n\nHelpful notes.', width: 4, height: 240, options: { textStyle: 'card', layout: { column: 6, row: 2, unit: 'cells', rows: 3 } } }] },
+          }),
+          context({ slug: 'usage' }),
+        );
+        assert.equal(textTile.status, 200, JSON.stringify(await textTile.clone().json()));
+        const saved = await body<{ dashboard: { widgets: Array<{ width: number; text: string; options: { textStyle: string; layout: { column: number; rows: number } } }> } }>(textTile);
+        assert.equal(saved.dashboard.widgets[0].width, 4);
+        assert.equal(saved.dashboard.widgets[0].text, '# Context\n\nHelpful notes.');
+        assert.equal(saved.dashboard.widgets[0].options.textStyle, 'card');
+        assert.equal(saved.dashboard.widgets[0].options.layout.column, 6);
+        assert.equal(saved.dashboard.widgets[0].options.layout.rows, 3);
         // Back to the layout the rest of this test reads.
         await routes.widgets.PUT(
           request('PUT', '/api/v1/dashboards/usage/widgets', {

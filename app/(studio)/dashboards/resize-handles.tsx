@@ -42,7 +42,7 @@ export function ResizeHandles({
   } | null>(null);
 
   const begin = (edge: Edge) => (event: React.PointerEvent) => {
-    const cell = grip.current?.closest<HTMLElement>('.dashboard-cell');
+    const cell = grip.current?.closest<HTMLElement>('.dashboard-cell, .dashboard-heading');
     const grid = cell?.parentElement;
     if (!cell || !grid) return;
     event.preventDefault();

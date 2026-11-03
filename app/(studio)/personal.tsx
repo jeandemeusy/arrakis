@@ -50,8 +50,9 @@ export function Favorite({ item }: { item: PersonalItem }) {
   return (
     <button
       type="button"
-      className="studio-button"
+      className="studio-button favorite-button"
       aria-label={`${active ? 'Remove' : 'Add'} ${item.slug} ${active ? 'from' : 'to'} favorites`}
+      title={active ? 'Remove from favorites' : 'Add to favorites'}
       aria-pressed={active}
       onClick={() =>
         writeItems(
@@ -66,8 +67,7 @@ export function Favorite({ item }: { item: PersonalItem }) {
         size={15}
         fill={active ? 'currentColor' : 'none'}
         aria-hidden="true"
-      />{' '}
-      {active ? 'Favorited' : 'Favorite'}
+      />
     </button>
   );
 }
