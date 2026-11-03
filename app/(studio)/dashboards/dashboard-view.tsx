@@ -32,6 +32,7 @@ import {
   responsiveSpan,
   resolveGridBoxes,
   snapGridRow,
+  snapSectionRow,
   type GridBox,
 } from '@/lib/viz/dashboard-grid';
 import { type WidgetPayload } from '../../viz/widget-tile';
@@ -154,7 +155,7 @@ export function DashboardView({
   const tileNodes = useRef(new Map<string, HTMLElement>());
   const [tileRows, setTileRows] = useState<Record<string, number>>({});
   const [gridViewport, setGridViewport] = useState(1200);
-  const [gridSize, setGridSize] = useState({ step: 1, gap: 8 });
+  const [gridSize, setGridSize] = useState({ step: 1, gap: 4 });
 
   useEffect(() => {
     const update = () => setGridViewport(window.innerWidth);
@@ -176,10 +177,12 @@ export function DashboardView({
       const next: Record<string, number> = {};
       const grid = tileNodes.current.values().next().value?.parentElement;
       if (grid) {
-        const gap = parseFloat(getComputedStyle(grid).columnGap) || 0;
+        const style = getComputedStyle(grid);
+        const columnGap = parseFloat(style.columnGap) || 0;
+        const gap = parseFloat(style.getPropertyValue('--grid-row-gap')) || 0;
         const step = Math.max(
           1,
-          Math.round((grid.getBoundingClientRect().width + gap) / 12),
+          Math.round((grid.getBoundingClientRect().width + columnGap) / 12),
         );
         setGridSize((current) =>
           current.step === step && current.gap === gap
@@ -192,8 +195,17 @@ export function DashboardView({
           node.querySelector<HTMLElement>(':scope > .chart-card') ?? node;
         const height = content.getBoundingClientRect().height;
         const gap =
-          parseFloat(getComputedStyle(node.parentElement!).columnGap) || 0;
-        if (height > 0) next[id] = gridRows(height, gap, gridSize.step);
+          parseFloat(
+            getComputedStyle(node.parentElement!).getPropertyValue(
+              '--grid-row-gap',
+            ),
+          ) || 0;
+        if (height > 0)
+          next[id] = gridRows(
+            height,
+            gap,
+            node.classList.contains('dashboard-heading') ? 1 : gridSize.step,
+          );
       }
       setTileRows((current) => {
         const ids = Object.keys(next);
@@ -211,7 +223,7 @@ export function DashboardView({
     for (const node of tileNodes.current.values()) observer.observe(node);
     measure();
     return () => observer.disconnect();
-  }, [dashboard, draft, editing, gridSize.step]);
+  }, [dashboard, draft, editing, gridSize.step, gridSize.gap]);
 
   useEffect(() => {
     let live = true;
@@ -663,15 +675,16 @@ export function DashboardView({
             0,
             Math.round((rect.left - gridBox.left) / (columnWidth + gap)),
           ),
-          row: snapGridRow(
-            Math.max(0, Math.round(rect.top - gridBox.top)),
-            gridSize.step,
-          ),
+          row: Math.max(0, Math.round(rect.top - gridBox.top)),
           width: Math.max(
             1,
             Math.min(12, Math.round((rect.width + gap) / (columnWidth + gap))),
           ),
-          height: gridRows(rect.height, gap, gridSize.step),
+          height: gridRows(
+            rect.height,
+            gridSize.gap,
+            widget.kind === 'text' ? 1 : gridSize.step,
+          ),
         },
       ];
     });
@@ -772,19 +785,16 @@ export function DashboardView({
   };
   const resizeSpatial = (
     widget: DraftWidget,
-    size: { width: number; height: number },
+    size: { width: number; height: number; rows: number },
   ) => {
     const snapshot = snapshotGrid(widget.id);
     const box = snapshot?.boxes.find((entry) => entry.id === widget.id);
     if (!snapshot || !box) {
-      updateWidget({ ...widget, ...size });
+      updateWidget({ ...widget, width: size.width, height: size.height });
       return;
     }
     box.width = responsiveSpan(size.width, window.innerWidth);
-    box.height = Math.max(
-      gridSize.step,
-      box.height + size.height - widget.height,
-    );
+    box.height = size.rows * gridSize.step;
     applyGrid(moveGridBox(snapshot.boxes, widget.id, box.column, box.row), {
       id: widget.id,
       ...size,
@@ -809,7 +819,20 @@ export function DashboardView({
       0,
       Math.min(100000, Math.round(clientY - rect.top - start.offsetY)),
     );
-    const row = snapGridRow(rawRow, gridSize.step);
+    // Each full-width heading starts a new tile grid immediately below its
+    // natural height. Snap within that section instead of to the page origin.
+    const headingIds = new Set(
+      draft
+        ?.filter((widget) => widget.kind === 'text')
+        .map((widget) => widget.id),
+    );
+    const row = snapSectionRow(
+      rawRow,
+      gridSize.step,
+      start.boxes,
+      headingIds,
+      start.id,
+    );
     const preview = compactGridBoxes(
       moveGridBox(start.boxes, start.id, column, row),
     ).find((box) => box.id === start.id);
@@ -821,7 +844,7 @@ export function DashboardView({
       height: moving.height,
       left: column * (columnWidth + gap),
       pixelWidth: moving.width * columnWidth + (moving.width - 1) * gap,
-      gap,
+      gap: gridSize.gap,
     };
   };
   const updateSpatialDrag = (event: React.PointerEvent<HTMLButtonElement>) => {
@@ -1171,13 +1194,12 @@ export function DashboardView({
                     (widget.visualization?.type === 'number' ? 80 : 200),
               gridSize.gap,
               gridSize.step,
-              widget.visualization?.type === 'number' ? 200 : 0,
             );
             return (
               <div
                 key={widget.id}
                 data-widget={widget.id}
-                className={`dashboard-cell span-${widget.width}${widget.options.layout ? ' has-layout' : ''}${editClasses}`}
+                className={`dashboard-cell span-${widget.width}${renderedHeight < 180 ? ' is-compact' : ''}${widget.options.layout ? ' has-layout' : ''}${editClasses}`}
                 ref={(node) => {
                   if (node) tileNodes.current.set(widget.id, node);
                   else tileNodes.current.delete(widget.id);

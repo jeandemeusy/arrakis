@@ -61,6 +61,26 @@ export function snapGridRow(row: number, step: number): number {
   return Math.max(0, Math.round(row / step) * step);
 }
 
+/** Start a fresh tile grid below each full-width section heading. */
+export function snapSectionRow(
+  row: number,
+  step: number,
+  boxes: GridBox[],
+  headingIds: Set<string>,
+  movingId: string,
+): number {
+  const origin = boxes.reduce(
+    (closest, box) =>
+      box.id !== movingId &&
+      headingIds.has(box.id) &&
+      box.row + box.height <= row
+        ? Math.max(closest, box.row + box.height)
+        : closest,
+    0,
+  );
+  return origin + snapGridRow(row - origin, step);
+}
+
 /** Preserve saved positions where possible, making room for content that grew. */
 export function resolveGridBoxes(boxes: GridBox[]): GridBox[] {
   const placed: GridBox[] = [];

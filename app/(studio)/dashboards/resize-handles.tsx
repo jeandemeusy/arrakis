@@ -1,7 +1,6 @@
 'use client';
 
 import { useRef, useState } from 'react';
-import { gridTileHeight } from '@/lib/viz/dashboard-grid';
 
 /** Heights are stored in pixels, from 80 to 1200. */
 const MIN_HEIGHT = 80;
@@ -28,7 +27,7 @@ export function ResizeHandles({
   height: number;
   rows: number;
   gridStep: number;
-  onResize: (size: { width: number; height: number }) => void;
+  onResize: (size: { width: number; height: number; rows: number }) => void;
 }) {
   const grip = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState<Edge | null>(null);
@@ -36,10 +35,10 @@ export function ResizeHandles({
     x: number;
     y: number;
     height: number;
+    rows: number;
     left: number;
     column: number;
     gap: number;
-    outerHeight: number;
   } | null>(null);
 
   const begin = (edge: Edge) => (event: React.PointerEvent) => {
@@ -54,10 +53,10 @@ export function ResizeHandles({
       x: event.clientX,
       y: event.clientY,
       height,
+      rows,
       left: cell.getBoundingClientRect().left,
       column: (box.width - gap * 11) / 12,
       gap,
-      outerHeight: cell.getBoundingClientRect().height,
     };
     setDragging(edge);
   };
@@ -65,7 +64,7 @@ export function ResizeHandles({
   const move = (event: React.PointerEvent) => {
     const from = start.current;
     if (!dragging || !from) return;
-    let next = { width, height };
+    let next = { width, height, rows };
     if (dragging !== 'bottom') {
       // As many columns as reach the pointer, counting the gaps between them.
       const span = Math.round(
@@ -74,17 +73,18 @@ export function ResizeHandles({
       next = { ...next, width: Math.min(12, Math.max(1, span)) };
     }
     if (dragging !== 'right') {
-      const outerHeight = gridTileHeight(
-        from.outerHeight + event.clientY - from.y,
-        from.gap,
-        gridStep,
+      const nextRows = Math.max(
+        1,
+        Math.round(from.rows + (event.clientY - from.y) / gridStep),
       );
       next = {
         ...next,
-        height: snapHeight(from.height + outerHeight - from.outerHeight),
+        rows: nextRows,
+        height: snapHeight(from.height + (nextRows - from.rows) * gridStep),
       };
     }
-    if (next.width !== width || next.height !== height) onResize(next);
+    if (next.width !== width || next.height !== height || next.rows !== rows)
+      onResize(next);
   };
 
   const end = () => {
@@ -109,6 +109,10 @@ export function ResizeHandles({
         edge === 'right'
           ? height
           : snapHeight(height + delta[1] * gridStep * (event.shiftKey ? 3 : 1)),
+      rows:
+        edge === 'right'
+          ? rows
+          : Math.max(1, rows + delta[1] * (event.shiftKey ? 3 : 1)),
     });
   };
 

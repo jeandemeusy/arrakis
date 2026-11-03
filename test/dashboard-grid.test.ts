@@ -8,6 +8,7 @@ import {
   responsiveSpan,
   resolveGridBoxes,
   snapGridRow,
+  snapSectionRow,
 } from '../lib/viz/dashboard-grid';
 
 describe('dashboard grid sizing', () => {
@@ -19,7 +20,7 @@ describe('dashboard grid sizing', () => {
     assert.equal(responsiveSpan(2, 560), 12);
   });
   it('counts exactly one gap between vertically stacked tiles', () => {
-    for (const gap of [10, 14, 18]) {
+    for (const gap of [4, 10, 14, 18]) {
       const shortHeight = gridTileHeight(300, gap, 76);
       const tallHeight = gridTileHeight(shortHeight * 2 + gap, gap, 76);
       assert.equal(tallHeight, shortHeight * 2 + gap);
@@ -111,5 +112,21 @@ describe('dashboard grid sizing', () => {
     const twoTiles = 2 * tile + gap;
     assert.equal(gridTileHeight(twoTiles, gap, step), twoTiles);
     assert.equal(gridRows(twoTiles, gap, step), step * 8);
+  });
+
+  it('starts tile rows immediately after a naturally sized section heading', () => {
+    const heading = {
+      id: 'heading',
+      column: 0,
+      row: 200,
+      width: 12,
+      height: 83,
+    };
+    const chart = { id: 'chart', column: 0, row: 300, width: 6, height: 200 };
+    const boxes = compactGridBoxes([heading, chart]);
+    assert.equal(boxes.find((box) => box.id === 'chart')?.row, 83);
+    const headings = new Set(['heading']);
+    assert.equal(snapSectionRow(89, 100, boxes, headings, 'chart'), 83);
+    assert.equal(snapSectionRow(179, 100, boxes, headings, 'chart'), 183);
   });
 });

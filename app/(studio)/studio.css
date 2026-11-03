@@ -3566,6 +3566,17 @@ a.settings-card:focus-visible {
    figure's room, plus the title above and the footer below. */
 .dashboard-cell > .chart-card.menu-mode.metric {
   height: var(--tile-height, calc(var(--cell-height, 120px) + 80px));
+  min-height: 0;
+}
+
+/* Small tiles scroll their contents instead of extending beyond their grid cell. */
+.dashboard-cell.is-compact > .chart-card {
+  overflow: auto;
+}
+
+/* A missing note must not remove the flexible space beneath the figure. */
+.dashboard-cell > .chart-card.menu-mode.metric:not(:has(> p)) > strong {
+  margin-bottom: auto;
 }
 
 /* Keep narrow metric titles, values and controls legible when notes wrap. */
@@ -3941,7 +3952,8 @@ a.settings-card:focus-visible {
 
 /* The grid's columns, shown while editing, clearer while dragging. */
 .grid-frame {
-  --grid-gap: 8px;
+  --grid-gap: 4px;
+  --grid-row-gap: 4px;
 
   position: relative;
 }
@@ -3970,7 +3982,8 @@ a.settings-card:focus-visible {
     to bottom,
     transparent 0,
     transparent calc(var(--grid-step, 1px) - 1px),
-    color-mix(in srgb, var(--ink) 9%, transparent) calc(var(--grid-step, 1px) - 1px),
+    color-mix(in srgb, var(--ink) 9%, transparent)
+      calc(var(--grid-step, 1px) - 1px),
     color-mix(in srgb, var(--ink) 9%, transparent) var(--grid-step, 1px)
   );
 }
