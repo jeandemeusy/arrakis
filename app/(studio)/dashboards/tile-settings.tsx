@@ -60,7 +60,7 @@ export function TileSettings({
         </p>
       )}
       <p className="drawer-size">
-        {widget.width}/12 wide · {widget.height}px high
+        {widget.width}/12 wide
         <small>Drag the tile&apos;s corner to resize it.</small>
       </p>
       <label className="studio-field">

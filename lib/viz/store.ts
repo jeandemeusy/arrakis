@@ -240,6 +240,7 @@ export type Variable = {
 };
 
 export type WidgetOptions = {
+  layout?: { column: number; row: number; unit?: 'cells'; rows?: number };
   title?: string;
   /**
    * Clicking a row or bar sets `var` to that row's `column`, on this dashboard
@@ -625,6 +626,39 @@ function parseWidgetOptions(input: unknown, where: string): WidgetOptions {
   }
   const raw = input as Record<string, unknown>;
   const options: WidgetOptions = {};
+  if (raw.layout !== undefined) {
+    const layout = raw.layout as Record<string, unknown> | null;
+    if (
+      !layout ||
+      !Number.isInteger(layout.column) ||
+      !Number.isInteger(layout.row) ||
+      Number(layout.column) < 0 ||
+      Number(layout.column) > 11 ||
+      Number(layout.row) < 0 ||
+      Number(layout.row) > 100000
+    )
+      throw badRequest(
+        `${where}.options.layout must have a valid column and row`,
+      );
+    if (layout.unit !== undefined && layout.unit !== 'cells')
+      throw badRequest(`${where}.options.layout.unit must be cells`);
+    if (
+      layout.rows !== undefined &&
+      (layout.unit !== 'cells' ||
+        !Number.isInteger(layout.rows) ||
+        Number(layout.rows) < 1 ||
+        Number(layout.rows) > 10000)
+    )
+      throw badRequest(
+        `${where}.options.layout.rows must be a positive grid-cell count`,
+      );
+    options.layout = {
+      column: Number(layout.column),
+      row: Number(layout.row),
+      ...(layout.unit === 'cells' ? { unit: 'cells' as const } : {}),
+      ...(layout.rows === undefined ? {} : { rows: Number(layout.rows) }),
+    };
+  }
   if (typeof raw.title === 'string' && raw.title.trim())
     options.title = raw.title.trim().slice(0, 200);
   if (typeof raw.note === 'string' && raw.note.trim())
@@ -691,13 +725,19 @@ export async function replaceWidgets(
     }
     const text =
       kind === 'text' ? asText(entry.text ?? '').slice(0, 5_000) : '';
+    const options = parseWidgetOptions(entry.options, where);
+    if (
+      options.layout &&
+      options.layout.column + (kind === 'text' ? 12 : width) > 12
+    )
+      throw badRequest(`${where}.options.layout extends beyond the grid`);
     return {
       kind,
       visualization,
       text,
       width,
       height,
-      options: parseWidgetOptions(entry.options, where),
+      options,
     };
   });
 

@@ -3234,17 +3234,31 @@ a.settings-card:focus-visible {
    * continues alongside them.
    */
   grid-auto-flow: row dense;
-  grid-auto-rows: 4px;
+  grid-auto-rows: 1px;
   column-gap: var(--grid-gap);
-  row-gap: var(--grid-gap);
+  row-gap: 0;
   align-items: start;
+}
+
+.dashboard-grid > .has-layout {
+  grid-column: var(--layout-column) / span var(--layout-width);
+  grid-row: var(--layout-row) / span var(--cell-rows, 1);
+}
+
+.grid-drop-preview {
+  position: absolute;
+  z-index: 4;
+  border: 2px dashed var(--accent-2);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--accent-2) 12%, transparent);
+  pointer-events: none;
 }
 
 .dashboard-cell {
   position: relative;
   display: flex;
   flex-direction: column;
-  grid-row: span var(--cell-rows, 7);
+  grid-row: span var(--cell-rows, 1);
   align-self: start;
   min-width: 0;
 }
@@ -3258,7 +3272,7 @@ a.settings-card:focus-visible {
    for its title, legend, note and footer so equal configured sizes always
    render as equal cards. */
 .dashboard-cell > .chart-card.menu-mode:not(.metric) {
-  height: calc(var(--cell-height, 280px) + 200px);
+  height: var(--tile-height, calc(var(--cell-height, 280px) + 200px));
 }
 
 .dashboard-cell > .chart-card.menu-mode:not(.metric) > .chart-frame {
@@ -3551,7 +3565,20 @@ a.settings-card:focus-visible {
 /* A number tile follows its widget's height, as a chart's plot does: the
    figure's room, plus the title above and the footer below. */
 .dashboard-cell > .chart-card.menu-mode.metric {
-  height: calc(var(--cell-height, 120px) + 80px);
+  height: var(--tile-height, calc(var(--cell-height, 120px) + 80px));
+}
+
+/* Keep narrow metric titles, values and controls legible when notes wrap. */
+.dashboard-cell > .chart-card.menu-mode.metric > span,
+.dashboard-cell > .chart-card.menu-mode.metric > strong,
+.dashboard-cell > .chart-card.menu-mode.metric > .tile-meta {
+  flex-shrink: 0;
+}
+
+.dashboard-cell > .chart-card.menu-mode.metric > p {
+  min-height: 0;
+  overflow: auto;
+  overflow-wrap: anywhere;
 }
 
 /* Resizing a tile while editing: grips on its right edge, bottom edge and
@@ -3914,6 +3941,8 @@ a.settings-card:focus-visible {
 
 /* The grid's columns, shown while editing, clearer while dragging. */
 .grid-frame {
+  --grid-gap: 8px;
+
   position: relative;
 }
 
@@ -3931,6 +3960,19 @@ a.settings-card:focus-visible {
 .grid-guides i {
   border-radius: var(--radius);
   background: color-mix(in srgb, var(--ink) 3%, transparent);
+}
+
+.grid-guides::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent calc(var(--grid-step, 1px) - 1px),
+    color-mix(in srgb, var(--ink) 9%, transparent) calc(var(--grid-step, 1px) - 1px),
+    color-mix(in srgb, var(--ink) 9%, transparent) var(--grid-step, 1px)
+  );
 }
 
 .grid-frame.dragging .grid-guides,
@@ -4077,6 +4119,7 @@ a.settings-card:focus-visible {
 
 .tile-tool.grip {
   cursor: grab;
+  touch-action: none;
 }
 
 .tile-tool.grip:active {
@@ -4142,6 +4185,10 @@ a.settings-card:focus-visible {
 }
 
 /* The ghost tile at the end of the grid. */
+.dashboard-grid > .add-tile-cell {
+  grid-row: span 188;
+}
+
 .add-tile {
   display: grid;
   flex: 1;

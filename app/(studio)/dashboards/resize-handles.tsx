@@ -1,32 +1,33 @@
 'use client';
 
 import { useRef, useState } from 'react';
+import { gridTileHeight } from '@/lib/viz/dashboard-grid';
 
-/** Heights snap to this, in pixels, from 80 to 1200 (what the store accepts). */
-const HEIGHT_STEP = 40;
+/** Heights are stored in pixels, from 80 to 1200. */
 const MIN_HEIGHT = 80;
 const MAX_HEIGHT = 1200;
 
 const snapHeight = (height: number) =>
-  Math.min(
-    MAX_HEIGHT,
-    Math.max(MIN_HEIGHT, Math.round(height / HEIGHT_STEP) * HEIGHT_STEP),
-  );
+  Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, Math.round(height)));
 
 type Edge = 'corner' | 'right' | 'bottom';
 
 /**
  * Grips on a tile being edited: drag the corner to resize both ways, an edge
- * for one. The width snaps to twelfths of the grid, the height to 40px; the
- * tile follows live, with its size shown while dragging.
+ * for one. Both dimensions snap to the same square grid. The tile follows
+ * live, with its size shown while dragging.
  */
 export function ResizeHandles({
   width,
   height,
+  rows,
+  gridStep,
   onResize,
 }: {
   width: number;
   height: number;
+  rows: number;
+  gridStep: number;
   onResize: (size: { width: number; height: number }) => void;
 }) {
   const grip = useRef<HTMLDivElement>(null);
@@ -38,6 +39,7 @@ export function ResizeHandles({
     left: number;
     column: number;
     gap: number;
+    outerHeight: number;
   } | null>(null);
 
   const begin = (edge: Edge) => (event: React.PointerEvent) => {
@@ -55,6 +57,7 @@ export function ResizeHandles({
       left: cell.getBoundingClientRect().left,
       column: (box.width - gap * 11) / 12,
       gap,
+      outerHeight: cell.getBoundingClientRect().height,
     };
     setDragging(edge);
   };
@@ -71,9 +74,14 @@ export function ResizeHandles({
       next = { ...next, width: Math.min(12, Math.max(1, span)) };
     }
     if (dragging !== 'right') {
+      const outerHeight = gridTileHeight(
+        from.outerHeight + event.clientY - from.y,
+        from.gap,
+        gridStep,
+      );
       next = {
         ...next,
-        height: snapHeight(from.height + event.clientY - from.y),
+        height: snapHeight(from.height + outerHeight - from.outerHeight),
       };
     }
     if (next.width !== width || next.height !== height) onResize(next);
@@ -88,8 +96,8 @@ export function ResizeHandles({
     const step: Record<string, [number, number]> = {
       ArrowLeft: [-1, 0],
       ArrowRight: [1, 0],
-      ArrowUp: [0, -HEIGHT_STEP],
-      ArrowDown: [0, HEIGHT_STEP],
+      ArrowUp: [0, -1],
+      ArrowDown: [0, 1],
     };
     const delta = step[event.key];
     if (!delta) return;
@@ -97,7 +105,10 @@ export function ResizeHandles({
     onResize({
       width:
         edge === 'bottom' ? width : Math.min(12, Math.max(1, width + delta[0])),
-      height: edge === 'right' ? height : snapHeight(height + delta[1]),
+      height:
+        edge === 'right'
+          ? height
+          : snapHeight(height + delta[1] * gridStep * (event.shiftKey ? 3 : 1)),
     });
   };
 
@@ -105,7 +116,7 @@ export function ResizeHandles({
     <button
       type="button"
       className={`resize-handle ${edge}`}
-      aria-label={`${label} (${width}/12 wide, ${height}px high)`}
+      aria-label={`${label} (${width}/12 wide, ${rows} grid rows high)`}
       title={label}
       onPointerDown={begin(edge)}
       onPointerMove={move}
@@ -122,7 +133,7 @@ export function ResizeHandles({
       {handle('corner', 'Size: drag, or arrow keys')}
       {dragging && (
         <output className="resize-size">
-          {width}/12 · {height}px
+          {width}/12 · {rows} rows
         </output>
       )}
     </div>

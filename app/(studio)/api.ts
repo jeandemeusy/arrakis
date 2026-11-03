@@ -251,6 +251,7 @@ export type ChartHost = {
 };
 
 export type WidgetOptions = {
+  layout?: { column: number; row: number; unit?: 'cells'; rows?: number };
   title?: string;
   link?: { column: string; var: string; dashboard?: string };
   requires?: string;

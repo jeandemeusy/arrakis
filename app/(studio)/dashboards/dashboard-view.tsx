@@ -24,6 +24,16 @@ import {
   X,
 } from 'lucide-react';
 import { asText } from '@/lib/viz/text';
+import {
+  gridRows,
+  gridTileHeight,
+  compactGridBoxes,
+  moveGridBox,
+  responsiveSpan,
+  resolveGridBoxes,
+  snapGridRow,
+  type GridBox,
+} from '@/lib/viz/dashboard-grid';
 import { type WidgetPayload } from '../../viz/widget-tile';
 import {
   api,
@@ -55,9 +65,6 @@ import { VariablesEditor } from './variables-editor';
 import { HelpTip } from '../help-tip';
 import { LockedButton } from '../locked-link';
 import { ShareButton } from '../share';
-
-const GRID_ROW_HEIGHT = 4;
-const GRID_GAP = 14;
 
 /**
  * A dashboard: its variables across the top, its widgets on the grid below.
@@ -117,33 +124,76 @@ export function DashboardView({
   const [selected, setSelected] = useState<string | null>(null);
   const [picking, setPicking] = useState(false);
   const [dragging, setDragging] = useState<string | null>(null);
-  const [dropTarget, setDropTarget] = useState<{
+  const spatialDrag = useRef<{
     id: string;
-    side: 'before' | 'after';
+    grid: HTMLElement;
+    boxes: GridBox[];
+    offsetX: number;
+    offsetY: number;
+    startX: number;
+    startY: number;
+    pointerX: number;
+    pointerY: number;
+    active: boolean;
   } | null>(null);
-  // The same, readable at once by the drag events that follow a drag start,
-  // before React has rendered the state.
-  const draggingRef = useRef<string | null>(null);
-  const dropRef = useRef<{ id: string; side: 'before' | 'after' } | null>(null);
+  const scrollFrame = useRef<number | null>(null);
+  const [placement, setPlacement] = useState<{
+    column: number;
+    row: number;
+    previewRow: number;
+    width: number;
+    height: number;
+    left: number;
+    pixelWidth: number;
+    gap: number;
+  } | null>(null);
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [added, setAdded] = useState<string | null>(null);
   // Dense grid rows need to reflect the tile's actual rendered chrome: legends,
   // notes and wrapped section text vary, so a height estimate can overlap them.
   const tileNodes = useRef(new Map<string, HTMLElement>());
   const [tileRows, setTileRows] = useState<Record<string, number>>({});
+  const [gridViewport, setGridViewport] = useState(1200);
+  const [gridSize, setGridSize] = useState({ step: 1, gap: 8 });
+
+  useEffect(() => {
+    const update = () => setGridViewport(window.innerWidth);
+    update();
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (scrollFrame.current !== null)
+        cancelAnimationFrame(scrollFrame.current);
+    },
+    [],
+  );
 
   useLayoutEffect(() => {
     const measure = () => {
       const next: Record<string, number> = {};
+      const grid = tileNodes.current.values().next().value?.parentElement;
+      if (grid) {
+        const gap = parseFloat(getComputedStyle(grid).columnGap) || 0;
+        const step = Math.max(
+          1,
+          Math.round((grid.getBoundingClientRect().width + gap) / 12),
+        );
+        setGridSize((current) =>
+          current.step === step && current.gap === gap
+            ? current
+            : { step, gap },
+        );
+      }
       for (const [id, node] of tileNodes.current) {
         const content =
           node.querySelector<HTMLElement>(':scope > .chart-card') ?? node;
         const height = content.getBoundingClientRect().height;
-        if (height > 0)
-          next[id] = Math.max(
-            1,
-            Math.ceil((height + GRID_GAP) / (GRID_ROW_HEIGHT + GRID_GAP)),
-          );
+        const gap =
+          parseFloat(getComputedStyle(node.parentElement!).columnGap) || 0;
+        if (height > 0) next[id] = gridRows(height, gap, gridSize.step);
       }
       setTileRows((current) => {
         const ids = Object.keys(next);
@@ -156,10 +206,12 @@ export function DashboardView({
       });
     };
     const observer = new ResizeObserver(measure);
+    const grid = tileNodes.current.values().next().value?.parentElement;
+    if (grid) observer.observe(grid);
     for (const node of tileNodes.current.values()) observer.observe(node);
     measure();
     return () => observer.disconnect();
-  }, [dashboard, draft, editing]);
+  }, [dashboard, draft, editing, gridSize.step]);
 
   useEffect(() => {
     let live = true;
@@ -480,6 +532,36 @@ export function DashboardView({
     !editing &&
     data?.widgets.find((candidate) => candidate.id === widget.id)?.state ===
       'hidden';
+  const layoutBoxes = widgets.flatMap((widget) => {
+    const layout = widget.options.layout;
+    if (!layout || hidden(widget)) return [];
+    const width = responsiveSpan(
+      widget.kind === 'text' ? 12 : widget.width,
+      gridViewport,
+    );
+    return [
+      {
+        id: widget.id,
+        ...layout,
+        row:
+          layout.unit === 'cells'
+            ? layout.row * gridSize.step
+            : snapGridRow(layout.row, gridSize.step),
+        column: Math.min(layout.column, 12 - width),
+        width,
+        height: tileRows[widget.id] ?? 1,
+      },
+    ];
+  });
+  const resolvedBoxes = resolveGridBoxes(layoutBoxes);
+  const layoutMeasured = layoutBoxes.every(
+    (box) => tileRows[box.id] !== undefined,
+  );
+  const resolvedLayout = new Map(
+    (layoutMeasured ? compactGridBoxes(resolvedBoxes) : resolvedBoxes).map(
+      (box) => [box.id, box],
+    ),
+  );
 
   const moveWidget = (from: number, to: number) => {
     if (!draft) return;
@@ -555,48 +637,247 @@ export function DashboardView({
       options: {},
     });
 
-  // Dropping a dragged tile before or after the one under the pointer.
-  const dragOver = (id: string) => (event: React.DragEvent<HTMLElement>) => {
-    const moving = draggingRef.current;
-    if (!moving || moving === id) return;
-    event.preventDefault();
-    const box = event.currentTarget.getBoundingClientRect();
-    const wide = box.width > box.height * 3;
-    const side = (
-      wide
-        ? event.clientY < box.top + box.height / 2
-        : event.clientX < box.left + box.width / 2
-    )
-      ? 'before'
-      : 'after';
-    if (dropRef.current?.id !== id || dropRef.current.side !== side) {
-      dropRef.current = { id, side };
-      setDropTarget({ id, side });
-    }
-  };
   const endDrag = () => {
-    draggingRef.current = null;
-    dropRef.current = null;
+    if (scrollFrame.current !== null) cancelAnimationFrame(scrollFrame.current);
+    scrollFrame.current = null;
+    spatialDrag.current = null;
     setDragging(null);
-    setDropTarget(null);
+    setPlacement(null);
   };
-  const drop = (event: React.DragEvent) => {
-    event.preventDefault();
-    const moving = draggingRef.current;
-    const target = dropRef.current;
-    if (draft && moving && target) {
-      const from = draft.findIndex((entry) => entry.id === moving);
-      let to = draft.findIndex((entry) => entry.id === target.id);
-      if (from >= 0 && to >= 0) {
-        if (target.side === 'after') to += 1;
-        if (from < to) to -= 1;
-        moveWidget(from, to);
-      }
+  const snapshotGrid = (id: string) => {
+    if (!draft) return null;
+    const node = tileNodes.current.get(id);
+    const grid = node?.parentElement;
+    if (!node || !grid) return null;
+    const gridBox = grid.getBoundingClientRect();
+    const gap = parseFloat(getComputedStyle(grid).columnGap) || 0;
+    const columnWidth = (gridBox.width - gap * 11) / 12;
+    const boxes = draft.flatMap((widget) => {
+      const element = tileNodes.current.get(widget.id);
+      if (!element) return [];
+      const rect = element.getBoundingClientRect();
+      return [
+        {
+          id: widget.id,
+          column: Math.max(
+            0,
+            Math.round((rect.left - gridBox.left) / (columnWidth + gap)),
+          ),
+          row: snapGridRow(
+            Math.max(0, Math.round(rect.top - gridBox.top)),
+            gridSize.step,
+          ),
+          width: Math.max(
+            1,
+            Math.min(12, Math.round((rect.width + gap) / (columnWidth + gap))),
+          ),
+          height: gridRows(rect.height, gap, gridSize.step),
+        },
+      ];
+    });
+    return { boxes, node };
+  };
+  const applyGrid = (
+    boxes: GridBox[],
+    resize?: { id: string; width: number; height: number },
+  ) => {
+    const compacted = compactGridBoxes(boxes);
+    setDraft(
+      (current) =>
+        current?.map((widget) => {
+          const box = compacted.find((entry) => entry.id === widget.id);
+          const size =
+            resize?.id === widget.id
+              ? { width: resize.width, height: resize.height }
+              : {};
+          return box
+            ? {
+                ...widget,
+                ...size,
+                options: {
+                  ...widget.options,
+                  layout: {
+                    column: box.column,
+                    row: Math.round(box.row / gridSize.step),
+                    unit: 'cells',
+                    ...(widget.kind === 'visualization'
+                      ? {
+                          rows: Math.max(
+                            1,
+                            Math.round(box.height / gridSize.step),
+                          ),
+                        }
+                      : {}),
+                  },
+                },
+              }
+            : widget;
+        }) ?? current,
+    );
+  };
+  const beginSpatialDrag = (
+    id: string,
+    event: React.PointerEvent<HTMLButtonElement>,
+  ) => {
+    if (event.button !== 0) return;
+    const snapshot = snapshotGrid(id);
+    if (!snapshot) return;
+    const grid = snapshot.node.parentElement;
+    if (!grid) return;
+    const rect = snapshot.node.getBoundingClientRect();
+    spatialDrag.current = {
+      id,
+      grid,
+      boxes: snapshot.boxes,
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top,
+      startX: event.clientX,
+      startY: event.clientY,
+      pointerX: event.clientX,
+      pointerY: event.clientY,
+      active: false,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+  const moveSpatial = (
+    id: string,
+    direction: 'left' | 'right' | 'up' | 'down',
+    index: number,
+  ) => {
+    const snapshot = snapshotGrid(id);
+    const box = snapshot?.boxes.find((entry) => entry.id === id);
+    if (!snapshot || !box) {
+      moveWidget(
+        index,
+        Math.max(
+          0,
+          Math.min(
+            widgets.length - 1,
+            index + (direction === 'left' || direction === 'up' ? -1 : 1),
+          ),
+        ),
+      );
+      return;
     }
+    const column =
+      box.column + (direction === 'left' ? -1 : direction === 'right' ? 1 : 0);
+    const row =
+      box.row +
+      (direction === 'up'
+        ? -gridSize.step
+        : direction === 'down'
+          ? gridSize.step
+          : 0);
+    applyGrid(moveGridBox(snapshot.boxes, id, column, row));
+  };
+  const resizeSpatial = (
+    widget: DraftWidget,
+    size: { width: number; height: number },
+  ) => {
+    const snapshot = snapshotGrid(widget.id);
+    const box = snapshot?.boxes.find((entry) => entry.id === widget.id);
+    if (!snapshot || !box) {
+      updateWidget({ ...widget, ...size });
+      return;
+    }
+    box.width = responsiveSpan(size.width, window.innerWidth);
+    box.height = Math.max(
+      gridSize.step,
+      box.height + size.height - widget.height,
+    );
+    applyGrid(moveGridBox(snapshot.boxes, widget.id, box.column, box.row), {
+      id: widget.id,
+      ...size,
+    });
+  };
+  const spatialPosition = (clientX: number, clientY: number) => {
+    const start = spatialDrag.current;
+    const moving = start?.boxes.find((box) => box.id === start.id);
+    if (!start || !moving) return null;
+    const grid = start.grid;
+    const rect = grid.getBoundingClientRect();
+    const gap = parseFloat(getComputedStyle(grid).columnGap) || 0;
+    const columnWidth = (rect.width - gap * 11) / 12;
+    const column = Math.max(
+      0,
+      Math.min(
+        12 - moving.width,
+        Math.round((clientX - rect.left - start.offsetX) / (columnWidth + gap)),
+      ),
+    );
+    const rawRow = Math.max(
+      0,
+      Math.min(100000, Math.round(clientY - rect.top - start.offsetY)),
+    );
+    const row = snapGridRow(rawRow, gridSize.step);
+    const preview = compactGridBoxes(
+      moveGridBox(start.boxes, start.id, column, row),
+    ).find((box) => box.id === start.id);
+    return {
+      column,
+      row,
+      previewRow: preview?.row ?? row,
+      width: moving.width,
+      height: moving.height,
+      left: column * (columnWidth + gap),
+      pixelWidth: moving.width * columnWidth + (moving.width - 1) * gap,
+      gap,
+    };
+  };
+  const updateSpatialDrag = (event: React.PointerEvent<HTMLButtonElement>) => {
+    const start = spatialDrag.current;
+    if (!start) return;
+    if (
+      !start.active &&
+      Math.hypot(event.clientX - start.startX, event.clientY - start.startY) < 5
+    )
+      return;
+    if (!start.active) {
+      start.active = true;
+      setDragging(start.id);
+    }
+    event.preventDefault();
+    start.pointerX = event.clientX;
+    start.pointerY = event.clientY;
+    setPlacement(spatialPosition(event.clientX, event.clientY));
+    const scroll = () => {
+      const current = spatialDrag.current;
+      if (!current?.active) {
+        scrollFrame.current = null;
+        return;
+      }
+      const edge = 64;
+      const direction =
+        current.pointerY < edge
+          ? -1
+          : current.pointerY > window.innerHeight - edge
+            ? 1
+            : 0;
+      if (!direction) {
+        scrollFrame.current = null;
+        return;
+      }
+      window.scrollBy({ top: direction * 14, behavior: 'instant' });
+      setPlacement(spatialPosition(current.pointerX, current.pointerY));
+      scrollFrame.current = requestAnimationFrame(scroll);
+    };
+    if (
+      scrollFrame.current === null &&
+      (event.clientY < 64 || event.clientY > window.innerHeight - 64)
+    )
+      scrollFrame.current = requestAnimationFrame(scroll);
+  };
+  const finishSpatialDrag = (event: React.PointerEvent<HTMLButtonElement>) => {
+    const start = spatialDrag.current;
+    const position = start?.active
+      ? spatialPosition(event.clientX, event.clientY)
+      : null;
+    if (start && position)
+      applyGrid(
+        moveGridBox(start.boxes, start.id, position.column, position.row),
+      );
     endDrag();
   };
-  const dropClass = (id: string) =>
-    dropTarget?.id === id ? ` drop-${dropTarget.side}` : '';
 
   const selectedWidget = draft?.find((entry) => entry.id === selected) ?? null;
 
@@ -776,7 +1057,10 @@ export function DashboardView({
         onChange={(name, value) => setVar(name, value)}
       />
 
-      <div className={`grid-frame${dragging ? ' dragging' : ''}`}>
+      <div
+        className={`grid-frame${dragging ? ' dragging' : ''}`}
+        style={{ '--grid-step': `${gridSize.step}px` } as React.CSSProperties}
+      >
         {editing && (
           <div className="grid-guides" aria-hidden="true">
             {Array.from({ length: 12 }, (_, at) => (
@@ -784,13 +1068,7 @@ export function DashboardView({
             ))}
           </div>
         )}
-        <div
-          className="tile-grid dashboard-grid"
-          onDragOver={(event) => {
-            if (draggingRef.current) event.preventDefault();
-          }}
-          onDrop={drop}
-        >
+        <div className="tile-grid dashboard-grid">
           {widgets.map((widget, index) => {
             if (hidden(widget)) return null;
             const label =
@@ -803,17 +1081,11 @@ export function DashboardView({
               <TileToolbar
                 label={label}
                 selected={selected === widget.id}
-                onDragStart={() => {
-                  draggingRef.current = widget.id;
-                  setDragging(widget.id);
-                }}
-                onDragEnd={endDrag}
-                onMove={(by) =>
-                  moveWidget(
-                    index,
-                    Math.max(0, Math.min(widgets.length - 1, index + by)),
-                  )
-                }
+                onPointerStart={(event) => beginSpatialDrag(widget.id, event)}
+                onPointerMove={updateSpatialDrag}
+                onPointerEnd={finishSpatialDrag}
+                onPointerCancel={endDrag}
+                onMove={(direction) => moveSpatial(widget.id, direction, index)}
                 onSettings={
                   widget.kind === 'visualization'
                     ? () => {
@@ -826,7 +1098,7 @@ export function DashboardView({
               />
             );
             const editClasses = editing
-              ? ` editing${selected === widget.id ? ' selected' : ''}${dragging === widget.id ? ' is-dragged' : ''}${added === widget.id ? ' just-added' : ''}${dropClass(widget.id)}`
+              ? ` editing${selected === widget.id ? ' selected' : ''}${dragging === widget.id ? ' is-dragged' : ''}${added === widget.id ? ' just-added' : ''}`
               : '';
             if (widget.kind === 'text') {
               return (
@@ -834,7 +1106,7 @@ export function DashboardView({
                   key={widget.id}
                   id={anchorOf.get(widget.id)}
                   data-widget={widget.id}
-                  className={`dashboard-heading span-12${editClasses}`}
+                  className={`dashboard-heading span-12${widget.options.layout ? ' has-layout' : ''}${editClasses}`}
                   ref={(node) => {
                     if (node) tileNodes.current.set(widget.id, node);
                     else tileNodes.current.delete(widget.id);
@@ -842,9 +1114,13 @@ export function DashboardView({
                   style={
                     {
                       '--cell-rows': tileRows[widget.id],
+                      '--layout-column':
+                        (resolvedLayout.get(widget.id)?.column ?? 0) + 1,
+                      '--layout-row':
+                        (resolvedLayout.get(widget.id)?.row ?? 0) + 1,
+                      '--layout-width': 12,
                     } as React.CSSProperties
                   }
-                  onDragOver={editing ? dragOver(widget.id) : undefined}
                 >
                   {toolbar}
                   {editing && draft ? (
@@ -887,11 +1163,21 @@ export function DashboardView({
               );
             }
             const link = widget.options.link;
+            const renderedHeight = gridTileHeight(
+              widget.options.layout?.unit === 'cells' &&
+                widget.options.layout.rows
+                ? widget.options.layout.rows * gridSize.step - gridSize.gap
+                : widget.height +
+                    (widget.visualization?.type === 'number' ? 80 : 200),
+              gridSize.gap,
+              gridSize.step,
+              widget.visualization?.type === 'number' ? 200 : 0,
+            );
             return (
               <div
                 key={widget.id}
                 data-widget={widget.id}
-                className={`dashboard-cell span-${widget.width}${editClasses}`}
+                className={`dashboard-cell span-${widget.width}${widget.options.layout ? ' has-layout' : ''}${editClasses}`}
                 ref={(node) => {
                   if (node) tileNodes.current.set(widget.id, node);
                   else tileNodes.current.delete(widget.id);
@@ -899,17 +1185,27 @@ export function DashboardView({
                 style={
                   {
                     '--cell-height': `${widget.height}px`,
+                    '--tile-height': `${renderedHeight}px`,
                     '--cell-rows': tileRows[widget.id],
+                    '--layout-column':
+                      (resolvedLayout.get(widget.id)?.column ?? 0) + 1,
+                    '--layout-row':
+                      (resolvedLayout.get(widget.id)?.row ?? 0) + 1,
+                    '--layout-width':
+                      resolvedLayout.get(widget.id)?.width ?? widget.width,
                   } as React.CSSProperties
                 }
-                onDragOver={editing ? dragOver(widget.id) : undefined}
               >
                 {toolbar}
                 {editing && draft && (
                   <ResizeHandles
                     width={widget.width}
                     height={widget.height}
-                    onResize={(size) => updateWidget({ ...widget, ...size })}
+                    rows={Math.round(
+                      (renderedHeight + gridSize.gap) / gridSize.step,
+                    )}
+                    gridStep={gridSize.step}
+                    onResize={(size) => resizeSpatial(widget, size)}
                   />
                 )}
                 <VisualizationWidget
@@ -925,6 +1221,18 @@ export function DashboardView({
               </div>
             );
           })}
+          {editing && placement && (
+            <div
+              className="grid-drop-preview"
+              aria-hidden="true"
+              style={{
+                left: placement.left,
+                top: placement.previewRow,
+                width: placement.pixelWidth,
+                height: placement.height - placement.gap,
+              }}
+            />
+          )}
           {editing && draft && (
             <div className="dashboard-cell span-4 add-tile-cell">
               <button

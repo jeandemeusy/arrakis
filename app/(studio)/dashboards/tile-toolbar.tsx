@@ -10,17 +10,21 @@ import { GripVertical, Settings2, Trash2 } from 'lucide-react';
 export function TileToolbar({
   label,
   selected,
-  onDragStart,
-  onDragEnd,
+  onPointerStart,
+  onPointerMove,
+  onPointerEnd,
+  onPointerCancel,
   onMove,
   onSettings,
   onRemove,
 }: {
   label: string;
   selected: boolean;
-  onDragStart: () => void;
-  onDragEnd: () => void;
-  onMove?: (by: -1 | 1) => void;
+  onPointerStart: (event: React.PointerEvent<HTMLButtonElement>) => void;
+  onPointerMove: (event: React.PointerEvent<HTMLButtonElement>) => void;
+  onPointerEnd: (event: React.PointerEvent<HTMLButtonElement>) => void;
+  onPointerCancel: () => void;
+  onMove?: (direction: 'left' | 'right' | 'up' | 'down') => void;
   onSettings?: () => void;
   onRemove: () => void;
 }) {
@@ -29,28 +33,23 @@ export function TileToolbar({
       <button
         type="button"
         className="tile-tool grip"
-        draggable
         aria-label={`Move ${label}: drag, or use the arrow keys`}
         title="Drag to move"
-        onDragStart={(event) => {
-          event.dataTransfer.effectAllowed = 'move';
-          event.dataTransfer.setData('text/plain', label);
-          const cell = (event.target as Element).closest(
-            '.dashboard-cell, .dashboard-heading',
-          );
-          if (cell) event.dataTransfer.setDragImage(cell, 24, 24);
-          onDragStart();
-        }}
-        onDragEnd={onDragEnd}
+        onPointerDown={onPointerStart}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerEnd}
+        onPointerCancel={onPointerCancel}
         onKeyDown={(event) => {
           if (!onMove) return;
-          if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
-            event.preventDefault();
-            onMove(-1);
-          } else if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
-            event.preventDefault();
-            onMove(1);
-          }
+          const direction = {
+            ArrowLeft: 'left',
+            ArrowRight: 'right',
+            ArrowUp: 'up',
+            ArrowDown: 'down',
+          }[event.key] as 'left' | 'right' | 'up' | 'down' | undefined;
+          if (!direction) return;
+          event.preventDefault();
+          onMove(direction);
         }}
       >
         <GripVertical size={14} aria-hidden="true" />
