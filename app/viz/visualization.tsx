@@ -35,6 +35,7 @@ import {
   toNumber,
 } from './format';
 import { pivot, shareSeries, type DrawnSeries } from './series';
+import { sortTableRows } from './table-sort';
 import './viz.css';
 import { asText } from '@/lib/viz/text';
 
@@ -166,11 +167,13 @@ function Legend({
   off,
   onToggle,
   onAll,
+  onOnly,
 }: {
   series: DrawnSeries[];
   off: Set<string>;
   onToggle: (key: string) => void;
   onAll: () => void;
+  onOnly: (key: string) => void;
 }) {
   const allOn = series.every((entry) => !off.has(entry.key));
   return (
@@ -180,11 +183,11 @@ function Legend({
           {series.length} series · scroll for more
         </li>
       )}
-      {series.length > 2 && (
-        <li>
+      {series.length > 1 && (
+        <li className="viz-legend-show-all">
           <button type="button" aria-pressed={allOn} onClick={onAll}>
             <i className="all" />
-            <span>All</span>
+            <span>Show all</span>
           </button>
         </li>
       )}
@@ -198,6 +201,14 @@ function Legend({
           >
             <i style={{ background: entry.color }} />
             <span>{entry.label}</span>
+          </button>
+          <button
+            type="button"
+            className="viz-legend-only"
+            aria-label={`Show only ${entry.label}`}
+            onClick={() => onOnly(entry.key)}
+          >
+            Only
           </button>
         </li>
       ))}
@@ -468,11 +479,14 @@ const Cartesian = memo(function Cartesian({
             else next.add(key);
             setOff(next);
           }}
-          onAll={() =>
+          onAll={() => setOff(new Set())}
+          onOnly={(key) =>
             setOff(
-              shownSeries.every((entry) => !off.has(entry.key))
-                ? new Set(shownSeries.map((entry) => entry.key))
-                : new Set(),
+              new Set(
+                shownSeries
+                  .filter((entry) => entry.key !== key)
+                  .map((entry) => entry.key),
+              ),
             )
           }
         />
@@ -808,6 +822,11 @@ function PieView({
               {slices.length} slices · scroll for more
             </li>
           )}
+          <li className="viz-legend-show-all">
+            <button type="button" onClick={() => setOff(new Set())}>
+              Show all
+            </button>
+          </li>
           {slices.map((slice) => (
             <li key={slice.key}>
               <button
@@ -824,6 +843,22 @@ function PieView({
                 <i style={{ background: slice.color }} />
                 <span>{slice.label}</span>
                 {!off.has(slice.key) && <small>{share(slice.value)}</small>}
+              </button>
+              <button
+                type="button"
+                className="viz-legend-only"
+                aria-label={`Show only ${slice.label}`}
+                onClick={() =>
+                  setOff(
+                    new Set(
+                      slices
+                        .filter((entry) => entry.key !== slice.key)
+                        .map((entry) => entry.key),
+                    ),
+                  )
+                }
+              >
+                Only
               </button>
             </li>
           ))}
@@ -1011,6 +1046,11 @@ function Table({
   const [copied, setCopied] = useState<string | null>(null);
   const [copyError, setCopyError] = useState<string | null>(null);
   const [capacity, setCapacity] = useState<number | null>(null);
+  const [compact, setCompact] = useState(false);
+  const [sort, setSort] = useState<{
+    column: number;
+    direction: 'asc' | 'desc';
+  } | null>(null);
   const tableRef = useRef<HTMLDivElement>(null);
   const shown = options.columns?.length
     ? options.columns
@@ -1026,6 +1066,18 @@ function Table({
   );
   const pages = Math.max(1, Math.ceil(rows.length / size));
   const current = Math.min(page, pages - 1);
+  const orderedRows = useMemo(
+    () =>
+      sort
+        ? sortTableRows(
+            rows,
+            sort.column,
+            columns[sort.column]?.type ?? 'text',
+            sort.direction,
+          )
+        : rows,
+    [rows, columns, sort],
+  );
   const numeric = (at: number) =>
     ['integer', 'bigint', 'float', 'numeric'].includes(columns[at].type);
   useEffect(() => {
@@ -1040,7 +1092,7 @@ function Table({
       const header =
         node.querySelector('thead')?.getBoundingClientRect().height ?? 0;
       const hint =
-        node.querySelector('.viz-table-scroll-hint')?.getBoundingClientRect()
+        node.querySelector('.viz-table-tools')?.getBoundingClientRect()
           .height ?? 0;
       const pager =
         node.querySelector('.viz-table-pager')?.getBoundingClientRect()
@@ -1058,18 +1110,30 @@ function Table({
       observer.observe(node.querySelector('table')!);
     measure();
     return () => observer.disconnect();
-  }, [columns, rows, current, size, height, overflow]);
+  }, [columns, rows, current, size, height, overflow, compact]);
   return (
     <div
-      className={`viz-table${overflow ? ' has-horizontal-overflow' : ''}`}
+      className={`viz-table${compact ? ' is-dense' : ''}${overflow ? ' has-horizontal-overflow' : ''}`}
       ref={tableRef}
       style={{ maxHeight: height }}
     >
-      {overflow && (
-        <div className="viz-table-scroll-hint">
-          Scroll horizontally to see all columns →
-        </div>
-      )}
+      <div className="viz-table-tools">
+        <span>
+          {overflow
+            ? 'Scroll horizontally to see all columns →'
+            : 'Sort loaded rows by column'}
+        </span>
+        <button
+          type="button"
+          aria-pressed={compact}
+          onClick={() => {
+            setCompact(!compact);
+            setPage(0);
+          }}
+        >
+          {compact ? 'Comfortable rows' : 'Compact rows'}
+        </button>
+      </div>
       <table>
         <thead>
           <tr>
@@ -1084,129 +1148,162 @@ function Table({
                 <th
                   key={entry.name}
                   scope="col"
+                  aria-sort={
+                    sort?.column === entry.at
+                      ? sort.direction === 'asc'
+                        ? 'ascending'
+                        : 'descending'
+                      : 'none'
+                  }
                   className={`align-${align}`}
                   style={size}
                 >
-                  {options.labels?.[entry.name] ?? entry.name}
+                  <button
+                    type="button"
+                    className="viz-table-sort"
+                    title="Sort loaded rows"
+                    onClick={() => {
+                      setSort((previous) =>
+                        previous?.column === entry.at
+                          ? previous.direction === 'asc'
+                            ? { column: entry.at, direction: 'desc' }
+                            : null
+                          : { column: entry.at, direction: 'asc' },
+                      );
+                      setPage(0);
+                    }}
+                  >
+                    {options.labels?.[entry.name] ?? entry.name}
+                    {sort?.column === entry.at
+                      ? sort.direction === 'asc'
+                        ? ' ↑'
+                        : ' ↓'
+                      : ''}
+                  </button>
                 </th>
               );
             })}
           </tr>
         </thead>
         <tbody>
-          {rows.slice(current * size, (current + 1) * size).map((row, at) => (
-            <tr
-              key={current * size + at}
-              className={onSelect ? 'selectable' : undefined}
-              onClick={
-                onSelect
-                  ? () =>
-                      onSelect(
-                        Object.fromEntries(
-                          columns.map((column, i) => [column.name, row[i]]),
-                        ),
-                      )
-                  : undefined
-              }
-            >
-              {shown.map((entry) => {
-                const value = row[entry.at];
-                const type = columns[entry.at].type;
-                const format = options.formats?.[entry.name];
-                const display = options.tableColumns?.[entry.name];
-                const raw = asText(value);
-                const full = display?.text
-                  ? raw
-                  : /^0x[0-9a-f]{16,}$/i.test(raw)
+          {orderedRows
+            .slice(current * size, (current + 1) * size)
+            .map((row, at) => (
+              <tr
+                key={current * size + at}
+                className={onSelect ? 'selectable' : undefined}
+                onClick={
+                  onSelect
+                    ? () =>
+                        onSelect(
+                          Object.fromEntries(
+                            columns.map((column, i) => [column.name, row[i]]),
+                          ),
+                        )
+                    : undefined
+                }
+              >
+                {shown.map((entry) => {
+                  const value = row[entry.at];
+                  const type = columns[entry.at].type;
+                  const format = options.formats?.[entry.name];
+                  const display = options.tableColumns?.[entry.name];
+                  const raw = asText(value);
+                  const full = display?.text
                     ? raw
-                    : format || numeric(entry.at)
-                      ? formatValue(value, format ?? options.format)
-                      : formatCategory(value, type);
-                const text = formatTableText(full, display);
-                const align =
-                  display?.align ?? (numeric(entry.at) ? 'right' : 'left');
-                const size = display?.width
-                  ? { width: display.width, minWidth: display.width }
-                  : undefined;
-                return (
-                  <td
-                    key={entry.name}
-                    className={[
-                      `align-${align}`,
-                      type === 'bytes' || display?.monospace ? 'mono' : '',
-                      display?.width ? 'fixed' : '',
-                    ].join(' ')}
-                    style={size}
-                    title={text !== full || display?.width ? full : undefined}
-                    onCopy={(event) => {
-                      if (text === full) return;
-                      event.clipboardData.setData('text/plain', full);
-                      event.preventDefault();
-                    }}
-                  >
-                    {onSelect &&
-                    entry ===
-                      (shown.find((column) =>
-                        /^0x[0-9a-f]{40,}$/i.test(asText(row[column.at])),
-                      ) ?? shown[0]) ? (
-                      <button
-                        type="button"
-                        className="viz-row-link"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          onSelect(
-                            Object.fromEntries(
-                              columns.map((column, i) => [column.name, row[i]]),
-                            ),
-                          );
-                        }}
-                        aria-label={`Open record for ${full}`}
-                      >
-                        {text}
-                      </button>
-                    ) : (
-                      text
-                    )}
-                    {/^0x[0-9a-f]{40,}$/i.test(raw) && (
-                      <button
-                        type="button"
-                        className="viz-copy"
-                        aria-label={
-                          copyError === raw
-                            ? 'Copy failed'
-                            : copied === raw
-                              ? 'Copied address'
-                              : `Copy ${entry.name}`
-                        }
-                        title={
-                          copyError === raw
-                            ? 'Copy failed; select the value to copy it'
-                            : copied === raw
-                              ? 'Copied'
-                              : 'Copy full value'
-                        }
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          void (async () => {
-                            try {
-                              await navigator.clipboard.writeText(raw);
-                              setCopyError(null);
-                              setCopied(raw);
-                            } catch {
-                              setCopied(null);
-                              setCopyError(raw);
-                            }
-                          })();
-                        }}
-                      >
-                        <Copy size={12} aria-hidden="true" />
-                      </button>
-                    )}
-                  </td>
-                );
-              })}
-            </tr>
-          ))}
+                    : /^0x[0-9a-f]{16,}$/i.test(raw)
+                      ? raw
+                      : format || numeric(entry.at)
+                        ? formatValue(value, format ?? options.format)
+                        : formatCategory(value, type);
+                  const text = formatTableText(full, display);
+                  const align =
+                    display?.align ?? (numeric(entry.at) ? 'right' : 'left');
+                  const size = display?.width
+                    ? { width: display.width, minWidth: display.width }
+                    : undefined;
+                  return (
+                    <td
+                      key={entry.name}
+                      className={[
+                        `align-${align}`,
+                        type === 'bytes' || display?.monospace ? 'mono' : '',
+                        display?.width ? 'fixed' : '',
+                      ].join(' ')}
+                      style={size}
+                      title={text !== full || display?.width ? full : undefined}
+                      onCopy={(event) => {
+                        if (text === full) return;
+                        event.clipboardData.setData('text/plain', full);
+                        event.preventDefault();
+                      }}
+                    >
+                      {onSelect &&
+                      entry ===
+                        (shown.find((column) =>
+                          /^0x[0-9a-f]{40,}$/i.test(asText(row[column.at])),
+                        ) ?? shown[0]) ? (
+                        <button
+                          type="button"
+                          className="viz-row-link"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onSelect(
+                              Object.fromEntries(
+                                columns.map((column, i) => [
+                                  column.name,
+                                  row[i],
+                                ]),
+                              ),
+                            );
+                          }}
+                          aria-label={`Open record for ${full}`}
+                        >
+                          {text}
+                        </button>
+                      ) : (
+                        text
+                      )}
+                      {/^0x[0-9a-f]{40,}$/i.test(raw) && (
+                        <button
+                          type="button"
+                          className="viz-copy"
+                          aria-label={
+                            copyError === raw
+                              ? 'Copy failed'
+                              : copied === raw
+                                ? 'Copied address'
+                                : `Copy ${entry.name}`
+                          }
+                          title={
+                            copyError === raw
+                              ? 'Copy failed; select the value to copy it'
+                              : copied === raw
+                                ? 'Copied'
+                                : 'Copy full value'
+                          }
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void (async () => {
+                              try {
+                                await navigator.clipboard.writeText(raw);
+                                setCopyError(null);
+                                setCopied(raw);
+                              } catch {
+                                setCopied(null);
+                                setCopyError(raw);
+                              }
+                            })();
+                          }}
+                        >
+                          <Copy size={12} aria-hidden="true" />
+                        </button>
+                      )}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
         </tbody>
       </table>
       {pages > 1 && (

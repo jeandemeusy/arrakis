@@ -53,9 +53,9 @@ function statusOf(payload: WidgetPayload): PanelStatus | undefined {
     const failure = networks.find((network) => network.lastAttempt?.error)
       ?.lastAttempt?.error;
     return {
-      state: 'failed',
+      state: failure ? 'failed' : 'pending',
       reason:
-        failure ?? 'Nothing stored yet. It appears after the query first runs.',
+        failure ?? 'No saved result yet. Run the query to load data.',
     };
   }
   if (missing.length) {
@@ -198,7 +198,7 @@ export function WidgetTile({
       columns,
       rows,
     );
-    const text = [derived, note].filter(Boolean).join(' · ');
+    const text = [data && !rows.length ? 'No matching data. Try another filter or range.' : derived, note].filter(Boolean).join(' · ');
     return (
       <Tile
         id={id}
@@ -222,6 +222,8 @@ export function WidgetTile({
   const body =
     payload.state === 'loading' ? (
       <Missing message="Loading…" height={height} />
+    ) : data && !rows.length ? (
+      <Missing message="No matching data. Try another filter or range." height={height} />
     ) : (
       <Chart
         spec={spec}

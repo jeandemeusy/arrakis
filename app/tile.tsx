@@ -33,7 +33,7 @@ import { usePalette } from './style';
  * answered and others did not, `failed` when none did.
  */
 export type PanelStatus = {
-  state: 'ok' | 'partial' | 'failed';
+  state: 'ok' | 'partial' | 'failed' | 'pending';
   reason: string | null;
 };
 
@@ -485,7 +485,7 @@ export function Tile({
 
   // Read the ref inside the handler, never while rendering.
   const isNumber = figure !== undefined;
-  const broken = status?.state === 'failed';
+  const broken = status?.state === 'failed' || status?.state === 'pending';
   // Nothing to export from a tile whose query never returned.
   const canDownload = Boolean(chart || rows || isNumber) && !broken;
   const download = () => {
@@ -498,7 +498,10 @@ export function Tile({
   const unavailable = (
     <div className="tile-unavailable">
       <AlertTriangle size={18} aria-hidden="true" />
-      <p>{status?.reason ?? 'This panel could not be loaded.'}</p>
+      <p>
+        {status?.reason ?? 'This panel could not be loaded.'}
+        {source && <> <Link href={source.href}>Open query</Link></>}
+      </p>
     </div>
   );
 
@@ -508,7 +511,7 @@ export function Tile({
       title={status.reason ?? undefined}
     >
       <AlertTriangle size={11} aria-hidden="true" />
-      {status.state === 'failed' ? 'unavailable' : 'partial'}
+      {status.state === 'failed' ? 'unavailable' : status.state === 'pending' ? 'waiting for data' : 'partial'}
     </span>
   );
 
@@ -613,7 +616,10 @@ export function Tile({
           </span>
           <strong>{figure}</strong>
           {broken ? (
-            <p className="metric-unavailable">{status?.reason}</p>
+            <p className="metric-unavailable">
+              {status?.reason}
+              {source && <> <Link href={source.href}>Open query</Link></>}
+            </p>
           ) : (
             note
           )}

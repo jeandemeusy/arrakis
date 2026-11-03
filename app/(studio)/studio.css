@@ -3282,6 +3282,7 @@ a.settings-card:focus-visible {
   grid-row: span var(--cell-rows, 1);
   align-self: start;
   min-width: 0;
+  container-type: inline-size;
 }
 
 /* The measured card keeps its natural height; its parent reserves matching rows. */
@@ -3625,11 +3626,31 @@ a.settings-card:focus-visible {
 .dashboard-cell > .chart-card.menu-mode.metric {
   height: var(--tile-height, calc(var(--cell-height, 120px) + 80px));
   min-height: 0;
+  padding: clamp(6px, 5cqi, 20px);
 }
 
 /* Small tiles scroll their contents instead of extending beyond their grid cell. */
 .dashboard-cell.is-compact > .chart-card {
   overflow: auto;
+}
+
+.dashboard-cell.is-compact > .chart-card.menu-mode.metric {
+  gap: 2px;
+  padding: clamp(4px, 3cqi, 12px);
+}
+
+.dashboard-cell.is-compact > .chart-card.menu-mode.metric > span {
+  font-size: 12px;
+}
+
+.dashboard-cell.is-compact > .chart-card.menu-mode.metric > p {
+  flex-shrink: 0;
+  overflow: visible;
+  font-size: 11px;
+}
+
+.dashboard-cell.is-compact .tile-meta {
+  margin-top: 4px;
 }
 
 /* A missing note must not remove the flexible space beneath the figure. */

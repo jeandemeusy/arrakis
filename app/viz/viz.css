@@ -109,13 +109,38 @@
   border-collapse: collapse;
 }
 
-.viz-table-scroll-hint {
+.viz-table-tools {
   position: sticky;
   left: 0;
-  width: fit-content;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
   padding: 2px 0 5px;
   color: var(--muted);
   font-size: 11px;
+}
+
+.viz-table-tools button,
+.viz-table-sort {
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.viz-table-tools button {
+  white-space: nowrap;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.viz-table-sort:hover,
+.viz-table-sort:focus-visible {
+  color: var(--ink);
 }
 
 .viz-row-link {
@@ -172,6 +197,11 @@
   padding: 6px 10px;
   border-bottom: 1px solid var(--line-soft);
   white-space: nowrap;
+}
+
+.viz-table.is-dense th,
+.viz-table.is-dense td {
+  padding-block: 2px;
 }
 
 .viz-table.has-horizontal-overflow th:first-child,
@@ -350,6 +380,18 @@
   opacity: 0.25;
 }
 
+.viz-legend .viz-legend-only {
+  margin-left: 6px;
+  color: var(--muted);
+  font-size: 10px;
+  opacity: 0;
+}
+
+.viz-legend li:hover .viz-legend-only,
+.viz-legend li:focus-within .viz-legend-only {
+  opacity: 1;
+}
+
 .viz-legend i {
   flex: none;
   width: 10px;
@@ -389,6 +431,14 @@
     flex-direction: row-reverse;
     font-family: var(--font-mono);
   }
+
+  .legend-auto .viz-legend-show-all::after {
+    margin-left: 6px;
+    padding: 2px 0;
+    font: 10px var(--font-mono);
+    visibility: hidden;
+    content: 'Only';
+  }
 }
 
 .legend-side .viz-cartesian-body {
@@ -413,10 +463,23 @@
   font-family: var(--font-mono);
 }
 
+.legend-side .viz-legend-show-all::after {
+  margin-left: 6px;
+  padding: 2px 0;
+  font: 10px var(--font-mono);
+  visibility: hidden;
+  content: 'Only';
+}
+
 .viz-tip {
   min-width: 160px;
   max-width: 320px;
   padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 18px rgb(0 0 0 / 0.18);
+  font-size: 13px;
+  line-height: 1.4;
 }
 
 .viz-tip-label {

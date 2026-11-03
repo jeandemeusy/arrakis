@@ -1450,7 +1450,7 @@ main {
 .chart-card.menu-mode.metric > strong {
   margin-top: auto;
   overflow: hidden;
-  font-size: clamp(24px, 14cqi, 58px);
+  font-size: clamp(16px, 12cqi, 58px);
   line-height: 1.05;
   text-align: center;
   white-space: nowrap;
