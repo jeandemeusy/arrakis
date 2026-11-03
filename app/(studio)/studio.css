@@ -942,8 +942,12 @@ textarea.studio-input {
 
   .workbench-about {
     position: static !important;
-    grid-column: 1 / -1;
+    grid-column: 2;
     max-height: none !important;
+  }
+
+  .workbench.no-schema .workbench-about {
+    grid-column: 1;
   }
 }
 
@@ -1018,6 +1022,19 @@ textarea.studio-input {
   justify-content: space-between;
   gap: 8px;
   padding: 1px 0;
+}
+
+.schema-description {
+  margin: 2px 0 5px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.schema-type {
+  display: block;
+  overflow-wrap: anywhere;
 }
 
 .schema-list button,
@@ -2079,8 +2096,14 @@ button.chip {
 }
 
 @media (width <= 980px) {
-  .workbench {
+  .workbench,
+  .workbench.no-schema,
+  .workbench.no-about {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .workbench-about {
+    grid-column: 1;
   }
 
   .workbench-side {
@@ -2094,6 +2117,16 @@ button.chip {
 }
 
 @media (width <= 640px) {
+  .page-head {
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .page-head .page-head-text {
+    flex-basis: 100%;
+  }
+
   .workbench-actions,
   .note-input {
     width: 100%;
@@ -2101,6 +2134,11 @@ button.chip {
 
   .exit-form {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .card-head,
+  .card-tools {
+    flex-wrap: wrap;
   }
 
   .query-table th:nth-child(n + 3),
@@ -3456,6 +3494,12 @@ a.settings-card:focus-visible {
   }
 }
 
+@media (width <= 640px) {
+  .dashboard-vars {
+    position: static;
+  }
+}
+
 .dashboard-vars .network-switch {
   margin: 0;
 }
@@ -3742,6 +3786,24 @@ a.settings-card:focus-visible {
   font-size: 11px;
 }
 
+.table-column .table-column-link {
+  grid-column: 2 / -1;
+}
+
+.table-column-link small {
+  line-height: 1.4;
+}
+
+.workbench-jump {
+  padding: 8px 14px 0;
+  font-size: 12px;
+}
+
+.editor-card,
+.results-card {
+  scroll-margin-top: 16px;
+}
+
 .table-column-field:nth-of-type(2),
 .table-column-field:nth-of-type(4) {
   grid-column: 2;
@@ -3895,6 +3957,17 @@ a.settings-card:focus-visible {
   height: var(--tile-height, calc(var(--cell-height, 120px) + 80px));
   min-height: 0;
   padding: clamp(6px, 5cqi, 20px);
+}
+
+/* A narrow screen stacks tiles; saved grid-row counts must not make them unreadably short. */
+@media (width <= 900px) {
+  .dashboard-cell:not(.editing) > .chart-card.menu-mode.metric {
+    min-height: 180px;
+  }
+
+  .dashboard-cell:not(.editing) > .chart-card.menu-mode:not(.metric) {
+    min-height: 320px;
+  }
 }
 
 /* Small tiles scroll their contents instead of extending beyond their grid cell. */

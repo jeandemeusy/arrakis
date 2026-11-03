@@ -108,6 +108,7 @@ describe('chart options', () => {
             condensed: true,
             align: 'center',
             width: 180,
+            link: '/dashboards/client?client={{address}}',
           },
         },
       },
@@ -119,12 +120,17 @@ describe('chart options', () => {
         condensed: true,
         align: 'center',
         width: 180,
+        link: '/dashboards/client?client={{address}}',
       },
     });
     assert.throws(
       () => parseConfig({ options: { tableColumns: { id: { width: 12 } } } }),
       /width/,
     );
+  });
+
+  it('rejects malformed table link configuration', () => {
+    assert.throws(() => parseConfig({ options: { tableColumns: { id: { link: 42 } } } }), /link/);
   });
 
   it('survives a builder compiling over the chart', () => {

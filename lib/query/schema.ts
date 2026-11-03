@@ -13,7 +13,8 @@ export type SchemaTable = {
   schema: string;
   name: string;
   kind: 'table' | 'view';
-  columns: Array<{ name: string; type: string }>;
+  description?: string | null;
+  columns: Array<{ name: string; type: string; description?: string | null }>;
 };
 
 const TTL_MS = 5 * 60_000;
@@ -24,7 +25,8 @@ async function load(network: NetworkConfig): Promise<SchemaTable[]> {
     network,
     text: `
       SELECT n.nspname, c.relname, c.relkind, a.attname,
-             format_type(a.atttypid, a.atttypmod)
+             format_type(a.atttypid, a.atttypmod),
+             obj_description(c.oid, 'pg_class'), col_description(c.oid, a.attnum)
       FROM pg_class c
       JOIN pg_namespace n ON n.oid = c.relnamespace
       JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
@@ -36,7 +38,7 @@ async function load(network: NetworkConfig): Promise<SchemaTable[]> {
     rowLimit: 50_000,
   });
   const tables = new Map<string, SchemaTable>();
-  for (const [schema, name, kind, column, type] of rows as string[][]) {
+  for (const [schema, name, kind, column, type, description, columnDescription] of rows as Array<[string, string, string, string, string, string | null, string | null]>) {
     const key = `${schema}.${name}`;
     let table = tables.get(key);
     if (!table) {
@@ -44,11 +46,12 @@ async function load(network: NetworkConfig): Promise<SchemaTable[]> {
         schema,
         name,
         kind: kind === 'v' || kind === 'm' ? 'view' : 'table',
+        description,
         columns: [],
       };
       tables.set(key, table);
     }
-    table.columns.push({ name: column, type });
+    table.columns.push({ name: column, type, description: columnDescription });
   }
   return [...tables.values()];
 }

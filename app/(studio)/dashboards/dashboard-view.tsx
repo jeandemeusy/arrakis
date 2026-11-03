@@ -255,7 +255,7 @@ export function DashboardView({
           next[id] = gridRows(
             height,
             gap,
-            node.classList.contains('dashboard-heading') ? 1 : gridSize.step,
+            node.classList.contains('dashboard-heading') || (!editing && gridViewport <= 640) ? 1 : gridSize.step,
           );
       }
       setTileRows((current) => {
@@ -274,7 +274,7 @@ export function DashboardView({
     for (const node of tileNodes.current.values()) observer.observe(node);
     measure();
     return () => observer.disconnect();
-  }, [dashboard, draft, editing, gridSize.step, gridSize.gap]);
+  }, [dashboard, draft, editing, gridSize.step, gridSize.gap, gridViewport]);
 
   useEffect(() => {
     let live = true;

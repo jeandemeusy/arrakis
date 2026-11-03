@@ -7,11 +7,13 @@ import { HelpTip } from '../help-tip';
 /** The tables of the data source, the fragments and the built-ins, each inserted at the cursor. */
 export function SchemaPanel({
   schema,
+  status,
   fragments,
   lists,
   onInsert,
 }: {
   schema: SchemaTable[];
+  status: 'loading' | 'ready' | 'error';
   fragments: QuerySummary[];
   /** The lists a query can read, by name. */
   lists: Array<{ name: string; type: string }>;
@@ -24,8 +26,10 @@ export function SchemaPanel({
     return schema.filter(
       (table) =>
         table.name.toLowerCase().includes(needle) ||
+        table.schema.toLowerCase().includes(needle) ||
+        table.description?.toLowerCase().includes(needle) ||
         table.columns.some((column) =>
-          column.name.toLowerCase().includes(needle),
+          column.name.toLowerCase().includes(needle) || column.type.toLowerCase().includes(needle) || column.description?.toLowerCase().includes(needle),
         ),
     );
   }, [schema, schemaFilter]);
@@ -50,30 +54,35 @@ export function SchemaPanel({
               <button
                 type="button"
                 className="schema-name"
-                onClick={() => onInsert(table.name)}
+                onClick={() => onInsert(table.schema === 'public' ? table.name : `${table.schema}.${table.name}`)}
                 title="Insert at cursor"
               >
                 {table.name}
               </button>
               {table.kind === 'view' && <small>view</small>}
             </summary>
+            {table.schema !== 'public' && <p className="schema-description">{table.schema}</p>}
+            {table.description && <p className="schema-description">{table.description}</p>}
             <ul>
               {table.columns.map((column) => (
                 <li key={column.name}>
-                  <button
+                  <div><button
                     type="button"
                     onClick={() => onInsert(column.name)}
                     title="Insert at cursor"
                   >
                     {column.name}
                   </button>
-                  <small>{column.type}</small>
+                  <small className="schema-type">{column.type}</small>
+                  {column.description && <p className="schema-description">{column.description}</p>}</div>
                 </li>
               ))}
             </ul>
           </details>
         ))}
-        {!schema.length && <p className="studio-muted">Loading the schema…</p>}
+        {status === 'loading' && <p className="studio-muted">Loading the schema…</p>}
+        {status === 'error' && <p className="studio-muted">Could not load the schema for this data source.</p>}
+        {status === 'ready' && !visibleTables.length && <p className="studio-muted">{schemaFilter ? 'No matching tables or columns.' : 'No readable tables or views.'}</p>}
       </div>
       <h2>
         Fragments <HelpTip topic="fragments" />

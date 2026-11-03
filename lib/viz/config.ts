@@ -113,6 +113,8 @@ export type TableColumnOptions = {
   width?: number;
   monospace?: boolean;
   condensed?: boolean;
+  /** URL template; {{column}} inserts a URL-encoded value from the row. */
+  link?: string;
 };
 
 export const SERIES_MARKS = ['bar', 'line', 'area'] as const;
@@ -381,6 +383,11 @@ export function parseConfig(input: unknown): VisualizationConfig {
       if (entry.monospace) display.monospace = true;
       if (typeof entry.condensed === 'boolean')
         display.condensed = entry.condensed;
+      if (entry.link !== undefined && entry.link !== null && entry.link !== '') {
+        if (typeof entry.link !== 'string' || entry.link.length > 2048)
+          throw badRequest(`options.tableColumns.${column}.link must be a URL template of at most 2048 characters`);
+        display.link = entry.link;
+      }
       if (
         entry.align !== undefined &&
         entry.align !== null &&

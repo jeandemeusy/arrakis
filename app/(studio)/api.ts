@@ -209,7 +209,8 @@ export type SchemaTable = {
   schema: string;
   name: string;
   kind: 'table' | 'view';
-  columns: Array<{ name: string; type: string }>;
+  description?: string | null;
+  columns: Array<{ name: string; type: string; description?: string | null }>;
 };
 
 export type Exit = {

@@ -190,7 +190,10 @@ export function Workbench({
   const [dashboards, setDashboards] = useState<ChartHost[]>([]);
   const schemaOpen = usePreference('arrakis.workbench.schema', true);
   const aboutOpen = usePreference('arrakis.workbench.about', true);
-  const [schema, setSchema] = useState<SchemaTable[]>([]);
+  const [schemaResult, setSchemaResult] = useState<{ network: string; tables: SchemaTable[]; status: 'ready' | 'error' } | null>(null);
+  const schemaNetwork = network === 'all' ? networks[0]?.id : network;
+  const schema = useMemo(() => schemaResult && schemaResult.network === schemaNetwork ? schemaResult.tables : [], [schemaResult, schemaNetwork]);
+  const schemaStatus = schemaResult && schemaResult.network === schemaNetwork ? schemaResult.status : 'loading';
   const [lists, setLists] = useState<Array<{ name: string; type: string }>>([]);
   const [fragments, setFragments] = useState<QuerySummary[]>([]);
   const [versions, setVersions] = useState<QueryVersion[]>([]);
@@ -338,15 +341,14 @@ export function Workbench({
   }, [editor]);
 
   // The schema of one data source: with "All", the first one's stands for the rest.
-  const schemaNetwork = network === 'all' ? networks[0]?.id : network;
   useEffect(() => {
     if (!editor || !schemaNetwork) return;
     let live = true;
     api<{ tables: SchemaTable[] }>(
       `/api/v1/schema?network=${encodeURIComponent(schemaNetwork)}`,
     )
-      .then(({ tables }) => live && setSchema(tables))
-      .catch(() => live && setSchema([]));
+      .then(({ tables }) => { if (live) setSchemaResult({ network: schemaNetwork, tables, status: 'ready' }); })
+      .catch(() => { if (live) setSchemaResult({ network: schemaNetwork, tables: [], status: 'error' }); });
     return () => {
       live = false;
     };
@@ -811,6 +813,7 @@ export function Workbench({
       {editor && schemaOpen && (
         <SchemaPanel
           schema={schema}
+          status={schemaStatus}
           fragments={fragments}
           lists={lists}
           onInsert={(text) => sqlEditor.current?.insert(text)}
@@ -1125,12 +1128,13 @@ export function Workbench({
           {dependents.length === 0 ? <p>No dependent queries or fragments.</p> : <ul>{dependents.map((entry) => <li key={entry.slug}><Link href={`/queries/${entry.slug}`}>{entry.title}</Link> {entry.direct ? '(direct)' : '(through another fragment)'}{entry.dashboards.length > 0 && <> · dashboards: {entry.dashboards.map((dashboard, index) => <span key={dashboard.slug}>{index > 0 && ', '}<Link href={`/dashboards/${dashboard.slug}`}>{dashboard.title}</Link></span>)}</>}</li>)}</ul>}
         </details>}
 
-        <section className="card editor-card" aria-label="Query editor">
+        <section id="query-editor" className="card editor-card" aria-label="Query editor">
           <header className="card-head">
             <h2>
               Query editor <HelpTip topic="templates" />
             </h2>
             <div className="card-tools">
+              <a className="tool labelled" href="#query-results">Results &amp; charts ↓</a>
               {editor && (
                 <button
                   type="button"
@@ -1413,7 +1417,7 @@ export function Workbench({
           )}
         </section>
 
-        <section className="card results-card" aria-label="Query results">
+        <section id="query-results" className="card results-card" aria-label="Query results">
           <div className="result-tabs" role="tablist" aria-label="Results">
             <button
               type="button"
@@ -1463,6 +1467,7 @@ export function Workbench({
             )}
           </div>
 
+          <div className="workbench-jump"><a href="#query-editor">↑ Back to SQL</a></div>
           <div className="workbench-panel" role="tabpanel">
             {tab === 'results' && (
               <>

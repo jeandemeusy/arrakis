@@ -38,6 +38,7 @@ import { pivot, shareSeries, type DrawnSeries } from './series';
 import { sortTableRows } from './table-sort';
 import './viz.css';
 import { asText } from '@/lib/viz/text';
+import { tableLink } from '@/lib/viz/links';
 
 /**
  * Draws a visualization's rows as its chart type.
@@ -1209,6 +1210,7 @@ function Table({
                   const format = options.formats?.[entry.name];
                   const display = options.tableColumns?.[entry.name];
                   const raw = asText(value);
+                  const link = display?.link ? tableLink(display.link, Object.fromEntries(columns.map((column, i) => [column.name, row[i]]))) : null;
                   const full = display?.text
                     ? raw
                     : /^0x[0-9a-f]{16,}$/i.test(raw)
@@ -1238,7 +1240,9 @@ function Table({
                         event.preventDefault();
                       }}
                     >
-                      {onSelect &&
+                      {link ? (
+                        <a className="viz-row-link" href={link.href} target={link.external ? '_blank' : undefined} rel={link.external ? 'noopener noreferrer' : undefined} onClick={(event) => event.stopPropagation()}>{text}</a>
+                      ) : onSelect &&
                       entry ===
                         (shown.find((column) =>
                           /^0x[0-9a-f]{40,}$/i.test(asText(row[column.at])),

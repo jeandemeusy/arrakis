@@ -373,6 +373,14 @@ export default function GuidePage() {
               and which axis it uses. Settings are kept by series name, so they
               follow a series however the data changes.
             </p>
+            <p>
+              In a table chart, expand <strong>Columns</strong> to add an optional
+              link to a column. Use row values in the URL, for example{' '}
+              <code>{'/dashboards/client?client={{address}}'}</code> or{' '}
+              <code>{'https://example.com/accounts/{{address}}'}</code>. Values
+              are URL encoded. A link is omitted when a referenced column is
+              missing or null; external links open in a new tab.
+            </p>
           </Section>
 
           <Section id="dashboards">

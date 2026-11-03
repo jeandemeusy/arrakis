@@ -666,6 +666,14 @@ function TableColumns({
               })
             }
           /></label>
+          <label className="table-column-field table-column-link"><span>Link URL (optional)</span><input
+            className="studio-input"
+            aria-label={`Link URL for ${column.name}`}
+            placeholder={`/dashboards/details?id={{${column.name}}}`}
+            value={display?.link ?? ''}
+            maxLength={2048}
+            onChange={(event) => setDisplay(column.name, { link: event.target.value || undefined })}
+          /><small>Use {'{{column}}'} for a row value. Links can be dashboard paths or http(s) URLs.</small></label>
         </div>
         );
       })}
