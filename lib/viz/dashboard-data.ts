@@ -33,6 +33,10 @@ export function resolveVariables(
   const networkIds = new Set(['all', ...sources]);
   const out: Record<string, string | undefined> = {};
   for (const variable of variables) {
+    if (variable.type === 'network' && variable.fixed) {
+      out[variable.name] = variable.default;
+      continue;
+    }
     let value = supplied[variable.name];
     if (value === undefined || value === '') value = variable.default;
     if (value !== undefined) {

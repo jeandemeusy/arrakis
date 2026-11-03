@@ -235,6 +235,8 @@ export type Variable = {
    * choice existed all offered it.
    */
   stack?: boolean;
+  /** Bind a network variable to its default and hide its selector. */
+  fixed?: boolean;
 };
 
 export type WidgetOptions = {
@@ -309,6 +311,11 @@ export function parseVariables(input: unknown): Variable[] {
       variable.default = asText(entry.default).slice(0, 200);
     }
     if (type === 'network' && entry.stack === false) variable.stack = false;
+    if (type === 'network' && entry.fixed === true) {
+      if (!variable.default || variable.default === 'all')
+        throw badRequest(`${where}.default must name a data source when fixed`);
+      variable.fixed = true;
+    }
     if (type === 'range' || type === 'select') {
       const options = Array.isArray(entry.options)
         ? entry.options.map(String).filter(Boolean)

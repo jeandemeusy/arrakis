@@ -270,8 +270,11 @@ export function DashboardView({
     const out: Record<string, string | undefined> = { ...data?.vars };
     for (const [name, value] of Object.entries(requested))
       if (value !== undefined || !data) out[name] = value;
+    for (const variable of dashboard?.variables ?? [])
+      if (variable.type === 'network' && variable.fixed)
+        out[variable.name] = variable.default;
     return out;
-  }, [data, requested]);
+  }, [data, requested, dashboard]);
   const network =
     (dashboard?.variables.find((variable) => variable.type === 'network') &&
       vars[

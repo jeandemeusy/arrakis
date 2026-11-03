@@ -237,6 +237,7 @@ export type DashboardVariable = {
   labels?: Record<string, string>;
   /** Data source variable: whether "All, stacked" is offered (absent: yes). */
   stack?: boolean;
+  fixed?: boolean;
 };
 
 /** A dashboard that shows charts of one query, with the variables it offers. */

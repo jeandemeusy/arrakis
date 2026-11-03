@@ -24,6 +24,7 @@ export function VariableBar({
   return (
     <div className="dashboard-vars">
       {variables.map((variable) => {
+        if (variable.type === 'network' && variable.fixed) return null;
         const raw = vars[variable.name];
         // Not stacking: "all" means the first source, as the server reads it.
         const value =
