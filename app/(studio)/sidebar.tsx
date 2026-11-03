@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 import {
   BookOpen,
   Database,
+  Folder,
   House,
   LayoutDashboard,
   LogIn,
@@ -34,7 +35,13 @@ import { SETTINGS_PAGES } from './settings/settings-pages';
  * editing lock. Folds to icons on wide screens; a drawer on narrow ones.
  */
 
-type DashboardLink = { slug: string; title: string; official: boolean };
+type DashboardLink = {
+  slug: string;
+  title: string;
+  official: boolean;
+  folderId: string | null;
+};
+type DashboardFolder = { id: string; name: string };
 
 function NavLink({
   href,
@@ -107,6 +114,7 @@ export function Sidebar() {
   const folded = useFolded();
   const [open, setOpen] = useState(false);
   const [dashboards, setDashboards] = useState<DashboardLink[] | null>(null);
+  const [folders, setFolders] = useState<DashboardFolder[]>([]);
   const activeSection = useActiveSection(
     dashboard?.sections.map((section) => section.id) ?? [],
   );
@@ -116,6 +124,9 @@ export function Sidebar() {
     api<{ dashboards: DashboardLink[] }>('/api/v1/dashboards')
       .then(({ dashboards: list }) => live && setDashboards(list))
       .catch(() => live && setDashboards([]));
+    api<{ folders: DashboardFolder[] }>('/api/v1/dashboard-folders')
+      .then(({ folders: list }) => live && setFolders(list))
+      .catch(() => live && setFolders([]));
     return () => {
       live = false;
     };
@@ -136,6 +147,40 @@ export function Sidebar() {
   const currentDashboard = pathname.startsWith('/dashboards/')
     ? decodeURIComponent(pathname.split('/')[2] ?? '')
     : null;
+
+  const dashboardLink = (entry: DashboardLink) => {
+    const here = currentDashboard === entry.slug;
+    const sections =
+      here && dashboard?.slug === entry.slug ? dashboard.sections : [];
+    return (
+      <li key={entry.slug}>
+        <NavLink
+          href={`/dashboards/${entry.slug}`}
+          label={entry.title}
+          active={here}
+          onNavigate={close}
+        />
+        {sections.length > 0 && (
+          <ul className="nav-sections" aria-label={`${entry.title} sections`}>
+            {sections.map((section) => (
+              <li key={section.id}>
+                <a
+                  href={`#${section.id}`}
+                  className="nav-section"
+                  aria-current={
+                    activeSection === section.id ? 'location' : undefined
+                  }
+                  onClick={close}
+                >
+                  {section.title}
+                </a>
+              </li>
+            ))}
+          </ul>
+        )}
+      </li>
+    );
+  };
 
   return (
     <>
@@ -198,46 +243,37 @@ export function Sidebar() {
                 onNavigate={close}
               />
               <ul className="nav-children">
-                {dashboards?.map((entry) => {
-                  const here = currentDashboard === entry.slug;
-                  const sections =
-                    here && dashboard?.slug === entry.slug
-                      ? dashboard.sections
-                      : [];
+                {folders.map((folder) => {
+                  const entries =
+                    dashboards?.filter(
+                      (entry) => entry.folderId === folder.id,
+                    ) ?? [];
+                  const active = entries.some(
+                    (entry) => entry.slug === currentDashboard,
+                  );
                   return (
-                    <li key={entry.slug}>
-                      <NavLink
-                        href={`/dashboards/${entry.slug}`}
-                        label={entry.title}
-                        active={here}
-                        onNavigate={close}
-                      />
-                      {sections.length > 0 && (
-                        <ul
-                          className="nav-sections"
-                          aria-label={`${entry.title} sections`}
-                        >
-                          {sections.map((section) => (
-                            <li key={section.id}>
-                              <a
-                                href={`#${section.id}`}
-                                className="nav-section"
-                                aria-current={
-                                  activeSection === section.id
-                                    ? 'location'
-                                    : undefined
-                                }
-                                onClick={close}
-                              >
-                                {section.title}
-                              </a>
-                            </li>
-                          ))}
+                    <li key={`${folder.id}-${active}`}>
+                      <details
+                        className="nav-folder"
+                        open={active || undefined}
+                      >
+                        <summary title={folder.name}>
+                          <Folder size={15} aria-hidden="true" />
+                          <span>{folder.name}</span>
+                        </summary>
+                        <ul>
+                          {entries.map(dashboardLink)}
+                          {entries.length === 0 && (
+                            <li className="nav-empty">Empty folder</li>
+                          )}
                         </ul>
-                      )}
+                      </details>
                     </li>
                   );
                 })}
+                {dashboards
+                  ?.filter((entry) => !entry.folderId)
+                  .map(dashboardLink)}
                 {dashboards?.length === 0 && (
                   <li className="nav-empty">None yet</li>
                 )}

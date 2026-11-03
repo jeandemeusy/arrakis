@@ -450,6 +450,7 @@ export async function requireDashboard(
 
 export type DashboardSummary = Omit<Dashboard, 'widgets'> & {
   official: boolean;
+  folderId: string | null;
   /** Charts on it, headings not counted. */
   charts: number;
 };
@@ -459,10 +460,10 @@ export async function listDashboards(
 ): Promise<DashboardSummary[]> {
   const db = await appDb();
   const { rows } = await db.query<
-    DashboardRow & { official: boolean; charts: number }
+    DashboardRow & { official: boolean; charts: number; folder_id: string | null }
   >(
     `SELECT d.id, d.slug, d.title, d.description, d.visibility, d.variables,
-            u.username AS created_by, d.updated_at, d.archived_at, d.official,
+            u.username AS created_by, d.updated_at, d.archived_at, d.official, d.folder_id,
             (SELECT count(*)::int FROM dashboard_widgets w
              WHERE w.dashboard_id = d.id AND w.kind = 'visualization') AS charts
      FROM dashboards d LEFT JOIN users u ON u.id = d.created_by
@@ -472,6 +473,7 @@ export async function listDashboards(
   );
   return rows.map((row) => ({
     official: row.official,
+    folderId: row.folder_id,
     charts: row.charts,
     id: row.id,
     slug: row.slug,
