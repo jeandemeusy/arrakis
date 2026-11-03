@@ -158,11 +158,13 @@ export async function preview(
     startedBy?: string;
     /** The plan rather than the rows; `analyze` runs it to measure. */
     explain?: 'plan' | 'analyze';
+    /** A draft fragment for editor-only tests. */
+    resolve?: ResolveFragment;
   } = {},
 ): Promise<Preview> {
   const outcomes = await Promise.allSettled(
     targets.map(async (network) => {
-      const prepared = await prepare(source, supplied, network);
+      const prepared = await prepare(source, supplied, network, options.resolve);
       const outcome = await runReadOnly({
         network,
         text: prepared.compiled.text,

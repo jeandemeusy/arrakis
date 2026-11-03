@@ -163,6 +163,7 @@ export type Dependent = {
   kind: 'query' | 'fragment';
   direct: boolean;
   charts: number;
+  dashboards: Array<{ slug: string; title: string }>;
 };
 
 export type Network = { id: string; label: string };

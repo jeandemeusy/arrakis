@@ -21,6 +21,7 @@ export type WidgetPayload =
   | {
       state: 'ok';
       data: {
+        queryVersion?: number | null;
         columns: Column[];
         rows: unknown[][];
         truncated: boolean;
@@ -139,6 +140,7 @@ export function WidgetTile({
   source,
   subtitle,
   busy,
+  detailVars,
 }: {
   id: string;
   title: string;
@@ -150,6 +152,7 @@ export function WidgetTile({
    * being recomputed for new variables. Either shows in place of its age.
    */
   busy?: 'running' | 'updating';
+  detailVars?: Record<string, string | undefined>;
   spec: ChartSpec;
   payload: WidgetPayload;
   width: number;
@@ -163,6 +166,13 @@ export function WidgetTile({
   const data = payload.state === 'ok' ? payload.data : null;
   const columns = data?.columns ?? [];
   const rows = data?.rows ?? [];
+  const details = <div className="tile-details">
+    {subtitle && <p><strong>Query:</strong> {subtitle}{data?.queryVersion != null ? ` · v${data.queryVersion}` : ''} {source && <a href={source.href}>Open query</a>}</p>}
+    <p><strong>Data shown:</strong> {data ? `${rows.length} result row${rows.length === 1 ? '' : 's'}${data.truncated ? ' (truncated)' : ''}` : 'Not available'}</p>
+    {data?.networks.map((entry) => <p key={entry.id}><strong>{entry.id}:</strong> {entry.status}{entry.stale ? ' · stale' : ''}{entry.finishedAt ? ` · last successful run ${WHEN.format(new Date(entry.finishedAt))}` : ''}{entry.lastAttempt?.status === 'failed' ? ` · last run failed${entry.lastAttempt.error ? `: ${entry.lastAttempt.error}` : ''}` : ''}</p>)}
+    {detailVars && Object.entries(detailVars).filter(([, value]) => value !== undefined).map(([name, value]) => <p key={name}><strong>{name}:</strong> {value}</p>)}
+    {data && rows.length > 0 && <><p><strong>Chart result</strong> (after the chart&rsquo;s transformations; not the underlying source rows):</p><div className="tile-details-table"><table><thead><tr>{columns.map((column) => <th key={column.name}>{column.name}</th>)}</tr></thead><tbody>{rows.slice(0, 10).map((row, index) => <tr key={index}>{row.map((value, at) => <td key={at}>{asText(value)}</td>)}</tr>)}</tbody></table></div>{rows.length > 10 && <p>Showing the first 10 result rows. Download data for the rest.</p>}</>}
+  </div>;
   const csv = data
     ? () => [
         columns.map((column) => column.name),
@@ -210,6 +220,7 @@ export function WidgetTile({
         noteText={text}
         rows={csv}
         source={source}
+        details={details}
         subtitle={subtitle}
         freshness={freshness}
         menu
@@ -245,6 +256,7 @@ export function WidgetTile({
       rowCount={isTable ? rows.length : undefined}
       note={note ? <p className="tile-note">{note}</p> : undefined}
       source={source}
+      details={details}
       subtitle={subtitle}
       freshness={freshness}
       menu

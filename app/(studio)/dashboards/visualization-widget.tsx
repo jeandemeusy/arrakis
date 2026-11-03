@@ -4,7 +4,7 @@ import { memo } from 'react';
 import { WidgetTile, type WidgetPayload } from '../../viz/widget-tile';
 import { type DashboardWidget } from '../api';
 import { useSession } from '../session';
-import { type DraftWidget, useWidgetData } from './widget-data';
+import { readsOf, type DraftWidget, useWidgetData } from './widget-data';
 
 export type TileLink = NonNullable<DashboardWidget['options']['link']>;
 
@@ -39,7 +39,12 @@ export const VisualizationWidget = memo(
     (before.expanded === before.widget.id) ===
       (after.expanded === after.widget.id) &&
     // Only a tile fetching its own data (while editing) reads the variables.
-    (after.payload !== null || before.vars === after.vars),
+    (before.vars === after.vars ||
+      (after.payload !== null &&
+        (!after.widget.visualization ||
+          [...readsOf(after.widget.visualization)].every(
+            (name) => before.vars[name] === after.vars[name],
+          )))),
 );
 
 function VisualizationWidgetTile({
@@ -96,6 +101,7 @@ function VisualizationWidgetTile({
       payload={payload ?? own}
       subtitle={visualization.queryTitle}
       busy={busy}
+      detailVars={Object.fromEntries([...readsOf(visualization)].map((name) => [name, vars[name]]))}
       width={12}
       height={widget.height}
       note={widget.options.note}

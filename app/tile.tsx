@@ -338,6 +338,8 @@ export type TileProps = {
   children?: ReactNode;
   /** Where the figure comes from: its title and an action link there. */
   source?: { href: string; label: string };
+  /** Information about the data behind the displayed value. */
+  details?: ReactNode;
   /** Shown muted after the title: the query the figure is drawn from. */
   subtitle?: string;
   /** How fresh the data is, as a pill in the tile's footer. */
@@ -448,6 +450,7 @@ export function Tile({
   rows,
   children,
   source,
+  details,
   subtitle,
   freshness,
   menu = false,
@@ -455,6 +458,7 @@ export function Tile({
   onExpand,
 }: TileProps) {
   const dialog = useRef<HTMLDialogElement>(null);
+  const detailsDialog = useRef<HTMLDialogElement>(null);
   const frame = useRef<HTMLDivElement>(null);
   const [frameHeight, setFrameHeight] = useState<number | null>(null);
   const palette = usePalette();
@@ -539,6 +543,9 @@ export function Tile({
   );
   const menuActions = (
     <TileMenu label={`More on ${title}`}>
+      {details && <button type="button" onClick={() => detailsDialog.current?.showModal()}>
+        <Search size={14} aria-hidden="true" /> Why this value?
+      </button>}
       {source && (
         <Link href={source.href} title={source.label}>
           <Code2 size={14} aria-hidden="true" /> Open the query
@@ -614,7 +621,7 @@ export function Tile({
             {sub}
             {flag}
           </span>
-          <strong>{figure}</strong>
+          <strong>{details ? <button type="button" className="metric-value-detail" title="Why this value?" aria-label={`Why is ${title} ${figure}?`} onClick={() => detailsDialog.current?.showModal()}>{figure}</button> : figure}</strong>
           {broken ? (
             <p className="metric-unavailable">
               {status?.reason}
@@ -673,6 +680,10 @@ export function Tile({
       )}
 
       {!hasFoot && actions}
+      {details && <dialog ref={detailsDialog} className="modal tile-details-modal" aria-label={`About ${title}`}>
+        <div className="modal-head"><h2>About {title}</h2><button type="button" aria-label="Close" onClick={() => detailsDialog.current?.close()}><X size={16} aria-hidden="true" /></button></div>
+        <div className="modal-body">{details}</div>
+      </dialog>}
       <dialog
         ref={dialog}
         className="modal"

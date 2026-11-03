@@ -189,6 +189,7 @@ export function AboutPanel({
                   {entry.charts > 0 &&
                     `${entry.direct ? '' : ' · '}${entry.charts} chart${entry.charts === 1 ? '' : 's'}`}
                 </small>
+                {entry.dashboards.length > 0 && <small>Dashboards: {entry.dashboards.map((dashboard, index) => <span key={dashboard.slug}>{index > 0 && ', '}<Link href={`/dashboards/${dashboard.slug}`}>{dashboard.title}</Link></span>)}</small>}
               </li>
             ))}
             {!dependents.length && (

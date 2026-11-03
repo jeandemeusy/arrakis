@@ -1,6 +1,6 @@
 'use client';
 
-import { GripVertical, Settings2, Trash2 } from 'lucide-react';
+import { ClipboardCopy, Copy, GripVertical, Settings2, Trash2 } from 'lucide-react';
 
 /**
  * The few controls a tile has while editing, floating over its top-right
@@ -16,6 +16,8 @@ export function TileToolbar({
   onPointerCancel,
   onMove,
   onSettings,
+  onDuplicate,
+  onCopy,
   onRemove,
 }: {
   label: string;
@@ -26,6 +28,8 @@ export function TileToolbar({
   onPointerCancel: () => void;
   onMove?: (direction: 'left' | 'right' | 'up' | 'down') => void;
   onSettings?: () => void;
+  onDuplicate: () => void;
+  onCopy: () => void;
   onRemove: () => void;
 }) {
   return (
@@ -66,6 +70,12 @@ export function TileToolbar({
           <Settings2 size={14} aria-hidden="true" />
         </button>
       )}
+      <button type="button" className="tile-tool" aria-label={`Duplicate ${label}`} title="Duplicate" onClick={onDuplicate}>
+        <Copy size={14} aria-hidden="true" />
+      </button>
+      <button type="button" className="tile-tool" aria-label={`Copy ${label}`} title="Copy tile" onClick={onCopy}>
+        <ClipboardCopy size={14} aria-hidden="true" />
+      </button>
       <button
         type="button"
         className="tile-tool danger"

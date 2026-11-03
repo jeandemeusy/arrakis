@@ -37,6 +37,7 @@ const CACHE_LIMIT = 500;
 const READER_ROLE = 'arrakis_results_reader';
 
 export type VisualizationData = {
+  queryVersion: number | null;
   columns: Column[];
   rows: unknown[][];
   truncated: boolean;
@@ -163,6 +164,7 @@ export async function runVisualization(options: {
     const located = await locateResults({ query, targets, supplied: {} });
     if (!located.tables.length) {
       return {
+        queryVersion: query.current?.version ?? null,
         columns: [],
         rows: [],
         truncated: false,
@@ -186,7 +188,7 @@ export async function runVisualization(options: {
       .digest('hex');
     const hit = cache.get(key);
     if (hit && Date.now() - hit.at < CACHE_TTL_MS) {
-      return { ...hit.data, networks: located.networks };
+      return { ...hit.data, queryVersion: query.current?.version ?? null, networks: located.networks };
     }
 
     let text: string;
@@ -229,6 +231,7 @@ export async function runVisualization(options: {
         row.map(toJsonValue),
       );
       const data: VisualizationData = {
+        queryVersion: query.current?.version ?? null,
         columns,
         rows: rows.slice(0, MAX_ROWS),
         truncated: rows.length > MAX_ROWS,

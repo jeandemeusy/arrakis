@@ -172,6 +172,11 @@ and comments:
 expression and stands in for a value, so the same mechanism covers a shared
 population and a shared formula. A fragment cannot use itself, directly or not.
 
+Editors can add SQL assertions to a fragment. Each must return exactly one
+boolean and can call the fragment with `{{> slug(...)}}`. Run it on a chosen
+data source against the current draft, without saving it or storing a result.
+The change-impact panel lists dependent queries, fragments and dashboards.
+
 **Lists** keep values out of the SQL, so editors change them without a new
 version: the accounts to leave out, the regions that count. Each value belongs
 to one data source or to every one. A list's values are part of each stored
@@ -193,6 +198,10 @@ replica leads, through an advisory lock in the app database; the others take
 over if it goes away. A failed run keeps the previous result serving and
 records the error on it. At most `ARRAKIS_SCHEDULER_CONCURRENCY` scheduled runs
 are in flight at once.
+
+**Query health** under Settings shows active runs, problems with default
+parameter values on each source, affected dashboards, and the 100 most recent
+stored runs recorded since history was enabled. Preview runs are not included.
 
 **Several data sources.** A query runs on one, or on all of them with their
 rows stacked under a `network` column — useful when they share a schema, like
@@ -316,6 +325,8 @@ GRANT SELECT ON ALL TABLES IN SCHEMA results TO arrakis_results_reader;
 A **dashboard** is a grid of charts and headings, in order, each 1 to 12 columns
 wide. **Edit** turns the page into its own editor:
 
+- undo and redo changes to the current draft, and duplicate a tile from its
+  toolbar; the history is cleared when editing ends;
 - a bar floats at the top with *Add chart* (any chart saved on a query, found
   as you type), *Heading*, *Variables*, *Settings* (visibility, archive), and
   *Cancel* / *Save*, with a dot that turns amber once something changed;
@@ -334,6 +345,13 @@ and a widget can be linked so that clicking a row or bar sets a variable here or
 on another dashboard, and can be shown only while a variable is set — which is
 how a drill-down works. Variables travel in the address
 (`/dashboards/usage?range=7d&client=0x…`), so any view can be linked to.
+Editors can save named views of the current variables for dashboard readers.
+Tile settings let them choose a destination dashboard and one of its variables
+for a row or bar click. Click a number or select **Why this value?** from a
+tile's menu to inspect its query, selected variables, source freshness and
+transformed chart result. This result is not necessarily the underlying source
+rows; the query link opens the underlying query where permissions allow.
+
 Dashboards are private, unlisted or public, like queries. Every chart's title
 (and *Open the query* in its menu) opens the query it is drawn from, on that
 chart's tab — `/queries/<slug>?tab=charts&chart=<id>` — so any figure can be

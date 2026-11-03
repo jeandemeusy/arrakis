@@ -27,8 +27,8 @@ export const SETTINGS_PAGES: SettingsPage[] = [
   {
     href: '/settings/runs',
     icon: Activity,
-    title: 'Running now',
-    text: 'Every query running at this moment — previews, stored runs and scheduled refreshes — with a way to cancel any of them.',
+    title: 'Query health',
+    text: 'Monitor active and recent runs, stale results and the dashboards they affect.',
     editorOnly: true,
   },
 ];

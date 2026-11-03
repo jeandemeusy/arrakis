@@ -76,6 +76,7 @@ import { SchemaPanel } from './schema-panel';
 import { ExtractForm } from './extract-form';
 import { ParametersPanel } from './parameters-panel';
 import { VersionsPanel } from './versions-panel';
+import { FragmentTests } from './fragment-tests';
 import { HelpTip } from '../help-tip';
 import { formatSql } from '../sql-format';
 import { ShareButton } from '../share';
@@ -1118,6 +1119,12 @@ export function Workbench({
 
         <ErrorBox error={saveError} />
 
+        {editor && isFragment && sqlDirty && dependents && <details className="fragment-impact studio-card">
+          <summary>Change impact: {dependents.length} dependent {dependents.length === 1 ? 'item' : 'items'}</summary>
+          <p className="studio-muted">Saving a new fragment version makes dependent stored results stale. Scheduled queries will rerun.</p>
+          {dependents.length === 0 ? <p>No dependent queries or fragments.</p> : <ul>{dependents.map((entry) => <li key={entry.slug}><Link href={`/queries/${entry.slug}`}>{entry.title}</Link> {entry.direct ? '(direct)' : '(through another fragment)'}{entry.dashboards.length > 0 && <> · dashboards: {entry.dashboards.map((dashboard, index) => <span key={dashboard.slug}>{index > 0 && ', '}<Link href={`/dashboards/${dashboard.slug}`}>{dashboard.title}</Link></span>)}</>}</li>)}</ul>}
+        </details>}
+
         <section className="card editor-card" aria-label="Query editor">
           <header className="card-head">
             <h2>
@@ -1703,6 +1710,7 @@ export function Workbench({
             )}
           </div>
         </section>
+        {editor && isFragment && slug && !query?.archivedAt && <FragmentTests slug={slug} sql={draft.sql} parameters={draft.parameters} network={network === 'all' && networks.length === 1 ? networks[0].id : network} />}
       </section>
 
       {aboutOpen && !creating && (

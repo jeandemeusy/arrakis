@@ -3,7 +3,7 @@ import type { Metadata } from 'next';
 import { RunsMonitor } from './runs-monitor';
 
 export const metadata: Metadata = {
-  title: 'Running now',
+  title: 'Query health',
   robots: { index: false, follow: false },
 };
 

@@ -19,6 +19,7 @@ export type Dependent = {
   /** Names it in its own SQL, rather than through another fragment. */
   direct: boolean;
   charts: number;
+  dashboards: Array<{ slug: string; title: string }>;
 };
 
 export async function dependents(
@@ -35,6 +36,14 @@ export async function dependents(
      GROUP BY q.slug`,
   );
   const charts = new Map(rows.map((row) => [row.slug, row.charts]));
+  const hosts = await db.query<{ query: string; slug: string; title: string }>(
+    `SELECT DISTINCT q.slug AS query, d.slug, d.title
+     FROM queries q JOIN visualizations v ON v.query_id = q.id
+     JOIN dashboard_widgets w ON w.visualization_id = v.id
+     JOIN dashboards d ON d.id = w.dashboard_id
+     WHERE v.archived_at IS NULL AND d.archived_at IS NULL ${editor ? '' : "AND d.visibility = 'public'"}
+     ORDER BY d.title`,
+  );
   const named = new RegExp(
     `\\{\\{\\s*>\\s*${slug.replace(/-/g, '\\-')}\\s*(\\(|\\}\\})`,
   );
@@ -60,6 +69,7 @@ export async function dependents(
       kind: query.kind,
       direct: named.test(query.current.sql),
       charts: charts.get(query.slug) ?? 0,
+      dashboards: hosts.rows.filter((host) => host.query === query.slug).map(({ slug, title }) => ({ slug, title })),
     });
   }
   return out.sort(

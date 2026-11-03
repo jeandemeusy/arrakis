@@ -3159,6 +3159,134 @@ a.settings-card:focus-visible {
   justify-self: start;
 }
 
+.tile-details-modal {
+  width: min(680px, 92vw);
+}
+
+.tile-details {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.chart-card .tile-details p {
+  margin: 0 0 12px;
+  font-size: inherit;
+}
+
+.chart-card .tile-details strong {
+  color: var(--ink);
+  font: inherit;
+  font-weight: 600;
+  letter-spacing: normal;
+}
+
+.tile-details a {
+  color: var(--ink);
+  text-underline-offset: 3px;
+}
+
+.metric-value-detail {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.metric-value-detail:hover {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 4px;
+}
+
+.tile-details-table,
+.query-health .runs-card {
+  max-width: 100%;
+  overflow: auto;
+}
+
+.tile-details-table table {
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.tile-details-table th,
+.tile-details-table td {
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+}
+
+.query-health {
+  display: grid;
+  gap: 12px;
+  margin-top: 32px;
+}
+
+.query-health h2,
+.query-health p,
+.fragment-tests h2 {
+  margin: 0;
+}
+
+.fragment-tests,
+.fragment-tests form {
+  display: grid;
+  gap: 12px;
+}
+
+.fragment-tests form label {
+  display: grid;
+  gap: 6px;
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
+.fragment-tests details[open] > summary {
+  margin-bottom: 14px;
+}
+
+.fragment-tests form .studio-button {
+  justify-self: start;
+}
+
+.fragment-test-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: start;
+  gap: 10px;
+}
+
+.fragment-test-row > div {
+  flex: 1;
+  min-width: 200px;
+}
+
+.fragment-test-row pre {
+  overflow-x: auto;
+  white-space: pre-wrap;
+}
+
+.fragment-impact summary,
+.fragment-tests summary {
+  cursor: pointer;
+}
+
+.dashboard-saved-views,
+.dashboard-saved-views form,
+.dashboard-saved-views label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.dashboard-saved-views {
+  margin-bottom: 12px;
+}
+
 .dashboard-folder-create,
 .dashboard-folder-heading,
 .dashboard-folder-heading form,
@@ -5455,7 +5583,13 @@ a.settings-card:focus-visible {
 /* A query plan, from Explain. */
 .query-plan {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 10px;
+  min-width: 0;
+}
+
+.query-plan section {
+  min-width: 0;
 }
 
 .query-plan p {
@@ -5469,6 +5603,8 @@ a.settings-card:focus-visible {
 }
 
 .query-plan pre {
+  max-width: 100%;
+  max-height: min(65vh, 640px);
   margin: 0;
   padding: 12px 14px;
   overflow: auto;

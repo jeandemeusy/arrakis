@@ -1,8 +1,9 @@
 'use client';
 
 import Link from 'next/link';
+import { useEffect, useState } from 'react';
 import { Trash2 } from 'lucide-react';
-import { type DashboardVariable } from '../api';
+import { api, type DashboardVariable } from '../api';
 import { type DraftWidget } from './widget-data';
 
 /**
@@ -11,16 +12,28 @@ import { type DraftWidget } from './widget-data';
  */
 export function TileSettings({
   widget,
+  dashboardSlug,
   variables,
   onChange,
   onRemove,
 }: {
   widget: DraftWidget;
+  dashboardSlug: string;
   variables: DashboardVariable[];
   onChange: (widget: DraftWidget) => void;
   onRemove: () => void;
 }) {
-  const textVars = variables.filter(
+  const [dashboards, setDashboards] = useState<Array<{ slug: string; title: string; variables: DashboardVariable[] }>>([]);
+  const [target, setTarget] = useState(widget.options.link?.dashboard ?? '');
+  useEffect(() => {
+    let live = true;
+    api<{ dashboards: Array<{ slug: string; title: string; variables: DashboardVariable[] }> }>('/api/v1/dashboards')
+      .then((result) => { if (live) setDashboards(result.dashboards); }).catch(() => undefined);
+    return () => { live = false; };
+  }, []);
+  const destination = widget.options.link ? (widget.options.link.dashboard ?? '') : target;
+  const targetVariables = destination ? dashboards.find((dashboard) => dashboard.slug === destination)?.variables ?? [] : variables;
+  const textVars = targetVariables.filter(
     (variable) => variable.type === 'text' || variable.type === 'select',
   );
   const options = widget.options;
@@ -79,7 +92,15 @@ export function TileSettings({
         />
       </label>
       <fieldset className="link-fields">
-        <legend>Clicking a row or bar sets</legend>
+        <legend>Clicking a row or bar</legend>
+        <label>Open dashboard <select className="studio-input" value={destination} onChange={(event) => {
+          const destination = event.target.value;
+          setTarget(destination);
+          const available = destination ? dashboards.find((dashboard) => dashboard.slug === destination)?.variables ?? [] : variables;
+          const valid = available.some((variable) => variable.name === options.link?.var && (variable.type === 'text' || variable.type === 'select'));
+          if (options.link) set({ link: valid ? { ...options.link, dashboard: destination || undefined } : undefined });
+        }}><option value="">This dashboard</option>{dashboards.filter((dashboard) => dashboard.slug !== dashboardSlug).map((dashboard) => <option key={dashboard.slug} value={dashboard.slug}>{dashboard.title}</option>)}</select></label>
+        <span>Set variable</span>
         <select
           className="studio-input"
           aria-label="Variable to set"
@@ -90,7 +111,7 @@ export function TileSettings({
                 ? {
                     column: options.link?.column ?? columns[0] ?? '',
                     var: event.target.value,
-                    dashboard: options.link?.dashboard,
+                    dashboard: destination || undefined,
                   }
                 : undefined,
             })
@@ -125,22 +146,6 @@ export function TileSettings({
                 </option>
               ))}
             </datalist>
-            <span>on dashboard</span>
-            <input
-              aria-label="Target dashboard"
-              className="studio-input mono"
-              placeholder="this one"
-              value={options.link.dashboard ?? ''}
-              onChange={(event) =>
-                options.link &&
-                set({
-                  link: {
-                    ...options.link,
-                    dashboard: event.target.value || undefined,
-                  },
-                })
-              }
-            />
           </>
         )}
       </fieldset>

@@ -8,6 +8,7 @@ import {
   useEffect,
   useLayoutEffect,
   useMemo,
+  useReducer,
   useRef,
   useState,
 } from 'react';
@@ -17,7 +18,10 @@ import {
   Lock,
   Pencil,
   Plus,
+  ClipboardPaste,
   Save,
+  Undo2,
+  Redo2,
   Settings2,
   SlidersHorizontal,
   Type,
@@ -67,6 +71,42 @@ import { HelpTip } from '../help-tip';
 import { LockedButton } from '../locked-link';
 import { ShareButton } from '../share';
 import { ago } from '../time';
+import { SavedViews } from './saved-views';
+
+type EditSettings = {
+  title: string;
+  description: string;
+  visibility: Visibility;
+  variables: DashboardVariable[];
+};
+type EditSnapshot = { draft: DraftWidget[] | null; settings: EditSettings | null };
+type EditHistory = { present: EditSnapshot; past: EditSnapshot[]; future: EditSnapshot[] };
+type EditAction =
+  | { type: 'draft'; value: React.SetStateAction<DraftWidget[] | null> }
+  | { type: 'settings'; value: React.SetStateAction<EditSettings | null> }
+  | { type: 'undo' }
+  | { type: 'redo' };
+
+function editHistory(state: EditHistory, action: EditAction): EditHistory {
+  if (action.type === 'undo') {
+    const previous = state.past.at(-1);
+    return previous ? { present: previous, past: state.past.slice(0, -1), future: [state.present, ...state.future] } : state;
+  }
+  if (action.type === 'redo') {
+    const next = state.future[0];
+    return next ? { present: next, past: [...state.past, state.present], future: state.future.slice(1) } : state;
+  }
+  const key = action.type;
+  const old = state.present[key];
+  const value = typeof action.value === 'function'
+    ? (action.value as (current: typeof old) => typeof old)(old)
+    : action.value;
+  if (JSON.stringify(old) === JSON.stringify(value)) return state;
+  const present = { ...state.present, [key]: value };
+  if (!state.present.draft || !state.present.settings || !present.draft || !present.settings)
+    return { present, past: [], future: [] };
+  return { present, past: [...state.past.slice(-99), state.present], future: [] };
+}
 
 /**
  * A dashboard: its variables across the top, its widgets on the grid below.
@@ -108,13 +148,22 @@ export function DashboardView({
   const [networks, setNetworks] = useState<Network[]>([]);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [editing, setEditing] = useState(initialEditing);
-  const [draft, setDraft] = useState<DraftWidget[] | null>(null);
-  const [settings, setSettings] = useState<{
-    title: string;
-    description: string;
-    visibility: Visibility;
-    variables: DashboardVariable[];
-  } | null>(null);
+  const [history, dispatchEdit] = useReducer(editHistory, { present: { draft: null, settings: null }, past: [], future: [] });
+  const { draft, settings } = history.present;
+  const setDraft = useCallback((value: React.SetStateAction<DraftWidget[] | null>) => dispatchEdit({ type: 'draft', value }), []);
+  const setSettings = useCallback((value: React.SetStateAction<EditSettings | null>) => dispatchEdit({ type: 'settings', value }), []);
+  useEffect(() => {
+    if (!editing) return;
+    const handleKey = (event: KeyboardEvent) => {
+      const element = event.target as HTMLElement | null;
+      if (element?.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(element?.tagName ?? '')) return;
+      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.key.toLowerCase() !== 'z') return;
+      event.preventDefault();
+      dispatchEdit({ type: event.shiftKey ? 'redo' : 'undo' });
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [editing]);
   const [catalog, setCatalog] = useState<SavedVisualization[]>([]);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -124,6 +173,7 @@ export function DashboardView({
     null,
   );
   const [selected, setSelected] = useState<string | null>(null);
+  const [copiedWidget, setCopiedWidget] = useState<DraftWidget | null>(null);
   const [picking, setPicking] = useState(false);
   const [dragging, setDragging] = useState<string | null>(null);
   const spatialDrag = useRef<{
@@ -657,6 +707,24 @@ export function DashboardView({
     setDraft((current) => [...(current ?? []), widget]);
     setAdded(widget.id);
   };
+  const duplicateWidget = (widget: DraftWidget) => {
+    const bottom = Math.max(0, ...[...resolvedLayout.values()].map((box) => box.row + box.height));
+    const layout = widget.options.layout;
+    addWidget({
+      ...widget,
+      id: `new-${crypto.randomUUID()}`,
+      local: true,
+      options: {
+        ...widget.options,
+        layout: {
+          column: layout?.column ?? 0,
+          row: Math.ceil(bottom / gridSize.step),
+          unit: 'cells',
+          ...(widget.kind === 'visualization' && layout?.rows ? { rows: layout.rows } : {}),
+        },
+      },
+    });
+  };
   const addChart = (visualization: SavedVisualization) => {
     setPicking(false);
     addWidget({
@@ -948,6 +1016,15 @@ export function DashboardView({
             {dirty ? 'Unsaved changes' : 'Editing'}
           </span>
           <span className="edit-bar-sep" />
+          <button type="button" className="edit-bar-button" title="Undo" aria-label="Undo dashboard change" disabled={!history.past.length} onClick={() => dispatchEdit({ type: 'undo' })}>
+            <Undo2 size={15} aria-hidden="true" /><span className="edit-label">Undo</span>
+          </button>
+          <button type="button" className="edit-bar-button" title="Redo" aria-label="Redo dashboard change" disabled={!history.future.length} onClick={() => dispatchEdit({ type: 'redo' })}>
+            <Redo2 size={15} aria-hidden="true" /><span className="edit-label">Redo</span>
+          </button>
+          <button type="button" className="edit-bar-button" disabled={!copiedWidget} title="Paste copied tile" onClick={() => copiedWidget && duplicateWidget(copiedWidget)}>
+            <ClipboardPaste size={15} aria-hidden="true" /><span className="edit-label">Paste tile</span>
+          </button>
           <div className="edit-bar-group menu-anchor">
             <button
               type="button"
@@ -1113,6 +1190,15 @@ export function DashboardView({
       </header>
       {saveError && <p className="studio-error">{saveError}</p>}
 
+      {!editing && <SavedViews slug={slug} vars={Object.fromEntries(dashboard.variables.map((variable) => [variable.name, vars[variable.name]]))} editable={Boolean(user)} onApply={(values) => {
+        const next = Object.fromEntries(dashboard.variables.map((variable) => [variable.name, values[variable.name]]));
+        requestedRef.current = next;
+        setRequested(next);
+        const params = new URLSearchParams();
+        for (const [key, value] of Object.entries(next)) if (value) params.set(key, value);
+        window.history.replaceState(window.history.state, '', `/dashboards/${slug}${params.size ? `?${params}` : ''}`);
+      }} />}
+
       <VariableBar
         variables={variables}
         vars={vars}
@@ -1192,6 +1278,8 @@ export function DashboardView({
                     : undefined
                 }
                 onRemove={() => removeWidget(widget.id)}
+                onDuplicate={() => duplicateWidget(widget)}
+                onCopy={() => setCopiedWidget(widget)}
               />
             );
             const editClasses = editing
@@ -1383,6 +1471,7 @@ export function DashboardView({
           {panel === 'tile' && selectedWidget && (
             <TileSettings
               key={selectedWidget.id}
+              dashboardSlug={slug}
               widget={selectedWidget}
               variables={settings.variables}
               onChange={updateWidget}

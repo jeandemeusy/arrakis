@@ -7,6 +7,7 @@ import { Activity, Square } from 'lucide-react';
 import { api, ApiError } from '../../api';
 import { useSession } from '../../session';
 import { took } from '../../time';
+import { QueryHealth } from './query-health';
 
 type ActiveRun = {
   id: string;
@@ -97,7 +98,7 @@ export function RunsMonitor() {
     <main className="studio-page studio-medium">
       <header className="page-head">
         <div>
-          <h1>Running now</h1>
+          <h1>Query health</h1>
           <p className="studio-muted">
             Every query running against a data source at this moment, on any
             server: editors&apos; previews, runs stored by hand and scheduled
@@ -105,6 +106,7 @@ export function RunsMonitor() {
           </p>
         </div>
       </header>
+      {user && <h2>Running now</h2>}
       {user === null && (
         <p className="studio-muted">
           <Link href="/login?next=/settings/runs">Unlock editing</Link> to see
@@ -173,6 +175,7 @@ export function RunsMonitor() {
           )}
         </div>
       )}
+      <QueryHealth enabled={Boolean(user)} />
     </main>
   );
 }
