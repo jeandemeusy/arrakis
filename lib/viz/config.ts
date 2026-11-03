@@ -80,6 +80,8 @@ export type Options = {
 
   /** The legend beside the chart; shown by default when there are two series or more. */
   legend?: boolean;
+  /** Where to place a chart legend; auto adapts to the available width. */
+  legendPosition?: 'auto' | 'side' | 'below';
   /** The tooltip ends with the sum of the series at that point. */
   tooltipTotal?: boolean;
   /** Stacks every point to 100%, so the chart shows shares rather than amounts. */
@@ -215,6 +217,11 @@ function parseAxis(input: unknown, where: string): AxisOptions | undefined {
 
 /** The drawing options of line, area and bar charts, into `options`. */
 function parseDrawing(raw: Record<string, unknown>, options: Options) {
+  if (raw.legendPosition !== undefined && raw.legendPosition !== null) {
+    if (typeof raw.legendPosition !== 'string' || !['auto', 'side', 'below'].includes(raw.legendPosition))
+      throw badRequest('options.legendPosition must be auto, side, or below');
+    options.legendPosition = raw.legendPosition as Options['legendPosition'];
+  }
   for (const key of [
     'legend',
     'tooltipTotal',
@@ -359,7 +366,9 @@ export function parseConfig(input: unknown): VisualizationConfig {
       typeof optionsIn.tableColumns !== 'object' ||
       Array.isArray(optionsIn.tableColumns)
     )
-      throw badRequest('options.tableColumns must map columns to their display');
+      throw badRequest(
+        'options.tableColumns must map columns to their display',
+      );
     const tableColumns: Record<string, TableColumnOptions> = {};
     for (const [column, value] of Object.entries(
       optionsIn.tableColumns as Record<string, unknown>,
@@ -370,19 +379,32 @@ export function parseConfig(input: unknown): VisualizationConfig {
       const display: TableColumnOptions = {};
       if (entry.text) display.text = true;
       if (entry.monospace) display.monospace = true;
-      if (entry.condensed) display.condensed = true;
-      if (entry.align !== undefined && entry.align !== null && entry.align !== '') {
+      if (typeof entry.condensed === 'boolean')
+        display.condensed = entry.condensed;
+      if (
+        entry.align !== undefined &&
+        entry.align !== null &&
+        entry.align !== ''
+      ) {
         if (
           typeof entry.align !== 'string' ||
           !['left', 'center', 'right'].includes(entry.align)
         )
-          throw badRequest(`options.tableColumns.${column}.align must be left, center or right`);
+          throw badRequest(
+            `options.tableColumns.${column}.align must be left, center or right`,
+          );
         display.align = entry.align as TableColumnOptions['align'];
       }
-      if (entry.width !== undefined && entry.width !== null && entry.width !== '') {
+      if (
+        entry.width !== undefined &&
+        entry.width !== null &&
+        entry.width !== ''
+      ) {
         const width = Number(entry.width);
         if (!Number.isInteger(width) || width < 40 || width > 1_000)
-          throw badRequest(`options.tableColumns.${column}.width must be from 40 to 1000`);
+          throw badRequest(
+            `options.tableColumns.${column}.width must be from 40 to 1000`,
+          );
         display.width = width;
       }
       if (Object.keys(display).length) tableColumns[column] = display;
@@ -431,7 +453,8 @@ export function finalizeConfig(
       (options as Record<string, unknown>)[key] = merged;
     else delete options[key];
   }
-  if (compiled.options.columns && !options.columns) options.columns = compiled.options.columns;
+  if (compiled.options.columns && !options.columns)
+    options.columns = compiled.options.columns;
   else if (type !== 'table') delete options.columns;
   return {
     steps: compiled.steps,

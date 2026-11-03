@@ -13,14 +13,16 @@ export function VariableSwitch({
   variable,
   value,
   onChange,
+  showLabel = false,
 }: {
   variable: Pick<DashboardVariable, 'label' | 'options' | 'labels'>;
   value: string | undefined;
   onChange: (value: string) => void;
+  showLabel?: boolean;
 }) {
   return (
     <fieldset className="network-switch">
-      <legend className="sr-only">{variable.label}</legend>
+      <legend className={showLabel ? undefined : 'sr-only'}>{variable.label}</legend>
       {(variable.options ?? []).map((option) => (
         <button
           key={option}

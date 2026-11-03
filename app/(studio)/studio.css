@@ -12,7 +12,7 @@
   --sql-function: var(--accent-3);
   --sql-number: var(--accent-3);
   --sql-string: var(--warn-ink);
-  --sql-comment: var(--muted-3);
+  --sql-comment: var(--muted);
   --sql-placeholder-bg: var(--yellow);
   --studio-max: 1600px;
 
@@ -914,8 +914,8 @@ textarea.studio-input {
 
 .workbench {
   display: grid;
-  grid-template-columns: 240px minmax(0, 1fr) 270px;
-  gap: 24px;
+  grid-template-columns: 200px minmax(0, 1fr) 250px;
+  gap: 20px;
   align-items: start;
 }
 
@@ -924,7 +924,7 @@ textarea.studio-input {
 }
 
 .workbench.no-about {
-  grid-template-columns: 240px minmax(0, 1fr);
+  grid-template-columns: 200px minmax(0, 1fr);
 }
 
 .workbench.no-schema.no-about {
@@ -933,7 +933,7 @@ textarea.studio-input {
 
 @media (width <= 1320px) {
   .workbench {
-    grid-template-columns: 240px minmax(0, 1fr);
+    grid-template-columns: 200px minmax(0, 1fr);
   }
 
   .workbench.no-schema {
@@ -3192,6 +3192,27 @@ a.settings-card:focus-visible {
   margin: 0;
 }
 
+.dashboard-freshness {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.dashboard-vars .network-switch > legend {
+  float: left;
+  align-self: center;
+  margin-right: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.dashboard-edit-hint {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .var-chip {
   display: inline-flex;
   align-items: center;
@@ -3332,6 +3353,34 @@ a.settings-card:focus-visible {
   gap: 10px;
 }
 
+.allowed-networks {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.allowed-networks legend {
+  padding: 0 4px;
+  font-weight: 600;
+}
+
+.allowed-networks label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.allowed-networks-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-top: 8px;
+}
+
 .variable-row {
   position: relative;
   display: grid;
@@ -3345,6 +3394,15 @@ a.settings-card:focus-visible {
 
 .variable-row > .studio-input:nth-child(n + 3) {
   grid-column: 1 / -1;
+}
+
+.variable-label-option {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .variable-row > .studio-icon-button {
@@ -4151,6 +4209,7 @@ a.settings-card:focus-visible {
 }
 
 .dashboard-cell.editing:hover .resize-handle.corner,
+.dashboard-cell.editing.selected .resize-handle.corner,
 .dashboard-cell.editing .resize-handle.corner:focus-visible,
 .resize-grips.dragging .resize-handle.corner {
   opacity: 1;

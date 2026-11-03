@@ -238,6 +238,9 @@ export type DashboardVariable = {
   /** Data source variable: whether "All, stacked" is offered (absent: yes). */
   stack?: boolean;
   fixed?: boolean;
+  networks?: string[];
+  /** Show the variable label in the dashboard controls (default: true). */
+  showLabel?: boolean;
 };
 
 /** A dashboard that shows charts of one query, with the variables it offers. */

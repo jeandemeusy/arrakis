@@ -237,6 +237,10 @@ export type Variable = {
   stack?: boolean;
   /** Bind a network variable to its default and hide its selector. */
   fixed?: boolean;
+  /** Allowed data-source IDs; absent means every configured source. */
+  networks?: string[];
+  /** Show the variable label in the dashboard controls (default: true). */
+  showLabel?: boolean;
 };
 
 export type WidgetOptions = {
@@ -304,6 +308,9 @@ export function parseVariables(input: unknown): Variable[] {
           : name,
       type,
     };
+    if (entry.showLabel !== undefined && typeof entry.showLabel !== 'boolean')
+      throw badRequest(`${where}.showLabel must be a boolean`);
+    if (entry.showLabel === false) variable.showLabel = false;
     if (
       entry.default !== undefined &&
       entry.default !== null &&
@@ -312,6 +319,13 @@ export function parseVariables(input: unknown): Variable[] {
       variable.default = asText(entry.default).slice(0, 200);
     }
     if (type === 'network' && entry.stack === false) variable.stack = false;
+    if (type === 'network' && entry.networks !== undefined) {
+      if (!Array.isArray(entry.networks) || !entry.networks.length || entry.networks.length > 100 || entry.networks.some((id) => typeof id !== 'string' || !id.trim() || id === 'all'))
+        throw badRequest(`${where}.networks must contain at least one data-source ID`);
+      variable.networks = [...new Set(entry.networks.map((id: string) => id.trim()))];
+      if (variable.default && variable.default !== 'all' && !variable.networks.includes(variable.default))
+        throw badRequest(`${where}.default must be one of its allowed data sources`);
+    }
     if (type === 'network' && entry.fixed === true) {
       if (!variable.default || variable.default === 'all')
         throw badRequest(`${where}.default must name a data source when fixed`);

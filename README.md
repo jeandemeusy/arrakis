@@ -198,7 +198,8 @@ are in flight at once.
 rows stacked under a `network` column — useful when they share a schema, like
 production and staging. A query whose figure only means something per source
 sets `combine: "hidden"`. A dashboard's data source variable decides whether
-viewers may pick *All, stacked*.
+viewers may pick *All, stacked* and can restrict which configured data sources
+appear. When restricted, *All, stacked* combines only the allowed sources.
 
 In the editor: highlighting, completion of tables, columns, fragments, lists and
 placeholders (type `{{`), Cmd/Ctrl+Enter to run (the selection only, when there

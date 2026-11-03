@@ -4,9 +4,8 @@ import {
   route,
   varsFromSearch,
 } from '@/lib/api/handler';
-import { targetNetworks } from '@/lib/query/networks';
 import { runStates } from '@/lib/query/results';
-import { networkOf, resolveVariables } from '@/lib/viz/dashboard-data';
+import { dashboardTargets, resolveVariables } from '@/lib/viz/dashboard-data';
 import { requireDashboard } from '@/lib/viz/store';
 
 export const dynamic = 'force-dynamic';
@@ -26,7 +25,6 @@ export const GET = route(async (request: Request, context: Context) => {
     dashboard.variables,
     varsFromSearch(new URL(request.url)),
   );
-  const network = networkOf(dashboard.variables, vars);
   const queries = [
     ...new Set(
       dashboard.widgets
@@ -37,7 +35,7 @@ export const GET = route(async (request: Request, context: Context) => {
   return noStore(request, {
     queries: await runStates(
       queries,
-      targetNetworks(network).map((entry) => entry.id),
+      dashboardTargets(dashboard.variables, vars).map((entry) => entry.id),
     ),
   });
 });

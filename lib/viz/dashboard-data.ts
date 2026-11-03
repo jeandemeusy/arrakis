@@ -1,6 +1,7 @@
 import 'server-only';
 
 import { toErrorShape, type ApiErrorShape } from './errors';
+import { badRequest } from '../api/errors';
 import { getQuery } from '../query/store';
 import {
   networks as configuredNetworks,
@@ -30,11 +31,41 @@ export function resolveVariables(
   supplied: Record<string, string | undefined>,
 ): Record<string, string | undefined> {
   const sources = configuredNetworks().map((network) => network.id);
-  const networkIds = new Set(['all', ...sources]);
   const out: Record<string, string | undefined> = {};
   for (const variable of variables) {
     if (variable.type === 'network' && variable.fixed) {
       out[variable.name] = variable.default;
+      continue;
+    }
+    // Keep the original semantics for dashboards without a source restriction.
+    if (variable.type === 'network' && !variable.networks) {
+      let value = supplied[variable.name] || variable.default;
+      if (value !== undefined && value !== 'all' && !sources.includes(value))
+        value = 'all';
+      if (value === 'all' && variable.stack === false && sources.length > 1)
+        value = sources[0];
+      out[variable.name] = value;
+      continue;
+    }
+    if (variable.type === 'network') {
+      const allowed = variable.networks
+        ? sources.filter((id) => variable.networks!.includes(id))
+        : sources;
+      if (!allowed.length)
+        throw badRequest(
+          `No allowed data sources are configured for ${variable.label}`,
+        );
+      const fallback =
+        variable.default && allowed.includes(variable.default)
+          ? variable.default
+          : variable.stack !== false && allowed.length > 1
+            ? 'all'
+            : allowed[0];
+      let value = supplied[variable.name] || variable.default || fallback;
+      if (value !== 'all' && !allowed.includes(value)) value = fallback;
+      if (value === 'all' && (variable.stack === false || allowed.length === 1))
+        value = allowed[0];
+      out[variable.name] = value;
       continue;
     }
     let value = supplied[variable.name];
@@ -42,16 +73,6 @@ export function resolveVariables(
     if (value !== undefined) {
       if (variable.options && !variable.options.includes(value))
         value = variable.default;
-      if (variable.type === 'network' && !networkIds.has(value ?? ''))
-        value = 'all';
-      // A dashboard that does not stack its sources shows one at a time.
-      if (
-        variable.type === 'network' &&
-        variable.stack === false &&
-        value === 'all' &&
-        sources.length > 1
-      )
-        value = sources[0];
       if (variable.type === 'text') value = value?.slice(0, 500);
     }
     out[variable.name] = value;
@@ -66,6 +87,24 @@ export function networkOf(
 ): string {
   const variable = variables.find((entry) => entry.type === 'network');
   return (variable && vars[variable.name]) || 'all';
+}
+
+/** Resolve "all" within the dashboard's allowed sources. */
+export function dashboardTargets(
+  variables: Variable[],
+  vars: Record<string, string | undefined>,
+) {
+  const variable = variables.find((entry) => entry.type === 'network');
+  const targets = targetNetworks(networkOf(variables, vars));
+  const allowed = variable?.networks;
+  const selected = allowed
+    ? targets.filter((target) => allowed.includes(target.id))
+    : targets;
+  if (!selected.length)
+    throw badRequest(
+      'No allowed data sources are configured for this dashboard',
+    );
+  return selected;
 }
 
 /**
@@ -86,7 +125,11 @@ export function isSet(
   return !(
     variable?.type === 'network' &&
     value === 'all' &&
-    configuredNetworks().length > 1
+    (variable.networks
+      ? configuredNetworks().filter((network) =>
+          variable.networks!.includes(network.id),
+        ).length
+      : configuredNetworks().length) > 1
   );
 }
 
@@ -94,13 +137,19 @@ export async function visualizationData(
   visualization: Visualization,
   network: string,
   vars: Record<string, string | undefined>,
+  sources?: string[],
 ): Promise<VisualizationData> {
   const query = await getQuery(visualization.query);
   if (!query) throw new Error(`Query ${visualization.query} vanished`);
+  const targets = sources
+    ? targetNetworks(network).filter((entry) => sources.includes(entry.id))
+    : targetNetworks(network);
+  if (!targets.length)
+    throw badRequest('No matching data sources are configured');
   return runVisualization({
     query,
     config: visualization.config,
-    targets: targetNetworks(network),
+    targets,
     vars,
     cacheKey: `${visualization.id}:${visualization.updatedAt}`,
   });
@@ -115,6 +164,9 @@ export async function dashboardData(
 }> {
   const vars = resolveVariables(dashboard.variables, supplied);
   const network = networkOf(dashboard.variables, vars);
+  const sources = dashboardTargets(dashboard.variables, vars).map(
+    (source) => source.id,
+  );
   const widgets = await Promise.all(
     dashboard.widgets.map(async (widget): Promise<WidgetData> => {
       if (widget.kind === 'text') return { id: widget.id, state: 'text' };
@@ -133,7 +185,12 @@ export async function dashboardData(
         return {
           id: widget.id,
           state: 'ok',
-          data: await visualizationData(widget.visualization, network, vars),
+          data: await visualizationData(
+            widget.visualization,
+            network,
+            vars,
+            sources,
+          ),
         };
       } catch (error) {
         return { id: widget.id, state: 'error', error: toErrorShape(error) };

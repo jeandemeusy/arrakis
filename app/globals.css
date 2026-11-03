@@ -97,7 +97,8 @@
     ui-sans-serif, system-ui, -apple-system, 'Segoe UI', roboto,
     'Helvetica Neue', arial, sans-serif;
   --font-display: var(--font-sans);
-  --font-mono: ui-monospace, 'SFMono-Regular', menlo, monaco, consolas, monospace;
+  --font-mono:
+    ui-monospace, 'SFMono-Regular', menlo, monaco, consolas, monospace;
   --display-weight: 600;
 
   /* A tile's title: quiet here, a poster headline in the neubrutal style. */
@@ -120,9 +121,7 @@
   --hover: color-mix(in srgb, var(--ink) 6%, transparent);
   --pressed: color-mix(in srgb, var(--ink) 8%, transparent);
   --focus-ring: 0 0 0 3px color-mix(in srgb, var(--ink) 10%, transparent);
-  --shadow-pop:
-    0 12px 32px rgb(0 0 0 / 0.08),
-    0 1px 2px rgb(0 0 0 / 0.05);
+  --shadow-pop: 0 12px 32px rgb(0 0 0 / 0.08), 0 1px 2px rgb(0 0 0 / 0.05);
 
   /* One horizontal inset for every full-width band, so nothing drifts out of line. */
   --gutter: clamp(24px, 5vw, 76px);
@@ -176,9 +175,7 @@
   --bad: #e5675a;
   --overlay: rgb(0 0 0 / 0.55);
   --tile-shadow: 0 1px 2px rgb(0 0 0 / 0.4);
-  --shadow-pop:
-    0 12px 32px rgb(0 0 0 / 0.45),
-    0 1px 2px rgb(0 0 0 / 0.3);
+  --shadow-pop: 0 12px 32px rgb(0 0 0 / 0.45), 0 1px 2px rgb(0 0 0 / 0.3);
 }
 
 :root[data-theme='dark']:not([data-style='neubrutal']) .studio {
@@ -1406,21 +1403,43 @@ main {
 
 .chart-card.menu-mode.metric > span {
   order: 0;
-  display: block;
-  overflow: hidden;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 6px;
+  overflow: visible;
   color: var(--ink);
   font-family: var(--font-sans);
   font-size: 14px;
   font-weight: 600;
   letter-spacing: 0;
-  text-overflow: ellipsis;
   text-transform: none;
-  white-space: nowrap;
+  white-space: normal;
+}
+
+.chart-card.menu-mode.metric > span .tile-title-link {
+  overflow-wrap: anywhere;
 }
 
 .chart-card.menu-mode.metric > span .tile-subtitle {
+  overflow: hidden;
+  max-width: 100%;
   font-size: 13px;
+  text-overflow: ellipsis;
   vertical-align: 0;
+  white-space: nowrap;
+}
+
+@container (max-width: 210px) {
+  .chart-card.menu-mode.metric > span .tile-subtitle {
+    flex-basis: 100%;
+    margin-left: 0;
+  }
+}
+
+@container (max-width: 150px) {
+  .chart-card.menu-mode.metric > span .tile-subtitle {
+    display: none;
+  }
 }
 
 .chart-card.menu-mode.metric > span .tile-flag {
@@ -1459,6 +1478,28 @@ main {
   margin-top: 0;
 }
 
+.tile-meta-actions {
+  display: flex;
+  align-items: center;
+}
+
+.tile-expand {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.tile-expand:hover,
+.tile-expand:focus-visible {
+  color: var(--ink);
+}
+
 .tile-fresh {
   display: inline-flex;
   align-items: center;
@@ -1473,6 +1514,11 @@ main {
 .tile-fresh.fresh {
   background: rgb(46 139 87 / 0.1);
   color: #237048;
+}
+
+:root[data-theme='dark']:not([data-style='neubrutal']) .tile-fresh.fresh {
+  background: var(--ok-halo);
+  color: var(--ok);
 }
 
 .tile-fresh.stale {
@@ -1634,20 +1680,10 @@ main {
   }
 }
 
-/* A narrow number tile keeps status available without letting its footer spill
-   past the card: the icon retains the status name for assistive technology. */
 @container (max-width: 210px) {
-  .tile-fresh .tile-fresh-label {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
-  }
-
   .tile-fresh {
-    gap: 0;
-    padding-inline: 8px;
+    gap: 3px;
+    padding-inline: 5px;
+    font-size: 10px;
   }
 }

@@ -237,6 +237,22 @@ export function ChartPanel({
           />
         </>
       )}
+      {(cartesian || type === 'pie') && (
+        <Row label="Legend position">
+          <select
+            value={options.legendPosition ?? 'auto'}
+            onChange={(event) =>
+              set({
+                legendPosition: event.target.value as Options['legendPosition'],
+              })
+            }
+          >
+            <option value="auto">Auto</option>
+            <option value="side">Right of chart</option>
+            <option value="below">Below chart</option>
+          </select>
+        </Row>
+      )}
       {(cartesian || type === 'share' || type === 'pie') && (
         <Check
           label="Keep series colours stable"

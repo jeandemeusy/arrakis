@@ -89,7 +89,7 @@ function freshnessOf(payload: WidgetPayload): Freshness | undefined {
   const at = WHEN.format(new Date(finished));
   return {
     state: failed ? 'failed' : stale ? 'stale' : 'fresh',
-    label: ago(finished),
+    label: `${failed ? 'Failed · ' : stale ? 'Stale · ' : ''}${ago(finished)}`,
     title: failed
       ? `The last run failed; showing the result from ${at}`
       : stale

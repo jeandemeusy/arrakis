@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
-import { type DashboardVariable } from '../api';
+import { type DashboardVariable, type Network } from '../api';
 
 /**
  * A variable's choices as one line, `value` or `value=Label` separated by
@@ -52,9 +52,11 @@ function OptionsInput({
 
 export function VariablesEditor({
   variables,
+  networks,
   onChange,
 }: {
   variables: DashboardVariable[];
+  networks: Network[];
   onChange: (variables: DashboardVariable[]) => void;
 }) {
   const set = (at: number, patch: Partial<DashboardVariable>) =>
@@ -87,6 +89,7 @@ export function VariablesEditor({
               const type = event.target.value as DashboardVariable['type'];
               set(at, {
                 type,
+                networks: undefined,
                 options:
                   type === 'range'
                     ? ['7d', '30d', '90d', 'all']
@@ -107,6 +110,16 @@ export function VariablesEditor({
             <option value="text">text (set by clicks)</option>
             <option value="select">select</option>
           </select>
+          <label className="variable-label-option">
+            <input
+              type="checkbox"
+              checked={variable.showLabel !== false}
+              onChange={(event) =>
+                set(at, { showLabel: event.target.checked ? undefined : false })
+              }
+            />
+            Show label on dashboard
+          </label>
           {variable.type === 'network' && (
             <label
               className="stack-sources"
@@ -121,6 +134,66 @@ export function VariablesEditor({
               />
               <span>All, stacked</span>
             </label>
+          )}
+          {variable.type === 'network' && (
+            <fieldset className="allowed-networks">
+              <legend>Selectable data sources</legend>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={!variable.networks}
+                  onChange={(event) => {
+                    if (event.target.checked) set(at, { networks: undefined });
+                    else if (networks.length)
+                      set(at, {
+                        networks: networks.map((network) => network.id),
+                      });
+                  }}
+                />
+                All configured sources
+              </label>
+              {variable.networks && (
+                <div className="allowed-networks-list">
+                  {[
+                    ...networks,
+                    ...variable.networks
+                      .filter(
+                        (id) => !networks.some((network) => network.id === id),
+                      )
+                      .map((id) => ({ id, label: `${id} (unavailable)` })),
+                  ].map((network) => {
+                    const selected = variable.networks!.includes(network.id);
+                    return (
+                      <label key={network.id}>
+                        <input
+                          type="checkbox"
+                          checked={selected}
+                          disabled={selected && variable.networks!.length === 1}
+                          onChange={(event) => {
+                            const next = event.target.checked
+                              ? [...variable.networks!, network.id]
+                              : variable.networks!.filter(
+                                  (id) => id !== network.id,
+                                );
+                            set(at, {
+                              networks: next,
+                              default:
+                                variable.default &&
+                                variable.default !== 'all' &&
+                                !next.includes(variable.default)
+                                  ? next[0]
+                                  : variable.default,
+                            });
+                          }}
+                        />
+                        {network.label}
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+              {!networks.length && <small>Data sources are unavailable.</small>}
+            </fieldset>
           )}
           {(variable.type === 'range' || variable.type === 'select') && (
             <OptionsInput

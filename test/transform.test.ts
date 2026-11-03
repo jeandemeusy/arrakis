@@ -126,6 +126,20 @@ describe('windows and bins over a number column', () => {
 });
 
 describe('dashboard variables', () => {
+  it('keeps the visibility choice and defaults to showing the label', () => {
+    const [hidden, shown, defaulted] = parseVariables([
+      { name: 'hidden', type: 'text', showLabel: false },
+      { name: 'shown', type: 'text', showLabel: true },
+      { name: 'defaulted', type: 'text' },
+    ]);
+    assert.equal(hidden.showLabel, false);
+    assert.equal(shown.showLabel, undefined);
+    assert.equal(defaulted.showLabel, undefined);
+    assert.throws(
+      () => parseVariables([{ name: 'bad', type: 'text', showLabel: 'false' }]),
+      /showLabel/,
+    );
+  });
   it('keeps labels only for options that exist', () => {
     const [range] = parseVariables([
       {

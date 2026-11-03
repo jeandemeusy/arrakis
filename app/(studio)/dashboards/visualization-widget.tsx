@@ -19,6 +19,7 @@ type VisualizationWidgetProps = {
   onLink?: (link: TileLink, row: Record<string, unknown>) => void;
   /** Its query is being run, or its chart recomputed for new variables. */
   busy?: 'running' | 'updating';
+  sources?: string;
 };
 
 /**
@@ -33,6 +34,7 @@ export const VisualizationWidget = memo(
     before.payload === after.payload &&
     before.network === after.network &&
     before.busy === after.busy &&
+    before.sources === after.sources &&
     Boolean(before.onLink) === Boolean(after.onLink) &&
     (before.expanded === before.widget.id) ===
       (after.expanded === after.widget.id) &&
@@ -49,6 +51,7 @@ function VisualizationWidgetTile({
   onExpand,
   onLink,
   busy,
+  sources,
 }: VisualizationWidgetProps) {
   const link = widget.options.link;
   const onSelect =
@@ -60,6 +63,7 @@ function VisualizationWidgetTile({
     network,
     vars,
     payload !== null,
+    sources,
   );
   const { user } = useSession();
   const visualization = widget.visualization;

@@ -120,7 +120,9 @@ export default function GuidePage() {
               production and staging. A query whose figure only means something
               per source can refuse the stacked view. A dashboard&apos;s data
               source variable decides whether its viewers may pick{' '}
-              <em>All, stacked</em>.
+              <em>All, stacked</em>. In dashboard editing, Variables also lets
+              you choose which sources are selectable. Stacking then includes
+              only those sources.
             </p>
           </Section>
 

@@ -20,10 +20,12 @@ export const GET = route(async (request: Request, context: Context) => {
     throw notFound('No such visualization');
   }
   const url = new URL(request.url);
+  const sources = url.searchParams.getAll('source');
   const data = await visualizationData(
     visualization,
     url.searchParams.get('network') ?? 'all',
     varsFromSearch(url),
+    sources.length ? sources : undefined,
   );
   return json(request, data, {
     headers: {

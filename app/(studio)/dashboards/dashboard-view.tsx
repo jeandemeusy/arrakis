@@ -66,6 +66,7 @@ import { VariablesEditor } from './variables-editor';
 import { HelpTip } from '../help-tip';
 import { LockedButton } from '../locked-link';
 import { ShareButton } from '../share';
+import { ago } from '../time';
 
 /**
  * A dashboard: its variables across the top, its widgets on the grid below.
@@ -332,8 +333,20 @@ export function DashboardView({
   // values the last response resolved.
   const vars = useMemo(() => {
     const out: Record<string, string | undefined> = { ...data?.vars };
-    for (const [name, value] of Object.entries(requested))
+    for (const [name, value] of Object.entries(requested)) {
+      const variable = dashboard?.variables.find(
+        (entry) => entry.name === name,
+      );
+      if (
+        variable?.type === 'network' &&
+        variable.networks &&
+        value &&
+        value !== 'all' &&
+        !variable.networks.includes(value)
+      )
+        continue;
       if (value !== undefined || !data) out[name] = value;
+    }
     for (const variable of dashboard?.variables ?? [])
       if (variable.type === 'network' && variable.fixed)
         out[variable.name] = variable.default;
@@ -524,6 +537,26 @@ export function DashboardView({
       : [],
   );
   const networkVar = variables.find((variable) => variable.type === 'network');
+  const allowedSources = networkVar?.networks
+    ? networks
+        .filter((source) => networkVar.networks!.includes(source.id))
+        .map((source) => source.id)
+    : undefined;
+  const chosenNetwork = networkVar?.fixed
+    ? (networkVar.default ?? network)
+    : network;
+  const previewNetwork =
+    allowedSources && !allowedSources.length
+      ? '__unavailable'
+      : chosenNetwork === 'all' &&
+          networkVar?.stack === false &&
+          allowedSources?.length
+        ? allowedSources[0]
+        : allowedSources &&
+            chosenNetwork !== 'all' &&
+            !allowedSources.includes(chosenNetwork)
+          ? allowedSources[0]
+          : chosenNetwork;
   const busyOf = (widget: DraftWidget): 'running' | 'updating' | undefined => {
     const visualization = widget.visualization;
     if (!visualization || editing) return undefined;
@@ -1006,6 +1039,13 @@ export function DashboardView({
         </div>
       )}
 
+      {editing && (
+        <p className="dashboard-edit-hint">
+          Hover a tile to move or resize it. Use the arrow keys on a handle for
+          precise changes.
+        </p>
+      )}
+
       <header className="page-head">
         <div className="page-head-text">
           {editing && settings ? (
@@ -1077,6 +1117,40 @@ export function DashboardView({
         variables={variables}
         vars={vars}
         networks={networks}
+        freshnessSummary={(() => {
+          const entries = data?.widgets ?? [];
+          const networks = entries.flatMap((entry) =>
+            entry.state === 'ok' ? entry.data.networks : [],
+          );
+          const oldest = networks
+            .map((network) => network.finishedAt)
+            .filter((at): at is string => Boolean(at))
+            .sort()[0];
+          const failed = entries.filter(
+            (entry) =>
+              entry.state === 'error' ||
+              (entry.state === 'ok' &&
+                entry.data.networks.some(
+                  (network) =>
+                    network.status === 'failed' ||
+                    network.lastAttempt?.status === 'failed',
+                )),
+          ).length;
+          const stale = entries.filter(
+            (entry) =>
+              entry.state === 'ok' &&
+              entry.data.networks.some((network) => network.stale),
+          ).length;
+          return oldest
+            ? [
+                `Oldest result ${ago(oldest)}`,
+                failed ? `${failed} failed` : '',
+                stale ? `${stale} stale` : '',
+              ]
+                .filter(Boolean)
+                .join(' · ')
+            : undefined;
+        })()}
         onChange={(name, value) => setVar(name, value)}
       />
 
@@ -1233,7 +1307,12 @@ export function DashboardView({
                 <VisualizationWidget
                   widget={widget}
                   payload={payloadOf(widget)}
-                  network={network}
+                  network={editing ? previewNetwork : network}
+                  sources={
+                    editing && allowedSources?.length
+                      ? allowedSources.join(',')
+                      : undefined
+                  }
                   vars={vars}
                   expanded={expanded}
                   onExpand={setExpanded}
@@ -1320,6 +1399,7 @@ export function DashboardView({
               </p>
               <VariablesEditor
                 variables={settings.variables}
+                networks={networks}
                 onChange={(next) =>
                   setSettings({ ...settings, variables: next })
                 }

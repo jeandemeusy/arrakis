@@ -555,10 +555,20 @@ export function Tile({
   const meta = (
     <div className="tile-meta">
       {freshness ? <FreshnessPill freshness={freshness} /> : <span />}
-      {menuActions}
+      <div className="tile-meta-actions">
+        {className?.includes('table-card') && (
+          <button type="button" className="tile-expand" aria-label={`Enlarge ${title}`} title="Enlarge table" onClick={() => onExpand(id)}>
+            <Maximize size={14} aria-hidden="true" />
+          </button>
+        )}
+        {menuActions}
+      </div>
     </div>
   );
-  const sub = subtitle ? <small className="tile-subtitle">{subtitle}</small> : null;
+  const sub =
+    subtitle && subtitle.trim().toLowerCase() !== title.trim().toLowerCase() ? (
+      <small className="tile-subtitle">{subtitle}</small>
+    ) : null;
   const actions = menu ? meta : (
     <div className="chart-actions">
       {source && (

@@ -1127,7 +1127,7 @@ export function Workbench({
               {editor && (
                 <button
                   type="button"
-                  className="tool"
+                  className="tool labelled"
                   aria-pressed={schemaOpen}
                   title={schemaOpen ? 'Hide the schema' : 'Show the schema'}
                   aria-label="Schema"
@@ -1136,6 +1136,7 @@ export function Workbench({
                   }
                 >
                   <PanelLeft size={15} aria-hidden="true" />
+                  Schema
                 </button>
               )}
               {editor && !readOnly && (

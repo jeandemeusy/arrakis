@@ -109,6 +109,53 @@
   border-collapse: collapse;
 }
 
+.viz-table-scroll-hint {
+  position: sticky;
+  left: 0;
+  width: fit-content;
+  padding: 2px 0 5px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.viz-row-link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: var(--line);
+  text-underline-offset: 2px;
+}
+
+.viz-copy {
+  display: inline-flex;
+  margin-left: 5px;
+  padding: 2px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  vertical-align: middle;
+  cursor: pointer;
+  opacity: 0;
+}
+
+.viz-table tr:hover .viz-copy,
+.viz-table tr:focus-within .viz-copy {
+  opacity: 1;
+}
+
+.viz-copy:hover,
+.viz-copy:focus-visible,
+.viz-row-link:hover,
+.viz-row-link:focus-visible {
+  color: var(--ink);
+  outline-offset: 2px;
+}
+
 .viz-table th {
   position: sticky;
   top: 0;
@@ -127,9 +174,20 @@
   white-space: nowrap;
 }
 
-/* An unconfigured identifier remains whole and may widen the scrollable table.
-   A deliberate fixed-width column clips cleanly instead of spilling into the
-   next cell. */
+.viz-table.has-horizontal-overflow th:first-child,
+.viz-table.has-horizontal-overflow td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--surface);
+  box-shadow: 1px 0 var(--line);
+}
+
+.viz-table.has-horizontal-overflow th:first-child {
+  z-index: 2;
+}
+
+/* Fixed-width columns clip cleanly instead of spilling into the next cell. */
 .viz-table td.fixed {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -154,7 +212,8 @@
   cursor: pointer;
 }
 
-.viz-table tr.selectable:hover td {
+.viz-table tr.selectable:hover td,
+.viz-table tr.selectable:focus-within td {
   background: var(--surface-alt);
 }
 
@@ -246,10 +305,11 @@
   display: flex;
   flex-wrap: wrap;
   gap: 2px 12px;
-  max-height: 72px;
+  max-height: 96px;
   margin: 0;
   padding: 0;
   overflow: auto;
+  scrollbar-width: thin;
   list-style: none;
   font-size: 12px;
 }
@@ -266,6 +326,13 @@
   font: inherit;
   text-align: left;
   cursor: pointer;
+}
+
+.viz-legend .viz-legend-info {
+  flex-basis: 100%;
+  justify-content: flex-start;
+  color: var(--muted);
+  font-size: 11px;
 }
 
 .viz-legend button span {
@@ -301,11 +368,11 @@
 
 /* Wide enough: the legend is a column on the right, as tall as the plot. */
 @container (min-width: 560px) {
-  .viz-cartesian-body {
+  .legend-auto .viz-cartesian-body {
     grid-template-columns: minmax(0, 1fr) minmax(110px, 180px);
   }
 
-  .viz-legend {
+  .legend-auto .viz-legend {
     flex-direction: column;
     flex-wrap: nowrap;
     align-content: flex-start;
@@ -313,15 +380,37 @@
     padding-top: 12px;
   }
 
-  .viz-legend li {
+  .legend-auto .viz-legend li {
     display: flex;
     justify-content: flex-end;
   }
 
-  .viz-legend button {
+  .legend-auto .viz-legend button {
     flex-direction: row-reverse;
     font-family: var(--font-mono);
   }
+}
+
+.legend-side .viz-cartesian-body {
+  grid-template-columns: minmax(0, 1fr) minmax(90px, 180px);
+}
+
+.legend-side .viz-legend {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-content: flex-start;
+  max-height: var(--viz-height, 320px);
+  padding-top: 12px;
+}
+
+.legend-side .viz-legend li {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.legend-side .viz-legend button {
+  flex-direction: row-reverse;
+  font-family: var(--font-mono);
 }
 
 .viz-tip {

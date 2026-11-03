@@ -14,30 +14,40 @@ export function VariableBar({
   variables,
   vars,
   networks,
+  freshnessSummary,
   onChange,
 }: {
   variables: DashboardVariable[];
   vars: Record<string, string | undefined>;
   networks: Network[];
+  freshnessSummary?: string;
   onChange: (name: string, value: string | undefined) => void;
 }) {
   return (
     <div className="dashboard-vars">
       {variables.map((variable) => {
         if (variable.type === 'network' && variable.fixed) return null;
+        const allowedNetworks =
+          variable.type === 'network' && variable.networks
+            ? networks.filter((network) =>
+                variable.networks!.includes(network.id),
+              )
+            : networks;
         const raw = vars[variable.name];
-        // Not stacking: "all" means the first source, as the server reads it.
+        // A single source, or a non-stacking variable, resolves "all" to
+        // the source actually being displayed.
         const value =
           variable.type === 'network' &&
-          variable.stack === false &&
-          raw === 'all'
-            ? networks[0]?.id
+          (variable.stack === false || allowedNetworks.length === 1) &&
+          (raw === 'all' || !raw)
+            ? allowedNetworks[0]?.id
             : raw;
         if (variable.type === 'range' || variable.type === 'select') {
           return (
             <VariableSwitch
               key={variable.name}
               variable={variable}
+              showLabel={variable.showLabel !== false}
               value={value}
               onChange={(option) => onChange(variable.name, option)}
             />
@@ -45,18 +55,22 @@ export function VariableBar({
         }
         if (variable.type === 'network') {
           const options = [
-            ...(networks.length > 1 && variable.stack !== false
+            ...(allowedNetworks.length > 1 && variable.stack !== false
               ? [{ value: 'all', label: 'All, stacked' }]
               : []),
-            ...networks.map((network) => ({
+            ...allowedNetworks.map((network) => ({
               value: network.id,
               label: network.label,
             })),
           ];
-          if (networks.length <= 1) return null;
+          if (!allowedNetworks.length) return null;
           return (
             <fieldset key={variable.name} className="network-switch">
-              <legend className="sr-only">{variable.label}</legend>
+              <legend
+                className={variable.showLabel === false ? 'sr-only' : undefined}
+              >
+                {variable.label}
+              </legend>
               {options.map((option) => (
                 <button
                   key={option.value}
@@ -73,7 +87,11 @@ export function VariableBar({
         }
         return value ? (
           <span key={variable.name} className="var-chip">
-            <span>{variable.label}</span>
+            <span
+              className={variable.showLabel === false ? 'sr-only' : undefined}
+            >
+              {variable.label}
+            </span>
             <code title={value}>{shortValue(value)}</code>
             <button
               type="button"
@@ -85,7 +103,11 @@ export function VariableBar({
           </span>
         ) : (
           <label key={variable.name} className="var-input">
-            <span>{variable.label}</span>
+            <span
+              className={variable.showLabel === false ? 'sr-only' : undefined}
+            >
+              {variable.label}
+            </span>
             <input
               className="studio-input mono"
               placeholder="any"
@@ -104,6 +126,14 @@ export function VariableBar({
           </label>
         );
       })}
+      {freshnessSummary && (
+        <span
+          className="dashboard-freshness"
+          title="Oldest available result across visible dashboard data"
+        >
+          {freshnessSummary}
+        </span>
+      )}
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { formatValue } from '../app/viz/format';
+import { formatTableText, formatValue } from '../app/viz/format';
 
 describe('formatValue', () => {
   it('preserves low non-zero decimal values with scientific notation', () => {
@@ -16,5 +16,14 @@ describe('formatValue', () => {
   it('continues to render true zero as zero', () => {
     assert.equal(formatValue('0', 'decimal'), '0');
     assert.equal(formatValue('0', 'token'), '0');
+  });
+});
+
+describe('table identifiers', () => {
+  it('keeps explicitly configured text whole unless condensation is selected', () => {
+    const address = '0x1234567890123456789012345678901234567890';
+    assert.equal(formatTableText(address, { text: true }), address);
+    assert.equal(formatTableText(address, { text: true, condensed: true }), '0x1234…7890');
+    assert.equal(formatTableText(address), '0x1234…7890');
   });
 });

@@ -17,6 +17,7 @@ describe('chart options', () => {
     const { options } = parseConfig({
       options: {
         legend: false,
+        legendPosition: 'below',
         normalize: true,
         tooltipTotal: null,
         stableColors: true,
@@ -44,6 +45,7 @@ describe('chart options', () => {
     });
     assert.deepEqual(options, {
       legend: false,
+      legendPosition: 'below',
       normalize: true,
       stableColors: true,
       series: {
@@ -62,6 +64,10 @@ describe('chart options', () => {
   });
 
   it('refuses what the renderer cannot draw', () => {
+    assert.throws(
+      () => parseConfig({ options: { legendPosition: 'top' } }),
+      /legendPosition/,
+    );
     assert.throws(
       () => parseConfig({ options: { series: { a: { color: 'red' } } } }),
       /#rrggbb/,
@@ -82,6 +88,14 @@ describe('chart options', () => {
       () => parseConfig({ options: { yAxis: { format: 'hex' } } }),
       /format/,
     );
+  });
+
+  it('keeps the legend position when compiling a chart builder', () => {
+    const config = parseConfig({
+      options: { legendPosition: 'side' },
+      builder: { groups: [{ column: 'day' }], measures: [{ fn: 'count', as: 'n' }] },
+    });
+    assert.equal(finalizeConfig('bar', config).options.legendPosition, 'side');
   });
 
   it('keeps per-column table display choices and rejects invalid widths', () => {

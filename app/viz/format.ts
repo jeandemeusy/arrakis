@@ -3,6 +3,18 @@ import type { Format } from '@/lib/viz/config';
 import { DECIMAL, INTEGER, formatDay, volume } from '../chart-theme';
 import { asText } from '@/lib/viz/text';
 
+/** Abbreviate automatic hex identifiers, while honoring explicit text formats. */
+export function formatTableText(
+  value: string,
+  display?: { text?: boolean; condensed?: boolean },
+): string {
+  const address = /^0x[0-9a-f]{40,}$/i.test(value);
+  const condensed = display?.condensed ?? (address && !display?.text);
+  return condensed && value.length > 12
+    ? `${value.slice(0, 6)}…${value.slice(-4)}`
+    : value;
+}
+
 /**
  * How a value reads on a chart, a tile or in a table cell.
  *

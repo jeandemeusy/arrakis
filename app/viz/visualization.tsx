@@ -1,6 +1,7 @@
 'use client';
 
-import { memo, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { Copy } from 'lucide-react';
 import {
   Area,
   Bar,
@@ -27,7 +28,12 @@ import type {
 
 import { heatColor } from '../chart-theme';
 import { usePalette } from '../style';
-import { formatCategory, formatValue, toNumber } from './format';
+import {
+  formatCategory,
+  formatTableText,
+  formatValue,
+  toNumber,
+} from './format';
 import { pivot, shareSeries, type DrawnSeries } from './series';
 import './viz.css';
 import { asText } from '@/lib/viz/text';
@@ -168,7 +174,12 @@ function Legend({
 }) {
   const allOn = series.every((entry) => !off.has(entry.key));
   return (
-    <ul className="viz-legend" aria-label="Series">
+    <ul className="viz-legend" aria-label="Series; scroll for more">
+      {series.length > 5 && (
+        <li className="viz-legend-info">
+          {series.length} series · scroll for more
+        </li>
+      )}
       {series.length > 2 && (
         <li>
           <button type="button" aria-pressed={allOn} onClick={onAll}>
@@ -443,7 +454,7 @@ const Cartesian = memo(function Cartesian({
   const shownSeries = series.filter((entry) => !entry.hidden);
   return (
     <div
-      className="viz-cartesian"
+      className={`viz-cartesian legend-${options.legendPosition ?? 'auto'}`}
       style={{ '--viz-height': `${height}px` } as React.CSSProperties}
     >
       <div className="viz-cartesian-body">
@@ -783,12 +794,20 @@ function PieView({
   if (slices.length < 2) return chart;
   return (
     <div
-      className="viz-cartesian"
+      className={`viz-cartesian legend-${options.legendPosition ?? 'auto'}`}
       style={{ '--viz-height': `${height}px` } as React.CSSProperties}
     >
       <div className="viz-cartesian-body">
         <div className="viz-plot">{chart}</div>
-        <ul className="viz-legend viz-pie-legend" aria-label="Slices">
+        <ul
+          className="viz-legend viz-pie-legend"
+          aria-label="Slices; scroll for more"
+        >
+          {slices.length > 5 && (
+            <li className="viz-legend-info">
+              {slices.length} slices · scroll for more
+            </li>
+          )}
           {slices.map((slice) => (
             <li key={slice.key}>
               <button
@@ -988,26 +1007,76 @@ function Table({
   onSelect,
 }: VisualizationProps) {
   const [page, setPage] = useState(0);
+  const [overflow, setOverflow] = useState(false);
+  const [copied, setCopied] = useState<string | null>(null);
+  const [copyError, setCopyError] = useState<string | null>(null);
+  const [capacity, setCapacity] = useState<number | null>(null);
+  const tableRef = useRef<HTMLDivElement>(null);
   const shown = options.columns?.length
     ? options.columns
         .map((name) => ({ name, at: index(columns, name) }))
         .filter((entry) => entry.at >= 0)
     : columns.map((column, at) => ({ name: column.name, at }));
-  const size = options.pageSize ?? 10;
+  const size = Math.max(
+    1,
+    Math.min(
+      options.pageSize ?? 100,
+      capacity ?? Math.floor((height - 100) / 30),
+    ),
+  );
   const pages = Math.max(1, Math.ceil(rows.length / size));
   const current = Math.min(page, pages - 1);
   const numeric = (at: number) =>
     ['integer', 'bigint', 'float', 'numeric'].includes(columns[at].type);
-  const condense = (value: string) =>
-    value.length <= 12 ? value : `${value.slice(0, 6)}…${value.slice(-4)}`;
+  useEffect(() => {
+    const node = tableRef.current;
+    if (!node) return;
+    const measure = () => {
+      setOverflow(node.scrollWidth > node.clientWidth + 1);
+      const rowHeight = node
+        .querySelector('tbody tr')
+        ?.getBoundingClientRect().height;
+      if (!rowHeight) return;
+      const header =
+        node.querySelector('thead')?.getBoundingClientRect().height ?? 0;
+      const hint =
+        node.querySelector('.viz-table-scroll-hint')?.getBoundingClientRect()
+          .height ?? 0;
+      const pager =
+        node.querySelector('.viz-table-pager')?.getBoundingClientRect()
+          .height ?? 28;
+      setCapacity(
+        Math.max(
+          1,
+          Math.floor((height - header - hint - pager - 4) / rowHeight),
+        ),
+      );
+    };
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    if (node.querySelector('table'))
+      observer.observe(node.querySelector('table')!);
+    measure();
+    return () => observer.disconnect();
+  }, [columns, rows, current, size, height, overflow]);
   return (
-    <div className="viz-table" style={{ maxHeight: height }}>
+    <div
+      className={`viz-table${overflow ? ' has-horizontal-overflow' : ''}`}
+      ref={tableRef}
+      style={{ maxHeight: height }}
+    >
+      {overflow && (
+        <div className="viz-table-scroll-hint">
+          Scroll horizontally to see all columns →
+        </div>
+      )}
       <table>
         <thead>
           <tr>
             {shown.map((entry) => {
               const display = options.tableColumns?.[entry.name];
-              const align = display?.align ?? (numeric(entry.at) ? 'right' : 'left');
+              const align =
+                display?.align ?? (numeric(entry.at) ? 'right' : 'left');
               const size = display?.width
                 ? { width: display.width, minWidth: display.width }
                 : undefined;
@@ -1050,11 +1119,12 @@ function Table({
                   ? raw
                   : /^0x[0-9a-f]{16,}$/i.test(raw)
                     ? raw
-                  : format || numeric(entry.at)
-                    ? formatValue(value, format ?? options.format)
-                    : formatCategory(value, type);
-                const text = display?.text && display.condensed ? condense(full) : full;
-                const align = display?.align ?? (numeric(entry.at) ? 'right' : 'left');
+                    : format || numeric(entry.at)
+                      ? formatValue(value, format ?? options.format)
+                      : formatCategory(value, type);
+                const text = formatTableText(full, display);
+                const align =
+                  display?.align ?? (numeric(entry.at) ? 'right' : 'left');
                 const size = display?.width
                   ? { width: display.width, minWidth: display.width }
                   : undefined;
@@ -1074,7 +1144,64 @@ function Table({
                       event.preventDefault();
                     }}
                   >
-                    {text}
+                    {onSelect &&
+                    entry ===
+                      (shown.find((column) =>
+                        /^0x[0-9a-f]{40,}$/i.test(asText(row[column.at])),
+                      ) ?? shown[0]) ? (
+                      <button
+                        type="button"
+                        className="viz-row-link"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onSelect(
+                            Object.fromEntries(
+                              columns.map((column, i) => [column.name, row[i]]),
+                            ),
+                          );
+                        }}
+                        aria-label={`Open record for ${full}`}
+                      >
+                        {text}
+                      </button>
+                    ) : (
+                      text
+                    )}
+                    {/^0x[0-9a-f]{40,}$/i.test(raw) && (
+                      <button
+                        type="button"
+                        className="viz-copy"
+                        aria-label={
+                          copyError === raw
+                            ? 'Copy failed'
+                            : copied === raw
+                              ? 'Copied address'
+                              : `Copy ${entry.name}`
+                        }
+                        title={
+                          copyError === raw
+                            ? 'Copy failed; select the value to copy it'
+                            : copied === raw
+                              ? 'Copied'
+                              : 'Copy full value'
+                        }
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void (async () => {
+                            try {
+                              await navigator.clipboard.writeText(raw);
+                              setCopyError(null);
+                              setCopied(raw);
+                            } catch {
+                              setCopied(null);
+                              setCopyError(raw);
+                            }
+                          })();
+                        }}
+                      >
+                        <Copy size={12} aria-hidden="true" />
+                      </button>
+                    )}
                   </td>
                 );
               })}

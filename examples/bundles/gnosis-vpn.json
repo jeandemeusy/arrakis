@@ -4,12 +4,12 @@
   "name": "gnosis-vpn",
   "title": "Gnosis VPN",
   "description": "Who uses Gnosis VPN, how much traffic it carries and where, read from the HOPR network’s on-chain ticket redemptions.",
-  "exportedAt": "2026-11-02T22:07:31.732Z",
+  "exportedAt": "2026-11-03T17:31:55.952Z",
   "lists": [
     {
       "name": "exits",
       "type": "bytes",
-      "description": "Exit node addresses, per data source. Downstream volume counts only the exits listed here."
+      "description": "Exit node addresses, per data source, for a network without a service registry or an exit missing from it. Exits registered as gvpn:exit are found without it."
     }
   ],
   "queries": [
@@ -146,11 +146,21 @@
       "timeoutSeconds": null
     },
     {
+      "slug": "win-probability",
+      "title": "Winning probability history",
+      "description": "Fragment: the winning probability in force over each range of blocks, from the oracle logs.",
+      "kind": "fragment",
+      "sql": "-- The winning probability in force over each range of blocks.\n--\n-- Each update in oracle-updates holds from its block until the next one's.\n-- Blocks before the first update have no probability on record: they match no\n-- row here, and the queries that join this price them at zero rather than\n-- guess.\nSELECT\n  block_number AS from_block,\n  COALESCE(\n    LEAD(block_number) OVER (ORDER BY block_number, tx_index, log_index),\n    9223372036854775807\n  ) AS to_block,\n  {{> decode-win-prob(value)}} AS probability\nFROM {{> oracle-updates}} AS oracle\nWHERE kind = 'win-prob'",
+      "parameters": [],
+      "combine": "concat",
+      "timeoutSeconds": null
+    },
+    {
       "slug": "vpn-traffic",
       "title": "VPN traffic",
       "description": "Every VPN redemption, by block, with its direction, payer, relay and data volume.",
       "kind": "query",
-      "sql": "-- Every Gnosis VPN redemption, by block, converted to data volume.\n--\n-- One row per redemption from vpn-redemptions: upstream (a client paying a\n-- relay) and downstream (a configured exit paying a relay for the answer).\n-- Most of the dashboard is drawn from this one result: volume, redemptions,\n-- the relay breakdowns, the client ranking and each client's own record.\n--\n-- Volume: `tickets` is the ticket-index delta between redemptions, so it\n-- estimates the packets paid for directly. Each packet is 650 bytes, making\n-- volume tickets × 650 / 2^30 GB. Winning probability is the latest value in\n-- the oracle history, retained alongside each row as current ticket context.\n--\n-- Time is the block number. The event log keeps no block times, and a time\n-- estimated from block counts drifts, so none is given. `head_block`, the last\n-- block indexed, is where the dashboard's \"last N blocks\" windows end.\nWITH latest_probability AS (\n  SELECT {{> decode-win-prob(value)}} AS value\n  FROM {{> oracle-updates}} AS oracle\n  WHERE kind = 'win-prob'\n  ORDER BY block_number DESC, tx_index DESC, log_index DESC\n  LIMIT 1\n)\nSELECT\n  r.block,\n  {{> indexed-block}} AS head_block,\n  r.direction,\n  {{> hex(r.payer)}} AS payer,\n  {{> hex(r.relay)}} AS relay,\n  r.tickets,\n  (SELECT value FROM latest_probability) AS win_probability,\n  r.tickets * 650::float8 / 1073741824 AS gigabytes\nFROM {{> vpn-redemptions}} AS r\nORDER BY r.block, r.tx_index, r.log_index",
+      "sql": "-- Every Gnosis VPN redemption, by block, converted to data volume.\n--\n-- One row per redemption from vpn-redemptions: upstream (a client paying a\n-- relay) and downstream (a configured exit paying a relay for the answer).\n-- Most of the dashboard is drawn from this one result: volume, redemptions,\n-- the relay breakdowns, the client ranking and each client's own record.\n--\n-- Volume: a redemption pays for one winning ticket, and with winning\n-- probability p a winner stands for 1/p tickets of 650 bytes each, so it\n-- accounts for 650 / (2^30 × p) GB at the p in force at its block. Before the\n-- oracle's first update p is unknown, and the redemption counts with no volume.\n--\n-- Time is the block number. The event log keeps no block times, and a time\n-- estimated from block counts drifts, so none is given. `head_block`, the last\n-- block indexed, is where the dashboard's \"last N blocks\" windows end.\nSELECT\n  r.block,\n  {{> indexed-block}} AS head_block,\n  r.direction,\n  {{> hex(r.payer)}} AS payer,\n  {{> hex(r.relay)}} AS relay,\n  r.tickets,\n  COALESCE(w.probability, 0) AS win_probability,\n  CASE\n    WHEN w.probability > 0 THEN 650::float8 / 1073741824 / w.probability\n    ELSE 0\n  END AS gigabytes\nFROM {{> vpn-redemptions}} AS r\nLEFT JOIN {{> win-probability}} AS w\n  ON r.block >= w.from_block AND r.block < w.to_block\nORDER BY r.block, r.tx_index, r.log_index",
       "parameters": [],
       "refreshSeconds": 900,
       "rowLimit": null,
@@ -192,11 +202,23 @@
       "timeoutSeconds": null
     },
     {
+      "slug": "ticket-parameters",
+      "title": "Ticket parameters",
+      "description": "Current winning probability, ticket price and ticket value.",
+      "kind": "query",
+      "sql": "-- The oracle values as they stand: winning probability, ticket price, and\n-- what a ticket is worth for one remaining hop (price ÷ probability). One row.\n--\n-- The newest update of each in {{> oracle-updates}}, so the figures match the\n-- history the volume is priced with; both are null when the oracle has never\n-- been indexed. Per network only: each network sets its own price and\n-- probability, so a combined figure would be a fiction.\nWITH latest_probability AS (\n  SELECT {{> decode-win-prob(value)}} AS value\n  FROM {{> oracle-updates}} AS oracle\n  WHERE kind = 'win-prob'\n  ORDER BY block_number DESC, tx_index DESC, log_index DESC\n  LIMIT 1\n),\nlatest_price AS (\n  SELECT {{> uint256(value)}} AS wei\n  FROM {{> oracle-updates}} AS oracle\n  WHERE kind = 'ticket-price'\n  ORDER BY block_number DESC, tx_index DESC, log_index DESC\n  LIMIT 1\n)\nSELECT\n  (SELECT value FROM latest_probability) AS win_probability,\n  (SELECT ROUND(wei) FROM latest_price) AS ticket_price,\n  (\n    SELECT ROUND(latest_price.wei / latest_probability.value::numeric)\n    FROM latest_price, latest_probability\n    WHERE latest_probability.value > 0\n  ) AS ticket_value",
+      "parameters": [],
+      "refreshSeconds": 21600,
+      "rowLimit": null,
+      "combine": "hidden",
+      "timeoutSeconds": null
+    },
+    {
       "slug": "exit-nodes",
       "title": "Exits",
       "description": "The network’s Gnosis VPN exits, where each is reached and the downstream volume it paid.",
       "kind": "query",
-      "sql": "-- Every exit the dashboard knows, with the downstream volume it paid for.\n--\n-- The exits are those of exit-addresses, found in the service registry, the\n-- list \"exits\" or both. For a registered exit, the registry also says its name\n-- and where it is reached (the VPN server and the WireGuard server of its\n-- metadata) and which safe registered it. Volume is derived from the ticket\n-- index deltas, as in vpn-traffic; an exit that never paid a relay has none.\nWITH registered AS MATERIALIZED {{> registry-entries}},\ntraffic AS (\n  SELECT\n    r.payer,\n    COUNT(*) AS redemptions,\n    MAX(r.block) AS last_active_block,\n    SUM(r.tickets * 650::float8 / 1073741824) AS gigabytes\n  FROM {{> vpn-redemptions}} AS r\n  WHERE r.direction = 'downstream'\n  GROUP BY r.payer\n)\nSELECT\n  reg.name,\n  {{> hex(x.address)}} AS exit,\n  CASE\n    WHEN x.in_registry AND x.in_list THEN 'registry and list'\n    WHEN x.in_registry THEN 'registry'\n    ELSE 'list'\n  END AS found_in,\n  reg.vpn_server,\n  reg.wireguard_server,\n  {{> hex(reg.safe)}} AS safe,\n  COALESCE(t.gigabytes, 0) AS gigabytes,\n  COALESCE(t.redemptions, 0) AS redemptions,\n  t.last_active_block\nFROM {{> exit-addresses}} AS x\nLEFT JOIN registered AS reg ON reg.address = x.address\nLEFT JOIN traffic AS t ON t.payer = x.address\nORDER BY gigabytes DESC, exit",
+      "sql": "-- Every exit the dashboard knows, with the downstream volume it paid for.\n--\n-- The exits are those of exit-addresses, found in the service registry, the\n-- list \"exits\" or both. For a registered exit, the registry also says its name\n-- and where it is reached (the VPN server and the WireGuard server of its\n-- metadata) and which safe registered it. Volume is what the exit paid relays\n-- for the return path, all time, priced at the winning probability in force at\n-- each block as in vpn-traffic; an exit that never paid a relay has none.\nWITH registered AS MATERIALIZED {{> registry-entries}},\ntraffic AS (\n  SELECT\n    r.payer,\n    COUNT(*) AS redemptions,\n    MAX(r.block) AS last_active_block,\n    SUM(CASE WHEN w.probability > 0 THEN 650::float8 / 1073741824 / w.probability ELSE 0 END) AS gigabytes\n  FROM {{> vpn-redemptions}} AS r\n  LEFT JOIN {{> win-probability}} AS w\n    ON r.block >= w.from_block AND r.block < w.to_block\n  WHERE r.direction = 'downstream'\n  GROUP BY r.payer\n)\nSELECT\n  reg.name,\n  {{> hex(x.address)}} AS exit,\n  CASE\n    WHEN x.in_registry AND x.in_list THEN 'registry and list'\n    WHEN x.in_registry THEN 'registry'\n    ELSE 'list'\n  END AS found_in,\n  reg.vpn_server,\n  reg.wireguard_server,\n  {{> hex(reg.safe)}} AS safe,\n  COALESCE(t.gigabytes, 0) AS gigabytes,\n  COALESCE(t.redemptions, 0) AS redemptions,\n  t.last_active_block\nFROM {{> exit-addresses}} AS x\nLEFT JOIN registered AS reg ON reg.address = x.address\nLEFT JOIN traffic AS t ON t.payer = x.address\nORDER BY gigabytes DESC, exit",
       "parameters": [],
       "refreshSeconds": 21600,
       "rowLimit": null,
@@ -220,7 +242,7 @@
       "title": "Indexed contracts",
       "description": "The contracts this index subscribes to, by role.",
       "kind": "query",
-      "sql": "-- The contracts this index subscribes to, named by the events they emit.\n--\n-- Blokli records one row per (contract, event topic) it watches, so the\n-- distinct addresses are the contracts indexed and the topics — 32-byte event\n-- signature hashes — say what each one is.\nSELECT DISTINCT\n  {{> hex(address)}} AS contract\nFROM log_topic_info\nORDER BY contract",
+      "sql": "-- The contracts this index subscribes to, named by the events they emit.\n--\n-- Blokli records one row per (contract, event topic) it watches, so the\n-- distinct addresses are the contracts indexed and the topics — 32-byte event\n-- signature hashes — say what each one is.\nWITH role (topic, name) AS (\n  VALUES\n    ('ed22f34d154d253a7f6fd477439be59080a1554aa0d0642686d64223ab544c8a', 'Channels'),\n    ('004c0177ad15bb302b4419e9ac96065d6f436e0f61972f97bbe272834c40f934', 'Channels'),\n    ('197bba684a6afb7ba24f1d265605414b1d0051a6e295d6ff7b6e78e870d7a7f0', 'Channels'),\n    ('c4df5ba16814838ab2618829d68f8623bb897302f24dbdba2279dbe45adb3d14', 'Announcements'),\n    ('11d94653de52fc143887956fe4b5e4120a850b1300ece0533dee6bd8ff91f732', 'Announcements'),\n    ('a4de30a528becadf82649d1395c0e30dd18ae35b5a96ce71e9295bb14bc9f3bc', 'Announcements'),\n    ('776da40cbf2c223552661bd48502ceb72409b3362bb0c66d8989bd7e20e4497d', 'Node safe registry'),\n    ('1eb3e9b31552ebe06015df6569e31abbec0e73a88c3ccdd9fead65c4378b4e50', 'Node safe registry'),\n    ('2c906e9f9056ce9dab322be95fe710c2ecfa369bf6bf530bc81ced25caee90e1', 'Service registry'),\n    ('113517b01f8948e66b44bc59b45e47477fb89b357e7d1939b0d211dd15b698fe', 'Service registry'),\n    ('d290c349227ff04b271178af5d66f5375b072d8acfecd2ffcc80ec7ea77c69f5', 'Service registry'),\n    ('c156047b6a581b0578bc0cf242ee21ab84be919cf764ffd68ce50ded302323a7', 'Service registry'),\n    ('38a84f1ca3cac973fcc30eeaccfd5a063993a9bd564530c4790ef60291c6b161', 'Service registry'),\n    ('d4c5e06b1ae097ba02372652a7adaa6e4a8e00be527497a3ad0ebc3f761ef3fb', 'Ticket price oracle'),\n    ('02728c4a80373f4765559dc3a046edea88186424827238bb46245668315d3800', 'Winning probability oracle'),\n    ('06b541ddaa720db2b10a4d0cdac39b8d360425fc073085fac19bc82614677987', 'wxHOPR token'),\n    ('f4caeb2d6ca8932a215a353d0703c326ec2d81fc68170f320eb2ab49e9df61f9', 'wxHOPR token'),\n    ('83a5c31bfee49d254d95e3946d8e8434e5975382fa8b849182db9e251aaaaa26', 'Node stake factory'),\n    ('141df868a6331af528e38c83b7aa03edc19be66e37ae67f9285bf4f8e3c6a1a8', 'Safe'),\n    ('442e715f626346e8c54381002da614f62bee8d27386535b2521ec8540898556e', 'Safe')\n),\ncontract AS (\n  SELECT address, ARRAY_AGG(DISTINCT encode(topic, 'hex') ORDER BY encode(topic, 'hex')) AS topics\n  FROM log_topic_info\n  GROUP BY address\n)\nSELECT\n  COALESCE(\n    (\n      SELECT role.name\n      FROM unnest(contract.topics) WITH ORDINALITY AS t (topic, position)\n      JOIN role ON role.topic = t.topic\n      ORDER BY t.position\n      LIMIT 1\n    ),\n    'Indexed contract'\n  ) AS role,\n  {{> hex(contract.address)}} AS contract\nFROM contract\nORDER BY role, contract",
       "parameters": [],
       "refreshSeconds": 3600,
       "rowLimit": null,
@@ -659,12 +681,12 @@
         },
         "options": {
           "format": "gigabytes",
-          "legend": true,
           "formats": {
             "gigabytes": "gigabytes"
           },
           "stacked": true,
-          "seriesOrder": "rows"
+          "seriesOrder": "rows",
+          "legendPosition": "below"
         },
         "encoding": {
           "x": "period",
@@ -1032,6 +1054,62 @@
       }
     },
     {
+      "key": "gnosis-vpn/winning-probability",
+      "query": "ticket-parameters",
+      "title": "Winning probability",
+      "description": "",
+      "type": "number",
+      "config": {
+        "steps": [],
+        "options": {
+          "format": "decimal"
+        },
+        "encoding": {
+          "y": [
+            "win_probability"
+          ]
+        }
+      }
+    },
+    {
+      "key": "gnosis-vpn/ticket-price",
+      "query": "ticket-parameters",
+      "title": "Ticket price",
+      "description": "",
+      "type": "number",
+      "config": {
+        "steps": [],
+        "options": {
+          "format": "token",
+          "caption": "wxHOPR"
+        },
+        "encoding": {
+          "y": [
+            "ticket_price"
+          ]
+        }
+      }
+    },
+    {
+      "key": "gnosis-vpn/ticket-value",
+      "query": "ticket-parameters",
+      "title": "Ticket value",
+      "description": "",
+      "type": "number",
+      "config": {
+        "steps": [],
+        "options": {
+          "format": "token",
+          "caption": "wxHOPR"
+        },
+        "encoding": {
+          "y": [
+            "ticket_value"
+          ]
+        }
+      }
+    },
+    {
       "key": "gnosis-vpn/exits-registered",
       "query": "exit-nodes",
       "title": "Exits registered",
@@ -1188,7 +1266,6 @@
           "formats": {
             "gigabytes": "gigabytes"
           },
-          "pageSize": 25,
           "tableColumns": {
             "payer": {
               "text": true,
@@ -1230,7 +1307,6 @@
             "block",
             "client"
           ],
-          "pageSize": 25,
           "tableColumns": {
             "block": {
               "width": 100
@@ -1282,7 +1358,6 @@
             "relay",
             "channel"
           ],
-          "pageSize": 25,
           "tableColumns": {
             "block": {
               "width": 100
@@ -1312,8 +1387,29 @@
       "description": "",
       "type": "table",
       "config": {
-        "steps": [],
-        "builder": {},
+        "steps": [
+          {
+            "by": [
+              {
+                "column": "role"
+              },
+              {
+                "column": "network"
+              }
+            ],
+            "op": "sort"
+          }
+        ],
+        "builder": {
+          "sort": [
+            {
+              "column": "role"
+            },
+            {
+              "column": "network"
+            }
+          ]
+        },
         "options": {
           "columns": [
             "role",
@@ -1921,7 +2017,8 @@
           "name": "network",
           "type": "network",
           "label": "Network",
-          "default": "all"
+          "default": "all",
+          "showLabel": false
         },
         {
           "name": "range",
@@ -1939,7 +2036,8 @@
             "500000",
             "2000000",
             "all"
-          ]
+          ],
+          "showLabel": false
         },
         {
           "name": "direction",
@@ -1953,7 +2051,8 @@
           "options": [
             "upstream",
             "downstream"
-          ]
+          ],
+          "showLabel": false
         }
       ],
       "widgets": [
@@ -1961,44 +2060,75 @@
           "kind": "visualization",
           "chart": "gnosis-vpn/monthly-active-users",
           "width": 3,
-          "height": 120,
+          "height": 80,
           "options": {
-            "note": "Distinct clients, in the window"
+            "note": "Distinct clients, in the window",
+            "layout": {
+              "row": 0,
+              "rows": 2,
+              "unit": "cells",
+              "column": 0
+            }
           }
         },
         {
           "kind": "visualization",
           "chart": "gnosis-vpn/data-relayed",
           "width": 3,
-          "height": 120,
+          "height": 80,
           "options": {
-            "note": "Upstream and downstream combined, in the range"
+            "note": "Upstream and downstream combined, in the range",
+            "layout": {
+              "row": 0,
+              "rows": 2,
+              "unit": "cells",
+              "column": 3
+            }
           }
         },
         {
           "kind": "visualization",
           "chart": "gnosis-vpn/redemptions",
           "width": 2,
-          "height": 120,
+          "height": 80,
           "options": {
-            "note": "Client-channel redemptions, in the range"
+            "note": "Client-channel redemptions, in the range",
+            "layout": {
+              "row": 0,
+              "rows": 2,
+              "unit": "cells",
+              "column": 6
+            }
           }
         },
         {
           "kind": "visualization",
           "chart": "gnosis-vpn/new-clients",
           "width": 2,
-          "height": 120,
+          "height": 80,
           "options": {
-            "note": "Client deployments, in the range"
+            "note": "Client deployments, in the range",
+            "layout": {
+              "row": 0,
+              "rows": 2,
+              "unit": "cells",
+              "column": 8
+            }
           }
         },
         {
           "kind": "visualization",
           "chart": "gnosis-vpn/active-channels",
           "width": 2,
-          "height": 120,
-          "options": {}
+          "height": 80,
+          "options": {
+            "layout": {
+              "row": 0,
+              "rows": 2,
+              "unit": "cells",
+              "column": 10
+            }
+          }
         },
         {
           "kind": "text",
@@ -2006,40 +2136,71 @@
           "width": 12,
           "height": 80,
           "options": {
-            "note": "A user is a VPN client — an account that bound a key but never announced an address. Upstream volume is derived from the redemptions on client channels, priced at the winning probability in force at each block; downstream is what the configured exits pay relays for the return path."
+            "note": "A user is a VPN client — an account that bound a key but never announced an address, so it is not relay infrastructure. Upstream volume is derived from the redemptions on client channels, priced at the winning probability in force at each block; downstream is what the configured exits pay relays for the return path.",
+            "layout": {
+              "row": 2,
+              "unit": "cells",
+              "column": 0
+            }
           }
         },
         {
           "kind": "visualization",
           "chart": "gnosis-vpn/active-users",
-          "width": 6,
-          "height": 200,
+          "width": 5,
+          "height": 322,
           "options": {
-            "note": "Distinct clients active in each bin of blocks — redeemed for, or deployed."
+            "note": "Distinct clients active in each bin of blocks — redeemed for, or deployed.",
+            "layout": {
+              "row": 3,
+              "rows": 4,
+              "unit": "cells",
+              "column": 2
+            }
           }
         },
         {
           "kind": "visualization",
           "chart": "gnosis-vpn/volume",
-          "width": 6,
-          "height": 200,
+          "width": 5,
+          "height": 201,
           "options": {
-            "note": "About forty bins over the window. Upstream is paid for by the client and attributable to it; downstream is paid for by the exit, whose channels name no client."
+            "note": "About forty bins over the window. Upstream is paid for by the client and attributable to it; downstream is paid for by the exit, whose channels name no client.",
+            "layout": {
+              "row": 3,
+              "rows": 4,
+              "unit": "cells",
+              "column": 7
+            }
           }
         },
         {
           "kind": "visualization",
           "chart": "gnosis-vpn/downstream-ratio",
-          "width": 6,
-          "height": 110,
-          "options": {}
+          "width": 2,
+          "height": 80,
+          "options": {
+            "layout": {
+              "row": 3,
+              "rows": 2,
+              "unit": "cells",
+              "column": 0
+            }
+          }
         },
         {
           "kind": "visualization",
           "chart": "gnosis-vpn/exits-seen",
-          "width": 6,
-          "height": 110,
-          "options": {}
+          "width": 2,
+          "height": 80,
+          "options": {
+            "layout": {
+              "row": 5,
+              "rows": 2,
+              "unit": "cells",
+              "column": 0
+            }
+          }
         },
         {
           "kind": "text",
@@ -2047,7 +2208,12 @@
           "width": 12,
           "height": 80,
           "options": {
-            "note": "Who showed up, and when each client first appeared, block by block."
+            "note": "Who showed up, and when each client first appeared, block by block.",
+            "layout": {
+              "row": 7,
+              "unit": "cells",
+              "column": 0
+            }
           }
         },
         {
@@ -2056,7 +2222,13 @@
           "width": 12,
           "height": 200,
           "options": {
-            "note": "Client deployments in each bin of blocks."
+            "note": "Client deployments in each bin of blocks.",
+            "layout": {
+              "row": 8,
+              "rows": 4,
+              "unit": "cells",
+              "column": 0
+            }
           }
         },
         {
@@ -2065,25 +2237,104 @@
           "width": 12,
           "height": 80,
           "options": {
-            "note": "Estimated client traffic carried by each relay."
+            "note": "Estimated client traffic carried by each relay.",
+            "layout": {
+              "row": 12,
+              "unit": "cells",
+              "column": 0
+            }
           }
         },
         {
           "kind": "visualization",
           "chart": "gnosis-vpn/relayer-share",
-          "width": 4,
-          "height": 280,
+          "width": 3,
+          "height": 80,
           "options": {
-            "note": "Upstream volume."
+            "note": "Upstream volume.",
+            "layout": {
+              "row": 13,
+              "rows": 4,
+              "unit": "cells",
+              "column": 0
+            }
           }
         },
         {
           "kind": "visualization",
           "chart": "gnosis-vpn/relayer-daily",
-          "width": 8,
-          "height": 280,
+          "width": 9,
+          "height": 80,
           "options": {
-            "note": "Split by the relay each client (upstream) or exit (downstream) paid. Downstream names no client, so it is a relay breakdown, never a client one."
+            "note": "Split by the relay each client (upstream) or exit (downstream) paid. Downstream names no client, so it is a relay breakdown, never a client one.",
+            "layout": {
+              "row": 13,
+              "rows": 4,
+              "unit": "cells",
+              "column": 3
+            }
+          }
+        },
+        {
+          "kind": "text",
+          "text": "Ticket parameters",
+          "width": 12,
+          "height": 80,
+          "options": {
+            "note": "The oracle values that convert redemptions into traffic, as they stand now. Each network sets its own, so pick one network to see them.",
+            "layout": {
+              "row": 17,
+              "unit": "cells",
+              "column": 0
+            }
+          }
+        },
+        {
+          "kind": "visualization",
+          "chart": "gnosis-vpn/winning-probability",
+          "width": 4,
+          "height": 80,
+          "options": {
+            "note": "Current network minimum",
+            "layout": {
+              "row": 18,
+              "rows": 2,
+              "unit": "cells",
+              "column": 0
+            },
+            "requires": "network"
+          }
+        },
+        {
+          "kind": "visualization",
+          "chart": "gnosis-vpn/ticket-price",
+          "width": 4,
+          "height": 80,
+          "options": {
+            "note": "Cost of relaying one packet, one hop",
+            "layout": {
+              "row": 18,
+              "rows": 2,
+              "unit": "cells",
+              "column": 4
+            },
+            "requires": "network"
+          }
+        },
+        {
+          "kind": "visualization",
+          "chart": "gnosis-vpn/ticket-value",
+          "width": 4,
+          "height": 80,
+          "options": {
+            "note": "Price ÷ probability, for one remaining hop",
+            "layout": {
+              "row": 18,
+              "rows": 2,
+              "unit": "cells",
+              "column": 8
+            },
+            "requires": "network"
           }
         },
         {
@@ -2092,22 +2343,42 @@
           "width": 12,
           "height": 80,
           "options": {
-            "note": "Exits are detected from the service registry: every node registered there as gvpn:exit, until it deregisters. Its metadata names it and says where it is reached."
+            "note": "Exits are detected from the service registry: every node registered there as gvpn:exit, until it deregisters. Its metadata names it and says where it is reached. Add an address to the list “exits” (Settings → Lists) for a network without a registry. Volume is what each exit paid relays for the return path, all time.",
+            "layout": {
+              "row": 20,
+              "unit": "cells",
+              "column": 0
+            }
           }
         },
         {
           "kind": "visualization",
           "chart": "gnosis-vpn/exits-registered",
-          "width": 2,
-          "height": 240,
-          "options": {}
+          "width": 4,
+          "height": 80,
+          "options": {
+            "note": "Detected automatically",
+            "layout": {
+              "row": 21,
+              "rows": 2,
+              "unit": "cells",
+              "column": 0
+            }
+          }
         },
         {
           "kind": "visualization",
           "chart": "gnosis-vpn/exits",
-          "width": 10,
-          "height": 120,
-          "options": {}
+          "width": 8,
+          "height": 80,
+          "options": {
+            "layout": {
+              "row": 21,
+              "rows": 2,
+              "unit": "cells",
+              "column": 4
+            }
+          }
         },
         {
           "kind": "text",
@@ -2115,19 +2386,30 @@
           "width": 12,
           "height": 80,
           "options": {
-            "note": "Who used the network and when each client first appeared. Volume is upstream only — the traffic the client itself paid for. Pick a client to open its record."
+            "note": "Who used the network and when each client first appeared. Volume is upstream only — the traffic the client itself paid for. Pick a client to open its record.",
+            "layout": {
+              "row": 23,
+              "unit": "cells",
+              "column": 0
+            }
           }
         },
         {
           "kind": "visualization",
           "chart": "gnosis-vpn/top-clients",
           "width": 6,
-          "height": 280,
+          "height": 178,
           "options": {
             "link": {
               "var": "client",
               "column": "payer",
               "dashboard": "gnosis-vpn-client"
+            },
+            "layout": {
+              "row": 24,
+              "rows": 5,
+              "unit": "cells",
+              "column": 0
             }
           }
         },
@@ -2135,12 +2417,18 @@
           "kind": "visualization",
           "chart": "gnosis-vpn/deployments",
           "width": 6,
-          "height": 280,
+          "height": 178,
           "options": {
             "link": {
               "var": "client",
               "column": "client",
               "dashboard": "gnosis-vpn-client"
+            },
+            "layout": {
+              "row": 24,
+              "rows": 5,
+              "unit": "cells",
+              "column": 6
             }
           }
         },
@@ -2150,19 +2438,30 @@
           "width": 12,
           "height": 80,
           "options": {
-            "note": "The latest client redemptions, newest first. Upstream only — a downstream redemption is paid by an exit and names no client."
+            "note": "The latest client redemptions, newest first. Upstream only — a downstream redemption is paid by an exit and names no client.",
+            "layout": {
+              "row": 29,
+              "unit": "cells",
+              "column": 0
+            }
           }
         },
         {
           "kind": "visualization",
           "chart": "gnosis-vpn/feed",
           "width": 12,
-          "height": 200,
+          "height": 178,
           "options": {
             "link": {
               "var": "client",
               "column": "client",
               "dashboard": "gnosis-vpn-client"
+            },
+            "layout": {
+              "row": 30,
+              "rows": 5,
+              "unit": "cells",
+              "column": 0
             }
           }
         },
@@ -2171,14 +2470,27 @@
           "text": "Data sources",
           "width": 12,
           "height": 80,
-          "options": {}
+          "options": {
+            "layout": {
+              "row": 35,
+              "unit": "cells",
+              "column": 0
+            }
+          }
         },
         {
           "kind": "visualization",
           "chart": "gnosis-vpn/contracts",
           "width": 12,
-          "height": 200,
-          "options": {}
+          "height": 80,
+          "options": {
+            "layout": {
+              "row": 35,
+              "rows": 3,
+              "unit": "cells",
+              "column": 0
+            }
+          }
         }
       ]
     },
@@ -2192,7 +2504,8 @@
           "name": "network",
           "type": "network",
           "label": "Network",
-          "default": "all"
+          "default": "all",
+          "showLabel": false
         },
         {
           "name": "client",
@@ -2207,7 +2520,12 @@
           "width": 12,
           "height": 80,
           "options": {
-            "note": "A client leaves no trace of its own on chain: what is visible is a relay redeeming a ticket the client issued. First and last seen are the blocks that bound that trace."
+            "note": "A client leaves no trace of its own on chain: what is visible is a relay redeeming a ticket the client issued. First and last seen are the blocks that bound that trace.",
+            "layout": {
+              "row": 0,
+              "unit": "cells",
+              "column": 0
+            }
           }
         },
         {
@@ -2217,6 +2535,12 @@
           "height": 80,
           "options": {
             "note": "Key binding on chain",
+            "layout": {
+              "row": 1,
+              "rows": 2,
+              "unit": "cells",
+              "column": 0
+            },
             "requires": "client"
           }
         },
@@ -2224,9 +2548,15 @@
           "kind": "visualization",
           "chart": "gnosis-vpn-client/first-seen",
           "width": 4,
-          "height": 110,
+          "height": 80,
           "options": {
             "note": "First redemption",
+            "layout": {
+              "row": 1,
+              "rows": 2,
+              "unit": "cells",
+              "column": 4
+            },
             "requires": "client"
           }
         },
@@ -2234,9 +2564,15 @@
           "kind": "visualization",
           "chart": "gnosis-vpn-client/last-seen",
           "width": 4,
-          "height": 110,
+          "height": 80,
           "options": {
             "note": "Latest redemption",
+            "layout": {
+              "row": 1,
+              "rows": 2,
+              "unit": "cells",
+              "column": 8
+            },
             "requires": "client"
           }
         },
@@ -2244,8 +2580,14 @@
           "kind": "visualization",
           "chart": "gnosis-vpn-client/volume",
           "width": 4,
-          "height": 120,
+          "height": 172,
           "options": {
+            "layout": {
+              "row": 3,
+              "rows": 2,
+              "unit": "cells",
+              "column": 0
+            },
             "requires": "client"
           }
         },
@@ -2255,16 +2597,28 @@
           "width": 4,
           "height": 80,
           "options": {
+            "layout": {
+              "row": 5,
+              "rows": 2,
+              "unit": "cells",
+              "column": 0
+            },
             "requires": "client"
           }
         },
         {
           "kind": "visualization",
           "chart": "gnosis-vpn-client/daily",
-          "width": 12,
-          "height": 200,
+          "width": 8,
+          "height": 160,
           "options": {
             "note": "Upstream volume over the last 2,000,000 blocks.",
+            "layout": {
+              "row": 3,
+              "rows": 4,
+              "unit": "cells",
+              "column": 4
+            },
             "requires": "client"
           }
         },
@@ -2272,8 +2626,14 @@
           "kind": "visualization",
           "chart": "gnosis-vpn-client/relays",
           "width": 12,
-          "height": 240,
+          "height": 80,
           "options": {
+            "layout": {
+              "row": 7,
+              "rows": 3,
+              "unit": "cells",
+              "column": 0
+            },
             "requires": "client"
           }
         }

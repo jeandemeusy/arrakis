@@ -79,14 +79,17 @@ export function useWidgetData(
   network: string,
   vars: Record<string, string | undefined>,
   skip: boolean,
+  sources?: string,
 ): WidgetPayload {
   const [payload, setPayload] = useState<WidgetPayload>({ state: 'loading' });
   const search = useMemo(() => {
     const params = new URLSearchParams({ network });
+    if (sources)
+      for (const source of sources.split(',')) params.append('source', source);
     for (const [key, value] of Object.entries(vars))
       if (value) params.set(`v.${key}`, value);
     return params.toString();
-  }, [network, vars]);
+  }, [network, vars, sources]);
   useEffect(() => {
     if (skip || !id) return;
     let live = true;
