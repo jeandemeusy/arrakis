@@ -3186,6 +3186,34 @@ a.settings-card:focus-visible {
   text-underline-offset: 3px;
 }
 
+.why-section {
+  padding-top: 14px;
+  margin-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.why-section h3 {
+  margin: 0 0 8px;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.why-section ol {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 20px;
+}
+
+.why-section .studio-button {
+  margin: 0 0 12px;
+}
+
+.tile-details-table {
+  max-height: 320px;
+}
+
 .metric-value-detail {
   padding: 0;
   border: 0;

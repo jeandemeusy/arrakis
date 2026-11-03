@@ -45,6 +45,7 @@ describe(
       queryVisualizations: typeof import('../app/api/v1/queries/[slug]/visualizations/route');
       visualization: typeof import('../app/api/v1/visualizations/[id]/route');
       visualizationData: typeof import('../app/api/v1/visualizations/[id]/data/route');
+      visualizationInputs: typeof import('../app/api/v1/visualizations/[id]/inputs/route');
       preview: typeof import('../app/api/v1/visualizations/preview/route');
       dashboards: typeof import('../app/api/v1/dashboards/route');
       dashboard: typeof import('../app/api/v1/dashboards/[slug]/route');
@@ -100,6 +101,8 @@ describe(
         visualization: await import('../app/api/v1/visualizations/[id]/route'),
         visualizationData:
           await import('../app/api/v1/visualizations/[id]/data/route'),
+        visualizationInputs:
+          await import('../app/api/v1/visualizations/[id]/inputs/route'),
         preview: await import('../app/api/v1/visualizations/preview/route'),
         dashboards: await import('../app/api/v1/dashboards/route'),
         dashboard: await import('../app/api/v1/dashboards/[slug]/route'),
@@ -544,6 +547,35 @@ describe(
           252,
         );
         assert.match(anonymous.headers.get('cache-control') ?? '', /public/);
+      });
+
+      it('shows matching stored input rows for an ungrouped number and refuses stale chart settings', async () => {
+        const saved = await body<{ visualization: { updatedAt: string } }>(
+          await routes.visualization.GET(request('GET', `/api/v1/visualizations/${perClient}`), context({ id: perClient })),
+        );
+        const params = new URLSearchParams({ network: 'jura', 'v.client': CLIENT, chartVersion: saved.visualization.updatedAt });
+        const inputs = await routes.visualizationInputs.GET(request('GET', `/api/v1/visualizations/${perClient}/inputs?${params}`), context({ id: perClient }));
+        assert.equal(inputs.status, 200, await inputs.clone().text());
+        const inputData = await body<{ supported: boolean; columns: Array<{ name: string }>; rows: unknown[][]; hasMore: boolean }>(inputs);
+        assert.equal(inputData.supported, true);
+        const source = inputData.columns.findIndex((column) => column.name === 'source');
+        assert.ok(source >= 0);
+        assert.equal(inputData.rows.length, 9);
+        assert.ok(inputData.rows.every((row) => row[source] === CLIENT));
+        const chart = await body<Data>(await routes.visualizationData.GET(request('GET', `/api/v1/visualizations/${perClient}/data?network=jura&v.client=${CLIENT}`), context({ id: perClient })));
+        assert.equal(Number(chart.rows[0][0]), inputData.rows.length);
+        assert.equal(inputData.hasMore, false);
+        params.set('chartVersion', 'outdated');
+        assert.equal((await routes.visualizationInputs.GET(request('GET', `/api/v1/visualizations/${perClient}/inputs?${params}`), context({ id: perClient }))).status, 409);
+        const db = await lib.app.appDb();
+        await db.query("UPDATE queries SET visibility = 'private' WHERE slug = 'timed'");
+        try {
+          params.set('chartVersion', saved.visualization.updatedAt);
+          const privateResponse = await routes.visualizationInputs.GET(request('GET', `/api/v1/visualizations/${perClient}/inputs?${params}`), context({ id: perClient }));
+          assert.equal(privateResponse.status, 404);
+        } finally {
+          await db.query("UPDATE queries SET visibility = 'public' WHERE slug = 'timed'");
+        }
       });
 
       it('rejects an unknown chart type', async () => {

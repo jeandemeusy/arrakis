@@ -348,9 +348,13 @@ how a drill-down works. Variables travel in the address
 Editors can save named views of the current variables for dashboard readers.
 Tile settings let them choose a destination dashboard and one of its variables
 for a row or bar click. Click a number or select **Why this value?** from a
-tile's menu to inspect its query, selected variables, source freshness and
-transformed chart result. This result is not necessarily the underlying source
-rows; the query link opens the underlying query where permissions allow.
+tile's menu to inspect its query, selected variables, source freshness, chart
+steps and transformed result. For supported number tiles, **Show input rows**
+also displays up to 100 stored query rows entering the calculation, after its
+row-level filters and calculations. This reads the stored result, not the live
+source. Grouped calculations, custom SQL and other cases that cannot be
+traced reliably are identified as such; the complete stored query result can
+be opened where permissions allow.
 
 Dashboards are private, unlisted or public, like queries. Every chart's title
 (and *Open the query* in its menu) opens the query it is drawn from, on that

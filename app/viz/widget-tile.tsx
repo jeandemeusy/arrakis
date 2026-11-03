@@ -1,10 +1,11 @@
 'use client';
 
-import type { Encoding, Options, VisualizationType } from '@/lib/viz/config';
+import type { Encoding, Options, VisualizationConfig, VisualizationType } from '@/lib/viz/config';
 import { asText } from '@/lib/viz/text';
 
 import { Tile, type Freshness, type PanelStatus } from '../tile';
 import { ago } from '../(studio)/time';
+import { WhyValue } from './why-value';
 import {
   Missing,
   VisualizationBody,
@@ -141,10 +142,14 @@ export function WidgetTile({
   subtitle,
   busy,
   detailVars,
+  detailConfig,
+  detailChart,
+  detailNetwork,
+  detailSources,
 }: {
   id: string;
   title: string;
-  source?: { href: string; label: string };
+  source?: { href: string; label: string; resultsHref?: string };
   /** The query it is drawn from, shown muted after the title. */
   subtitle?: string;
   /**
@@ -153,6 +158,10 @@ export function WidgetTile({
    */
   busy?: 'running' | 'updating';
   detailVars?: Record<string, string | undefined>;
+  detailConfig?: VisualizationConfig;
+  detailChart?: { id: string; updatedAt: string };
+  detailNetwork?: string;
+  detailSources?: string;
   spec: ChartSpec;
   payload: WidgetPayload;
   width: number;
@@ -166,13 +175,7 @@ export function WidgetTile({
   const data = payload.state === 'ok' ? payload.data : null;
   const columns = data?.columns ?? [];
   const rows = data?.rows ?? [];
-  const details = <div className="tile-details">
-    {subtitle && <p><strong>Query:</strong> {subtitle}{data?.queryVersion != null ? ` · v${data.queryVersion}` : ''} {source && <a href={source.href}>Open query</a>}</p>}
-    <p><strong>Data shown:</strong> {data ? `${rows.length} result row${rows.length === 1 ? '' : 's'}${data.truncated ? ' (truncated)' : ''}` : 'Not available'}</p>
-    {data?.networks.map((entry) => <p key={entry.id}><strong>{entry.id}:</strong> {entry.status}{entry.stale ? ' · stale' : ''}{entry.finishedAt ? ` · last successful run ${WHEN.format(new Date(entry.finishedAt))}` : ''}{entry.lastAttempt?.status === 'failed' ? ` · last run failed${entry.lastAttempt.error ? `: ${entry.lastAttempt.error}` : ''}` : ''}</p>)}
-    {detailVars && Object.entries(detailVars).filter(([, value]) => value !== undefined).map(([name, value]) => <p key={name}><strong>{name}:</strong> {value}</p>)}
-    {data && rows.length > 0 && <><p><strong>Chart result</strong> (after the chart&rsquo;s transformations; not the underlying source rows):</p><div className="tile-details-table"><table><thead><tr>{columns.map((column) => <th key={column.name}>{column.name}</th>)}</tr></thead><tbody>{rows.slice(0, 10).map((row, index) => <tr key={index}>{row.map((value, at) => <td key={at}>{asText(value)}</td>)}</tr>)}</tbody></table></div>{rows.length > 10 && <p>Showing the first 10 result rows. Download data for the rest.</p>}</>}
-  </div>;
+  const details = <WhyValue data={data} title={title} query={subtitle} source={source} vars={detailVars ?? {}} config={detailConfig} chart={spec.type === 'number' ? detailChart : undefined} network={detailNetwork} sources={detailSources} busy={busy} />;
   const csv = data
     ? () => [
         columns.map((column) => column.name),

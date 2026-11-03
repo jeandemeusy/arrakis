@@ -102,6 +102,10 @@ function VisualizationWidgetTile({
       subtitle={visualization.queryTitle}
       busy={busy}
       detailVars={Object.fromEntries([...readsOf(visualization)].map((name) => [name, vars[name]]))}
+      detailConfig={visualization.config}
+      detailNetwork={network}
+      detailSources={sources}
+      detailChart={visualization.queryVisibility !== 'private' || user ? { id: visualization.id, updatedAt: visualization.updatedAt } : undefined}
       width={12}
       height={widget.height}
       note={widget.options.note}
@@ -115,6 +119,7 @@ function VisualizationWidgetTile({
           ? {
               href: `/queries/${visualization.query}?tab=charts&chart=${visualization.id}`,
               label: `Open the query behind this: ${visualization.queryTitle}`,
+              resultsHref: `/queries/${visualization.query}?tab=results`,
             }
           : undefined
       }
