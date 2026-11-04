@@ -114,6 +114,11 @@ export function VariableBar({
             <input
               className="studio-input mono"
               placeholder="any"
+              autoCapitalize={variable.lowercase ? 'none' : undefined}
+              onChange={(event) => {
+                if (variable.lowercase)
+                  event.currentTarget.value = event.currentTarget.value.toLowerCase();
+              }}
               onKeyDown={(event) => {
                 if (event.key === 'Enter')
                   onChange(

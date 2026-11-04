@@ -90,6 +90,7 @@ export function VariablesEditor({
               set(at, {
                 type,
                 networks: undefined,
+                lowercase: type === 'text' ? variable.lowercase : undefined,
                 options:
                   type === 'range'
                     ? ['7d', '30d', '90d', 'all']
@@ -120,6 +121,18 @@ export function VariablesEditor({
             />
             Show label on dashboard
           </label>
+          {variable.type === 'text' && (
+            <label className="variable-label-option">
+              <input
+                type="checkbox"
+                checked={variable.lowercase === true}
+                onChange={(event) =>
+                  set(at, { lowercase: event.target.checked ? true : undefined })
+                }
+              />
+              Convert values to lowercase
+            </label>
+          )}
           {variable.type === 'network' && (
             <label
               className="stack-sources"

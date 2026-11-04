@@ -391,6 +391,8 @@ export default function GuidePage() {
               account. A chart reads them through its filters and range step, so
               changing one redraws only the charts that read it. Variables
               travel in the address, so any view can be linked to.
+              Text variables can optionally convert values to lowercase, including
+              values from links and saved views; this is useful for addresses.
             </p>
             <p>
               Use <strong>Views</strong> beside the filters to save a named set

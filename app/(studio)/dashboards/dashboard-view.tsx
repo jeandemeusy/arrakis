@@ -29,6 +29,7 @@ import {
   X,
 } from 'lucide-react';
 import { asText } from '@/lib/viz/text';
+import { normalizeVariableValue } from '@/lib/viz/variable-value';
 import {
   gridRows,
   gridTileHeight,
@@ -397,7 +398,7 @@ export function DashboardView({
         !variable.networks.includes(value)
       )
         continue;
-      if (value !== undefined || !data) out[name] = value;
+      if (value !== undefined || !data) out[name] = normalizeVariableValue(variable, value);
     }
     for (const variable of dashboard?.variables ?? [])
       if (variable.type === 'network' && variable.fixed)
@@ -420,7 +421,8 @@ export function DashboardView({
         );
         return;
       }
-      const next = { ...requestedRef.current, [name]: value || undefined };
+      const variable = dashboard?.variables.find((entry) => entry.name === name);
+      const next = { ...requestedRef.current, [name]: normalizeVariableValue(variable, value || undefined) };
       requestedRef.current = next;
       setRequested(next);
       // The address follows without a navigation: nothing on the server
@@ -434,7 +436,7 @@ export function DashboardView({
         `/dashboards/${slug}${params.size ? `?${params}` : ''}`,
       );
     },
-    [router, slug],
+    [router, slug, dashboard],
   );
   const followLink = useCallback(
     (link: TileLink, row: Record<string, unknown>) => {
@@ -1212,7 +1214,7 @@ export function DashboardView({
         vars={vars}
         networks={networks}
         actions={!editing && dashboard.variables.length > 0 ? <SavedViews slug={slug} variables={dashboard.variables} networks={networks} vars={Object.fromEntries(dashboard.variables.map((variable) => [variable.name, vars[variable.name]]))} editable={Boolean(user)} onApply={(values) => {
-        const next = Object.fromEntries(dashboard.variables.map((variable) => [variable.name, values[variable.name]]));
+        const next = Object.fromEntries(dashboard.variables.map((variable) => [variable.name, normalizeVariableValue(variable, values[variable.name])]));
         requestedRef.current = next;
         setRequested(next);
         const params = new URLSearchParams();

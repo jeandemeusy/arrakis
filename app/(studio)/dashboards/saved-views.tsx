@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Bookmark, Check, ChevronDown, Plus, Trash2, X } from 'lucide-react';
+import { normalizeVariableValue } from '@/lib/viz/variable-value';
 import { api, ApiError, type DashboardVariable, type Network } from '../api';
 
 type View = { id: string; name: string; variables: Record<string, string> };
@@ -29,7 +30,7 @@ export function SavedViews({ slug, variables, networks, vars, editable, onApply 
   const path = `/api/v1/dashboards/${encodeURIComponent(slug)}/views`;
   const current = Object.fromEntries(Object.entries(vars).filter((entry): entry is [string, string] => typeof entry[1] === 'string'));
   const normalized = (variable: DashboardVariable, raw: string | undefined) => {
-    if (variable.type !== 'network') return raw ?? '';
+    if (variable.type !== 'network') return normalizeVariableValue(variable, raw) ?? '';
     const allowed = variable.networks ? networks.filter((network) => variable.networks!.includes(network.id)) : networks;
     return (variable.stack === false || allowed.length === 1) && (!raw || raw === 'all') ? allowed[0]?.id ?? '' : raw ?? '';
   };

@@ -9,6 +9,7 @@ import {
 } from '../query/networks';
 import { runVisualization, type VisualizationData } from './run';
 import type { Dashboard, Variable, Visualization } from './store';
+import { normalizeVariableValue } from './variable-value';
 
 /**
  * Everything a dashboard shows, in one call: its variables resolved against
@@ -75,7 +76,7 @@ export function resolveVariables(
         value = variable.default;
       if (variable.type === 'text') value = value?.slice(0, 500);
     }
-    out[variable.name] = value;
+    out[variable.name] = normalizeVariableValue(variable, value);
   }
   return out;
 }

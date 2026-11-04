@@ -7,6 +7,34 @@ import {
   networkOf,
   resolveVariables,
 } from '../lib/viz/dashboard-data';
+import { normalizeVariableValue } from '../lib/viz/variable-value';
+
+describe('lowercase dashboard variables', () => {
+  it('normalizes inputs and defaults only when enabled', () => {
+    const previous = process.env.DATA_SOURCES;
+    process.env.DATA_SOURCES = JSON.stringify([
+      { id: 'demo', databaseUrl: 'postgres://localhost/demo' },
+    ]);
+    try {
+    const variables = parseVariables([
+      { name: 'address', type: 'text', lowercase: true, default: '0xAbC' },
+      { name: 'other', type: 'text' },
+    ]);
+    assert.equal(variables[0].lowercase, true);
+    assert.equal(resolveVariables(variables, {}).address, '0xabc');
+    const values = resolveVariables(variables, { address: '0xDEf', other: 'KeepCase' });
+    assert.equal(values.address, '0xdef');
+    assert.equal(values.other, 'KeepCase');
+    assert.equal(normalizeVariableValue(variables[0], '0xAB'), '0xab');
+    assert.equal(normalizeVariableValue(variables[0], undefined), undefined);
+    assert.throws(() => parseVariables([{ name: 'bad', type: 'text', lowercase: 'true' }]), /lowercase/);
+    assert.throws(() => parseVariables([{ name: 'bad', type: 'select', lowercase: true }]), /lowercase/);
+    } finally {
+      if (previous === undefined) delete process.env.DATA_SOURCES;
+      else process.env.DATA_SOURCES = previous;
+    }
+  });
+});
 
 describe('fixed dashboard data sources', () => {
   it('keeps the configured source even if a viewer supplies another', () => {

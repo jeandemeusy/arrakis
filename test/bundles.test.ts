@@ -175,6 +175,28 @@ describe(
       );
     });
 
+    it('rebinds an existing chart when its bundle changes the query', async () => {
+      const changed = structuredClone(example) as Json;
+      const charts = changed.charts as Array<{ key: string; query: string; title: string }>;
+      const queries = changed.queries as Array<{ slug: string; kind: string }>;
+      const chart = charts[0];
+      const previous = chart.query;
+      chart.query = queries.find((query) => query.kind === 'query' && query.slug !== previous)!.slug;
+      const response = await post(routes.bundles, '/api/v1/bundles', { bundle: changed });
+      assert.equal(response.status, 200, JSON.stringify(await response.clone().json()));
+      const report = await body<{ report: Report }>(response);
+      assert.ok(report.report.updated.includes(`chart ${chart.title}`));
+      const db = await lib.app.appDb();
+      const result = await db.query<{ slug: string }>(
+        `SELECT q.slug FROM visualizations v JOIN queries q ON q.id = v.query_id
+         WHERE v.seed_key = $1 AND v.archived_at IS NULL`,
+        [chart.key.includes('/') ? chart.key : `gnosis-vpn/${chart.key}`],
+      );
+      assert.equal(result.rows[0]?.slug, chart.query);
+      const restore = await post(routes.bundles, '/api/v1/bundles', { bundle: example });
+      assert.equal(restore.status, 200);
+    });
+
     it('runs every query of the example bundle on a Blokli-shaped source', async () => {
       const queries = (
         example.queries as Array<{ slug: string; kind: string }>

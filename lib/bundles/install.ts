@@ -282,9 +282,11 @@ export async function installBundle(
       config: unknown;
       title: string;
       type: string;
+      query: string;
     }>(
-      `SELECT id, config, title, type FROM visualizations
-       WHERE seed_key = $1 AND archived_at IS NULL`,
+      `SELECT v.id, v.config, v.title, v.type, q.slug AS query
+       FROM visualizations v JOIN queries q ON q.id = v.query_id
+       WHERE v.seed_key = $1 AND v.archived_at IS NULL`,
       [key],
     );
     const label = `chart ${chart.title}`;
@@ -306,7 +308,14 @@ export async function installBundle(
     }
     ids.set(chart.key, rows[0].id);
     const updated = await updateVisualization(rows[0].id, input);
+    if (rows[0].query !== chart.query) {
+      const target = await getQuery(chart.query);
+      if (!target || target.kind !== 'query' || target.archivedAt)
+        throw badRequest(`No query "${chart.query}" to visualize`);
+      await db.query('UPDATE visualizations SET query_id = $2, updated_at = now() WHERE id = $1', [rows[0].id, target.id]);
+    }
     const same =
+      rows[0].query === chart.query &&
       rows[0].title === updated.title &&
       rows[0].type === updated.type &&
       JSON.stringify(rows[0].config) === JSON.stringify(updated.config);

@@ -241,6 +241,8 @@ export type Variable = {
   networks?: string[];
   /** Show the variable label in the dashboard controls (default: true). */
   showLabel?: boolean;
+  /** Normalize text selections, including URL and drill-down values. */
+  lowercase?: boolean;
 };
 
 export type WidgetOptions = {
@@ -312,6 +314,12 @@ export function parseVariables(input: unknown): Variable[] {
     if (entry.showLabel !== undefined && typeof entry.showLabel !== 'boolean')
       throw badRequest(`${where}.showLabel must be a boolean`);
     if (entry.showLabel === false) variable.showLabel = false;
+    if (entry.lowercase !== undefined && typeof entry.lowercase !== 'boolean')
+      throw badRequest(`${where}.lowercase must be a boolean`);
+    if (entry.lowercase === true) {
+      if (type !== 'text') throw badRequest(`${where}.lowercase is only available for text variables`);
+      variable.lowercase = true;
+    }
     if (
       entry.default !== undefined &&
       entry.default !== null &&
