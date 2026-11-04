@@ -347,7 +347,7 @@ export function listsNamed(sql: string): string[] {
   return [
     ...new Set(
       [
-        ...code.matchAll(/\{\{\s*(?:list:([a-z_][a-z0-9_]*)|(exits))\s*\}\}/g),
+        ...code.matchAll(/\{\{\s*(?:list:([a-z_][a-z0-9_]*)(?::(?:values|names))?|(exits))\s*\}\}/g),
       ].map((match) => match[1] ?? match[2]),
     ),
   ];

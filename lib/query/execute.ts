@@ -6,7 +6,7 @@ import { badRequest } from '../api/errors';
 import type { NetworkConfig } from '../networks';
 import { toJsonValue, type Column } from './columns';
 import { bind, compile, type Compiled, type ResolveFragment } from './compile';
-import { listResolver, listValues } from './lists';
+import { listInputs, listResolver } from './lists';
 import {
   coerce,
   displayValue,
@@ -74,9 +74,10 @@ export function parameterKey(
 export async function inputsFingerprint(
   compiled: Compiled,
   network: NetworkConfig,
-  lists?: Record<string, BindValue>,
+  lists?: { values: Record<string, BindValue>; labels: Record<string, BindValue> },
 ): Promise<string> {
-  const values = lists ?? (await listValues(compiled.lists, network.id));
+  const inputs = lists ?? (await listInputs(compiled.lists, network.id));
+  const values = inputs.values;
   const text = (value: unknown) =>
     Buffer.isBuffer(value) ? value.toString('hex') : String(value);
   const others = compiled.lists.filter((name) => name !== 'exits').sort();
@@ -91,6 +92,9 @@ export async function inputsFingerprint(
             others.map((name) => [name, (values[name] as unknown[]).map(text)]),
           ),
         }
+      : {}),
+    ...(compiled.labeledLists.length
+      ? { listLabels: Object.fromEntries([...compiled.labeledLists].sort().map((name) => [name, inputs.labels[name]])) }
       : {}),
   });
 }
@@ -114,8 +118,8 @@ export async function prepare(
     resolve,
     listResolver(),
   );
-  const lists = await listValues(compiled.lists, network.id);
-  const { values } = bind(compiled, supplied, { network: network.id, lists });
+  const lists = await listInputs(compiled.lists, network.id);
+  const { values } = bind(compiled, supplied, { network: network.id, lists: lists.values, listLabels: lists.labels });
   return {
     compiled,
     values,

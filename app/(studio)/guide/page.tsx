@@ -228,11 +228,12 @@ export default function GuidePage() {
                 </tr>
                 <tr>
                   <td>
-                    <code>{'{{list:name}}'}</code>
+                    <code>{'{{list:name:values}}'}</code>,{' '}
+                    <code>{'{{list:name:names}}'}</code>
                   </td>
                   <td>
                     A <a href="#lists">list</a> kept under Settings → Lists, as
-                    an array: <code>{'WHERE id = ANY({{list:excluded}})'}</code>
+                    arrays of values and labels: <code>{'WHERE id = ANY({{list:excluded:values}})'}</code>
                     .
                   </td>
                 </tr>
@@ -289,8 +290,16 @@ export default function GuidePage() {
               editors can change it without a new version: the accounts to leave
               out, the regions that count. Create one under{' '}
               <Link href="/settings/lists">Settings → Lists</Link> and write{' '}
-              <code>{'{{list:name}}'}</code> where an array goes:{' '}
-              <code>{'WHERE account = ANY({{list:excluded}})'}</code>.
+              <code>{'{{list:name:values}}'}</code> where an array goes:{' '}
+              <code>{'WHERE account = ANY({{list:excluded:values}})'}</code>.
+            </p>
+            <p>
+              To read labels as well, unnest the aligned arrays:{' '}
+              <code>{'SELECT value, name FROM unnest({{list:exits:values}}, {{list:exits:names}}) AS entry(value, name)'}</code>.
+              The value keeps the list&apos;s type. Empty labels are empty strings;
+              entries for the current data source and entries shared across all
+              sources are both included. Label changes make results that read
+              labels stale.
             </p>
             <p>
               A list holds text, numbers or bytes (written <code>0x…</code>),

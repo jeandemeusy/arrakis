@@ -1017,6 +1017,16 @@ textarea.studio-input {
   padding-left: 0;
 }
 
+.list-placeholders {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.list-placeholders button {
+  overflow-wrap: anywhere;
+}
+
 .schema-list li {
   display: flex;
   justify-content: space-between;

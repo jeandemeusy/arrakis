@@ -23,6 +23,8 @@ export { isRelation };
  *   {{list:name}}          a list an editor keeps under Settings → Lists, for
  *                          the data source the run reads, as an array of the
  *                          list's type (`{{exits}}` is `{{list:exits}}`)
+ *   {{list:name:values}}   the same values array (explicit form)
+ *   {{list:name:names}}    labels aligned with the values array
  *   {{> slug}}             another saved query of kind `fragment`, inlined as a
  *                          parenthesized subquery: `FROM {{> clients}} AS c`
  *                          or `WITH c AS {{> clients}}`
@@ -51,7 +53,8 @@ export type ResolveFragment = (slug: string) => Promise<FragmentSource | null>;
 type Slot =
   | { kind: 'user'; name: string }
   | { kind: 'system'; name: SystemParameter }
-  | { kind: 'list'; name: string };
+  | { kind: 'list'; name: string }
+  | { kind: 'list-label'; name: string };
 
 /** What a list holds, and so the array type it binds as. */
 export type ListType = 'text' | 'number' | 'bytes';
@@ -77,6 +80,8 @@ export type Compiled = {
   system: SystemParameter[];
   /** The lists the statement reads. */
   lists: string[];
+  /** Lists whose labels are read as well as their values. */
+  labeledLists: string[];
   /** Fragments inlined, outermost first, each with the version that was used. */
   fragments: Array<{ slug: string; versionId: string }>;
 };
@@ -84,7 +89,7 @@ export type Compiled = {
 const MAX_FRAGMENT_DEPTH = 8;
 const FRAGMENT = /^>\s*([a-z0-9][a-z0-9-]{0,79})\s*(?:\(([\s\S]*)\))?$/;
 const ARGUMENT = /^\$([a-z_][a-z0-9_]{0,62})(?:\s*=\s*([\s\S]+))?$/;
-const LIST = /^list:([a-z_][a-z0-9_]{0,62})$/;
+const LIST = /^list:([a-z_][a-z0-9_]{0,62})(?::(values|names))?$/;
 const NAME = /^[a-z_][a-z0-9_]{0,62}$/;
 
 type Placeholder = { start: number; end: number; inner: string };
@@ -246,6 +251,7 @@ export async function compile(
   const system = new Set<SystemParameter>();
   const fragments: Compiled['fragments'] = [];
   const lists = new Set<string>();
+  const labeledLists = new Set<string>();
 
   const slot = (key: string, value: Slot): number => {
     let position = slotIndex.get(key);
@@ -372,8 +378,7 @@ export async function compile(
       }
 
       // `{{exits}}`, from before lists, is the list of that name.
-      const list =
-        LIST.exec(inner) ?? (inner === 'exits' ? [inner, 'exits'] : null);
+      const list = LIST.exec(inner) ?? (inner === 'exits' ? [inner, 'exits'] : null);
       if (list) {
         const name = list[1];
         const type = await resolveList(name);
@@ -383,8 +388,14 @@ export async function compile(
           );
         }
         lists.add(name);
-        const position = slot(`list:${name}`, { kind: 'list', name });
-        out += `$${position}::${LIST_CAST[type]}`;
+        if (list[2] === 'names') {
+          labeledLists.add(name);
+          const labels = slot(`list-label:${name}`, { kind: 'list-label', name });
+          out += `$${labels}::text[]`;
+        } else {
+          const position = slot(`list:${name}`, { kind: 'list', name });
+          out += `$${position}::${LIST_CAST[type]}`;
+        }
         continue;
       }
 
@@ -434,6 +445,7 @@ export async function compile(
     used: [...used],
     system: [...system],
     lists: [...lists],
+    labeledLists: [...labeledLists],
     fragments,
   };
 }
@@ -442,6 +454,7 @@ export type SystemValues = {
   network: string;
   /** Each list the statement reads, as its values for this data source. */
   lists?: Record<string, BindValue>;
+  listLabels?: Record<string, BindValue>;
 };
 
 /**
@@ -485,6 +498,11 @@ export function bind(
             `list ${slot.name} was not resolved for a query that uses it`,
           );
         }
+        return value;
+      }
+      case 'list-label': {
+        const value = systemValues.listLabels?.[slot.name];
+        if (value === undefined) throw new Error(`labels for list ${slot.name} were not resolved`);
         return value;
       }
     }

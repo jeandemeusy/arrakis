@@ -92,10 +92,11 @@ export function ListSettings() {
         <div>
           <h1>Lists</h1>
           <p className="studio-muted">
-            Values a query reads as <code>{'{{list:name}}'}</code>: an array of
+            Values a query reads as <code>{'{{list:name:values}}'}</code>: an array of
             the list&apos;s type, holding what is kept for the data source the
             run reads and what is kept for all of them. Changing a list reruns
             the scheduled queries that read it.
+            Use <code>{'{{list:name:names}}'}</code> for the corresponding labels.
           </p>
         </div>
         {user && (
@@ -254,7 +255,7 @@ function ListCard({
       <header>
         <div>
           <h2>
-            <code>{`{{list:${list.name}}}`}</code>
+            <code>{`{{list:${list.name}:values}}`}</code>
           </h2>
           <p className="studio-muted">
             {TYPE_HINT[list.type]}

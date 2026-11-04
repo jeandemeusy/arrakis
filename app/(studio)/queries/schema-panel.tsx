@@ -127,13 +127,22 @@ export function SchemaPanel({
       <ul className="fragment-list">
         {lists.map((list) => (
           <li key={list.name}>
-            <button
-              type="button"
-              title={`An array of ${list.type}, as kept under Settings → Lists`}
-              onClick={() => onInsert(`{{list:${list.name}}}`)}
-            >
-              {`{{list:${list.name}}}`}
-            </button>
+            <div className="list-placeholders">
+              <button
+                type="button"
+                title={`An array of ${list.type}, as kept under Settings → Lists`}
+                onClick={() => onInsert(`{{list:${list.name}:values}}`)}
+              >
+                {`{{list:${list.name}:values}}`}
+              </button>
+              <button
+                type="button"
+                title="The labels of the list entries, aligned with the values array"
+                onClick={() => onInsert(`{{list:${list.name}:names}}`)}
+              >
+                {`{{list:${list.name}:names}}`}
+              </button>
+            </div>
             <small>{list.type}</small>
           </li>
         ))}

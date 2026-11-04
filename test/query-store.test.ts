@@ -915,6 +915,58 @@ describe(
         );
         assert.ok((await body(again)).query);
       });
+      it('reads source-scoped list entries with labels and tracks label changes', async () => {
+        assert.equal((await routes.lists.POST(request('POST', '/api/v1/lists', {
+          cookie, body: { name: 'named_exits', type: 'bytes' },
+        }), undefined)).status, 201);
+        for (const [value, label, source] of [
+          [EXIT_A, 'Global exit', null],
+          [EXIT_A, 'Jura override', 'jura'],
+          [EXIT_B, 'Jura exit', 'jura'],
+          [CLIENT, 'Dev exit', 'dev'],
+        ]) {
+          const added = await routes.listValues.POST(request('POST', '/api/v1/lists/named_exits/values', {
+            cookie, body: { value, label, source },
+          }), context({ name: 'named_exits' }));
+          assert.equal(added.status, 201);
+        }
+        for (const [slug, sql] of [
+          ['named-exits', 'SELECT value, label FROM unnest({{list:named_exits:values}}, {{list:named_exits:names}}) AS entries(value, label) ORDER BY value, label'],
+          ['exit-values', 'SELECT unnest({{list:named_exits}}) AS value'],
+        ]) {
+          assert.equal((await create({ slug, title: slug, sql, visibility: 'public' })).status, 201);
+          assert.equal((await run(slug, 'jura')).status, 200);
+        }
+        const before = await body(await results('named-exits', '?network=jura'));
+        assert.deepEqual(before.rows, [[EXIT_A, 'Global exit'], [EXIT_A, 'Jura override'], [EXIT_B, 'Jura exit']]);
+        const db = await lib.app.appDb();
+        await db.query(`UPDATE list_values v SET label = 'Renamed exit' FROM lists l
+          WHERE v.list_id = l.id AND l.name = 'named_exits' AND v.value = $1`, [EXIT_B]);
+        const changed = await body(await results('named-exits', '?network=jura'));
+        assert.equal((changed.networks as Array<{ stale: boolean }>)[0].stale, true);
+        const valuesOnly = await body(await results('exit-values', '?network=jura'));
+        assert.equal((valuesOnly.networks as Array<{ stale: boolean }>)[0].stale, false);
+        assert.equal((await run('named-exits', 'jura')).status, 200);
+        const refreshed = await body(await results('named-exits', '?network=jura'));
+        assert.deepEqual(refreshed.rows, [[EXIT_A, 'Global exit'], [EXIT_A, 'Jura override'], [EXIT_B, 'Renamed exit']]);
+        assert.equal((await run('named-exits', 'dev')).status, 200);
+        const dev = await body(await results('named-exits', '?network=dev'));
+        assert.deepEqual(dev.rows, [[EXIT_A, 'Global exit'], [CLIENT, 'Dev exit']]);
+        for (const [name, type, value] of [['named_text', 'text', 'Item'], ['named_number', 'number', '12.5']]) {
+          assert.equal((await routes.lists.POST(request('POST', '/api/v1/lists', {
+            cookie, body: { name, type },
+          }), undefined)).status, 201);
+          const sql = `SELECT value, name FROM unnest({{list:${name}:values}}, {{list:${name}:names}}) AS e(value, name)`;
+          const empty = await body(await adhoc(sql, { network: 'jura' }));
+          assert.deepEqual(empty.rows, []);
+          assert.equal((await routes.listValues.POST(request('POST', `/api/v1/lists/${name}/values`, {
+            cookie, body: { value, label: 'Example' },
+          }), context({ name }))).status, 201);
+          const populated = await body(await adhoc(sql, { network: 'jura' }));
+          assert.deepEqual(populated.rows, [[value, 'Example']]);
+        }
+      });
+
     });
 
     describe('session end', () => {

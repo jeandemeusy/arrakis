@@ -78,36 +78,43 @@ export function listResolver(): ResolveList {
  * Each named list's values for one data source, as bind values: Buffers for
  * bytes, strings otherwise. Sorted, so equal sets hash equally.
  */
-export async function listValues(
+export async function listInputs(
   names: string[],
   source: string,
-): Promise<Record<string, BindValue>> {
-  if (!names.length) return {};
+): Promise<{ values: Record<string, BindValue>; labels: Record<string, BindValue> }> {
+  if (!names.length) return { values: {}, labels: {} };
   const db = await appDb();
   const { rows } = await db.query<{
     name: string;
     type: ListType;
     value: string | null;
+    label: string | null;
   }>(
-    `SELECT l.name, l.type, v.value
+    `SELECT l.name, l.type, v.value, v.label
      FROM lists l
      LEFT JOIN list_values v
        ON v.list_id = l.id AND v.removed_at IS NULL
       AND (v.source IS NULL OR v.source = $2)
      WHERE l.name = ANY($1::text[])
-     ORDER BY l.name, v.value`,
+     ORDER BY l.name, v.value, v.source NULLS FIRST, v.id`,
     [names, source],
   );
   const out: Record<string, BindValue> = {};
-  for (const name of names) out[name] = [];
+  const labels: Record<string, BindValue> = {};
+  for (const name of names) { out[name] = []; labels[name] = []; }
   for (const row of rows) {
     if (row.value === null) continue;
     const values = out[row.name] as unknown[];
     values.push(
       row.type === 'bytes' ? Buffer.from(row.value.slice(2), 'hex') : row.value,
     );
+    (labels[row.name] as string[]).push(row.label ?? '');
   }
-  return out;
+  return { values: out, labels };
+}
+
+export async function listValues(names: string[], source: string): Promise<Record<string, BindValue>> {
+  return (await listInputs(names, source)).values;
 }
 
 export async function listLists(): Promise<List[]> {

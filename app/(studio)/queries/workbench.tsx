@@ -684,12 +684,10 @@ export function Workbench({
         detail: 'text: the data source',
         insert: 'source}}',
       },
-      ...lists.map((list) => ({
-        label: `list:${list.name}`,
-        kind: 'placeholder' as const,
-        detail: `${list.type}[]`,
-        insert: `list:${list.name}}}`,
-      })),
+      ...lists.flatMap((list) => [
+        { label: `list:${list.name}:values`, kind: 'placeholder' as const, detail: `${list.type}[]`, insert: `list:${list.name}:values}}` },
+        { label: `list:${list.name}:names`, kind: 'placeholder' as const, detail: 'text[]: list labels', insert: `list:${list.name}:names}}` },
+      ]),
       ...draft.parameters.map((parameter) => ({
         label: parameter.name,
         kind: 'placeholder' as const,

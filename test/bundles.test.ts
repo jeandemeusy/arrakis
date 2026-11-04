@@ -17,7 +17,11 @@ import {
   createTestDatabases,
   request,
 } from './support';
-import { fragmentsNamed } from '../lib/bundles/format';
+import { fragmentsNamed, listsNamed } from '../lib/bundles/format';
+
+it('recognizes lists read as labeled entries for bundle dependencies', () => {
+  assert.deepEqual(listsNamed("SELECT {{list:exits:names}} -- {{list:ignored:names}}\n WHERE 'x' = ANY({{list:regions:values}})"), ['exits', 'regions']);
+});
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PASSWORD = 'correct horse battery staple';
@@ -294,6 +298,40 @@ describe(
       assert.equal(exits[2].vpn_server, null);
       // The registered relays-paying exits make downstream traffic with no list.
       assert.ok(exits.slice(0, 2).every((row) => Number(row.redemptions) > 0));
+    });
+
+    it('uses configured exit names and falls back to registry names', async () => {
+      const app = await lib.app.appDb();
+      const pad = (id: number) => `0x${id.toString(16).padStart(40, '0')}`;
+      await app.query(`INSERT INTO list_values (list_id, source, value, label)
+        SELECT id, source, value, label FROM lists
+        CROSS JOIN (VALUES
+          (NULL::text, $1::text, 'Manual override'),
+          ('jura'::text, $2::text, ''),
+          ('jura'::text, $3::text, 'Manual exit')
+        ) AS entries(source, value, label)
+        WHERE name = 'exits'`, [pad(4), pad(5), pad(8)]);
+      const response = await routes.run.POST(
+        request('POST', '/api/v1/queries/exit-nodes/run', { cookie, body: { network: 'jura' } }),
+        context({ slug: 'exit-nodes' }),
+      );
+      const answer = await body<{ runs: Array<{ status: string; error?: string }> }>(response);
+      assert.equal(answer.runs[0].status, 'succeeded', JSON.stringify(answer));
+      const { rows: result } = await app.query<{ table_name: string }>(
+        `SELECT r.table_name FROM query_results r
+         JOIN query_versions v ON v.id = r.query_version_id
+         JOIN queries q ON q.id = v.query_id
+         WHERE q.slug = 'exit-nodes' AND r.network = 'jura'`,
+      );
+      const { rows } = await app.query<{ exit: string; name: string | null; found_in: string }>(
+        `SELECT exit, name, found_in FROM results.${result[0].table_name} ORDER BY exit`,
+      );
+      assert.deepEqual(rows.map((row) => [row.exit, row.name, row.found_in]), [
+        [pad(4), 'Manual override', 'registry and list'],
+        [pad(5), 'GVPN-KR-5', 'registry and list'],
+        [pad(7), null, 'registry'],
+        [pad(8), 'Manual exit', 'list'],
+      ]);
     });
 
     it('exports a dashboard with what it links to, fragments first', async () => {

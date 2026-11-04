@@ -108,6 +108,22 @@ describe('compile', () => {
       );
   });
 
+  it('exposes typed list entries and reuses the value array', async () => {
+    const compiled = await compile(
+      'SELECT e.value, e.label FROM unnest({{list:exits:values}}, {{list:exits:names}}) AS e(value, label) WHERE e.value = ANY({{list:exits}})',
+      [], none, async () => 'bytes',
+    );
+    assert.deepEqual(compiled.lists, ['exits']);
+    assert.deepEqual(compiled.labeledLists, ['exits']);
+    assert.match(compiled.text, /unnest\(\$1::bytea\[\], \$2::text\[\]\)/);
+    assert.match(compiled.text, /ANY\(\$1::bytea\[\]\)/);
+    const values = [Buffer.from('12', 'hex')];
+    assert.deepEqual(bind(compiled, {}, {
+      network: 'jura', lists: { exits: values }, listLabels: { exits: ['Exit'] },
+    }).values, [values, ['Exit']]);
+    await assert.rejects(compile('SELECT {{list:missing:names}}', [], none, async () => null), /no list "missing"/);
+  });
+
   it('rejects a second statement, positional parameters and unknown names', async () => {
     await assert.rejects(
       compile('SELECT 1; SELECT 2', [], none),
