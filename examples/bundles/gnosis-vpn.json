@@ -4,7 +4,7 @@
   "name": "gnosis-vpn",
   "title": "Gnosis VPN",
   "description": "Who uses Gnosis VPN, how much traffic it carries and where, read from the HOPR network’s on-chain ticket redemptions.",
-  "exportedAt": "2026-11-04T06:44:50.077Z",
+  "exportedAt": "2026-11-04T07:59:18.763Z",
   "lists": [
     {
       "name": "exits",
@@ -2134,7 +2134,7 @@
           "options": {
             "note": "Distinct clients active in each bin of blocks — redeemed for, or deployed.",
             "layout": {
-              "row": 3,
+              "row": 4,
               "rows": 4,
               "unit": "cells",
               "column": 2
@@ -2149,7 +2149,7 @@
           "options": {
             "note": "About forty bins over the window. Upstream is paid for by the client and attributable to it; downstream is paid for by the exit, whose channels name no client.",
             "layout": {
-              "row": 3,
+              "row": 4,
               "rows": 4,
               "unit": "cells",
               "column": 7
@@ -2163,7 +2163,7 @@
           "height": 80,
           "options": {
             "layout": {
-              "row": 3,
+              "row": 4,
               "rows": 2,
               "unit": "cells",
               "column": 0
@@ -2177,7 +2177,7 @@
           "height": 80,
           "options": {
             "layout": {
-              "row": 5,
+              "row": 6,
               "rows": 2,
               "unit": "cells",
               "column": 0
@@ -2192,7 +2192,7 @@
           "options": {
             "note": "Who showed up, and when each client first appeared, block by block.",
             "layout": {
-              "row": 7,
+              "row": 8,
               "unit": "cells",
               "column": 0
             }
@@ -2206,7 +2206,7 @@
           "options": {
             "note": "Client deployments in each bin of blocks.",
             "layout": {
-              "row": 8,
+              "row": 9,
               "rows": 4,
               "unit": "cells",
               "column": 0
@@ -2221,7 +2221,7 @@
           "options": {
             "note": "Estimated client traffic carried by each relay.",
             "layout": {
-              "row": 12,
+              "row": 13,
               "unit": "cells",
               "column": 0
             }
@@ -2235,7 +2235,7 @@
           "options": {
             "note": "Upstream volume.",
             "layout": {
-              "row": 13,
+              "row": 14,
               "rows": 4,
               "unit": "cells",
               "column": 0
@@ -2250,7 +2250,7 @@
           "options": {
             "note": "Split by the relay each client (upstream) or exit (downstream) paid. Downstream names no client, so it is a relay breakdown, never a client one.",
             "layout": {
-              "row": 13,
+              "row": 14,
               "rows": 4,
               "unit": "cells",
               "column": 3
@@ -2265,7 +2265,7 @@
           "options": {
             "note": "The oracle values that convert redemptions into traffic, as they stand now. Each network sets its own, so pick one network to see them.",
             "layout": {
-              "row": 17,
+              "row": 18,
               "unit": "cells",
               "column": 0
             }
@@ -2279,7 +2279,7 @@
           "options": {
             "note": "Current network minimum",
             "layout": {
-              "row": 18,
+              "row": 20,
               "rows": 2,
               "unit": "cells",
               "column": 0
@@ -2295,7 +2295,7 @@
           "options": {
             "note": "Cost of relaying one packet, one hop",
             "layout": {
-              "row": 18,
+              "row": 20,
               "rows": 2,
               "unit": "cells",
               "column": 4
@@ -2311,7 +2311,7 @@
           "options": {
             "note": "Price ÷ probability, for one remaining hop",
             "layout": {
-              "row": 18,
+              "row": 20,
               "rows": 2,
               "unit": "cells",
               "column": 8
@@ -2327,7 +2327,7 @@
           "options": {
             "note": "Exits are detected from the service registry: every node registered there as gvpn:exit, until it deregisters. Its metadata names it and says where it is reached. Add an address to the list “exits” (Settings → Lists) for a network without a registry. Volume is what each exit paid relays for the return path, all time.",
             "layout": {
-              "row": 20,
+              "row": 22,
               "unit": "cells",
               "column": 0
             }
@@ -2337,12 +2337,12 @@
           "kind": "visualization",
           "chart": "gnosis-vpn/exits-registered",
           "width": 2,
-          "height": 196,
+          "height": 346,
           "options": {
             "note": "Detected automatically",
             "layout": {
-              "row": 21,
-              "rows": 3,
+              "row": 24,
+              "rows": 5,
               "unit": "cells",
               "column": 0
             }
@@ -2352,11 +2352,11 @@
           "kind": "visualization",
           "chart": "gnosis-vpn/exits",
           "width": 10,
-          "height": 196,
+          "height": 346,
           "options": {
             "layout": {
-              "row": 21,
-              "rows": 3,
+              "row": 24,
+              "rows": 5,
               "unit": "cells",
               "column": 2
             }
@@ -2370,7 +2370,7 @@
           "options": {
             "note": "Who used the network and when each client first appeared. Volume is upstream only — the traffic the client itself paid for. Pick a client to open its record.",
             "layout": {
-              "row": 24,
+              "row": 29,
               "unit": "cells",
               "column": 0
             }
@@ -2388,7 +2388,7 @@
               "dashboard": "gnosis-vpn-client"
             },
             "layout": {
-              "row": 25,
+              "row": 30,
               "rows": 5,
               "unit": "cells",
               "column": 0
@@ -2407,7 +2407,7 @@
               "dashboard": "gnosis-vpn-client"
             },
             "layout": {
-              "row": 25,
+              "row": 30,
               "rows": 5,
               "unit": "cells",
               "column": 6
@@ -2422,7 +2422,7 @@
           "options": {
             "note": "The latest client redemptions, newest first. Upstream only — a downstream redemption is paid by an exit and names no client.",
             "layout": {
-              "row": 30,
+              "row": 35,
               "unit": "cells",
               "column": 0
             }
@@ -2440,7 +2440,7 @@
               "dashboard": "gnosis-vpn-client"
             },
             "layout": {
-              "row": 31,
+              "row": 37,
               "rows": 5,
               "unit": "cells",
               "column": 0
@@ -2454,7 +2454,7 @@
           "height": 80,
           "options": {
             "layout": {
-              "row": 36,
+              "row": 42,
               "unit": "cells",
               "column": 0
             }
@@ -2467,7 +2467,7 @@
           "height": 80,
           "options": {
             "layout": {
-              "row": 37,
+              "row": 43,
               "rows": 3,
               "unit": "cells",
               "column": 0
@@ -2566,11 +2566,11 @@
           "kind": "visualization",
           "chart": "gnosis-vpn-client/volume",
           "width": 4,
-          "height": 80,
+          "height": 155,
           "options": {
             "layout": {
               "row": 3,
-              "rows": 1,
+              "rows": 2,
               "unit": "cells",
               "column": 0
             },
@@ -2581,11 +2581,11 @@
           "kind": "visualization",
           "chart": "gnosis-vpn-client/redemptions",
           "width": 4,
-          "height": 80,
+          "height": 155,
           "options": {
             "layout": {
-              "row": 4,
-              "rows": 1,
+              "row": 5,
+              "rows": 2,
               "unit": "cells",
               "column": 0
             },
@@ -2596,12 +2596,12 @@
           "kind": "visualization",
           "chart": "gnosis-vpn-client/daily",
           "width": 8,
-          "height": 80,
+          "height": 230,
           "options": {
             "note": "Upstream volume over the last 2,000,000 blocks.",
             "layout": {
               "row": 3,
-              "rows": 2,
+              "rows": 4,
               "unit": "cells",
               "column": 4
             },
@@ -2615,7 +2615,7 @@
           "height": 80,
           "options": {
             "layout": {
-              "row": 5,
+              "row": 7,
               "rows": 3,
               "unit": "cells",
               "column": 0
