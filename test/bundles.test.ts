@@ -18,13 +18,14 @@ import {
   request,
 } from './support';
 import { fragmentsNamed, listsNamed } from '../lib/bundles/format';
+import { mockGoogle } from './google';
 
 it('recognizes lists read as labeled entries for bundle dependencies', () => {
   assert.deepEqual(listsNamed("SELECT {{list:exits:names}} -- {{list:ignored:names}}\n WHERE 'x' = ANY({{list:regions:values}})"), ['exits', 'regions']);
 });
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const PASSWORD = 'correct horse battery staple';
+
 
 type Json = Record<string, unknown>;
 type Report = { created: string[]; updated: string[]; unchanged: string[] };
@@ -48,7 +49,6 @@ describe(
     let cookie = '';
     let example: Json;
     let routes: {
-      login: typeof import('../app/api/v1/auth/login/route');
       bundles: typeof import('../app/api/v1/bundles/route');
       bundle: typeof import('../app/api/v1/bundles/[name]/route');
       preview: typeof import('../app/api/v1/bundles/preview/route');
@@ -73,20 +73,17 @@ describe(
 
     before(async () => {
       const databases = await createTestDatabases('arrakis_b');
-      const password = await import('../lib/auth/password');
+      const google = mockGoogle();
       process.env.APP_DATABASE_URL = databases.appUrl;
       process.env.NETWORKS = JSON.stringify([
         { id: 'jura', label: 'Jura', databaseUrl: databases.readOnly.jura },
       ]);
-      process.env.ARRAKIS_EDITOR_PASSWORD_HASH =
-        await password.hashPassword(PASSWORD);
       lib = {
         app: await import('../lib/db/app'),
         runner: await import('../lib/query/runner'),
         fetch: await import('../lib/bundles/fetch'),
       };
       routes = {
-        login: await import('../app/api/v1/auth/login/route'),
         bundles: await import('../app/api/v1/bundles/route'),
         bundle: await import('../app/api/v1/bundles/[name]/route'),
         preview: await import('../app/api/v1/bundles/preview/route'),
@@ -94,14 +91,7 @@ describe(
         queries: await import('../app/api/v1/queries/route'),
         run: await import('../app/api/v1/queries/[slug]/run/route'),
       };
-      cookie = cookieFrom(
-        await routes.login.POST(
-          request('POST', '/api/v1/auth/login', {
-            body: { password: PASSWORD },
-          }),
-          undefined,
-        ),
-      );
+      cookie = cookieFrom(await google.signIn());
       example = JSON.parse(
         await readFile(
           path.join(root, 'examples', 'bundles', 'gnosis-vpn.json'),

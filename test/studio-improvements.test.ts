@@ -7,6 +7,7 @@ import {
   createTestDatabases,
   request,
 } from './support';
+import { mockGoogle } from './google';
 
 describe(
   'dashboard views and query reliability',
@@ -26,13 +27,11 @@ describe(
     };
     before(async () => {
       const databases = await createTestDatabases('arrakis_improve');
+      const google = mockGoogle();
       process.env.APP_DATABASE_URL = databases.appUrl;
       process.env.NETWORKS = JSON.stringify([
         { id: 'jura', label: 'Jura', databaseUrl: databases.readOnly.jura },
       ]);
-      process.env.ARRAKIS_EDITOR_PASSWORD_HASH = await (
-        await import('../lib/auth/password')
-      ).hashPassword('test password');
       app = await import('../lib/db/app');
       runner = await import('../lib/query/runner');
       routes = {
@@ -44,15 +43,7 @@ describe(
         run: await import('../app/api/v1/queries/[slug]/run/route'),
         health: await import('../app/api/v1/runs/health/route'),
       };
-      const login = await (
-        await import('../app/api/v1/auth/login/route')
-      ).POST(
-        request('POST', '/api/v1/auth/login', {
-          body: { password: 'test password' },
-        }),
-        undefined,
-      );
-      cookie = cookieFrom(login);
+      cookie = cookieFrom(await google.signIn());
     });
     after(async () => {
       await runner?.closeQueryPools();

@@ -17,9 +17,10 @@ import {
   request,
   type TestDatabases,
 } from './support';
+import { mockGoogle } from './google';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const PASSWORD = 'correct horse battery staple';
+
 const EXIT_A = `0x${'04'.padStart(40, '0')}`;
 const EXIT_B = `0x${'05'.padStart(40, '0')}`;
 const CLIENT = `0x${'06'.padStart(40, '0')}`;
@@ -38,6 +39,7 @@ describe(
   () => {
     let databases: TestDatabases;
     let cookie = '';
+    let google: ReturnType<typeof mockGoogle>;
     // Imported after the environment is in place.
     let routes: {
       login: typeof import('../app/api/v1/auth/login/route');
@@ -60,7 +62,6 @@ describe(
       app: typeof import('../lib/db/app');
       runner: typeof import('../lib/query/runner');
       scheduler: typeof import('../lib/query/scheduler');
-      password: typeof import('../lib/auth/password');
     };
 
     const networks = (withUnsafe = false) =>
@@ -80,16 +81,14 @@ describe(
 
     before(async () => {
       databases = await createTestDatabases();
+      google = mockGoogle();
       lib = {
         app: await import('../lib/db/app'),
         runner: await import('../lib/query/runner'),
         scheduler: await import('../lib/query/scheduler'),
-        password: await import('../lib/auth/password'),
       };
       process.env.APP_DATABASE_URL = databases.appUrl;
       process.env.NETWORKS = networks();
-      process.env.ARRAKIS_EDITOR_PASSWORD_HASH =
-        await lib.password.hashPassword(PASSWORD);
       delete process.env.EXITS;
       routes = {
         login: await import('../app/api/v1/auth/login/route'),
@@ -125,22 +124,9 @@ describe(
         assert.deepEqual(await body(response), { user: null });
       });
 
-      it('refuses a wrong password', async () => {
-        const response = await routes.login.POST(
-          request('POST', '/api/v1/auth/login', { body: { password: 'nope' } }),
-          undefined,
-        );
-        assert.equal(response.status, 401);
-      });
-
-      it('opens a session with the right password', async () => {
-        const response = await routes.login.POST(
-          request('POST', '/api/v1/auth/login', {
-            body: { password: PASSWORD },
-          }),
-          undefined,
-        );
-        assert.equal(response.status, 200);
+      it('opens an individual editor session through Google Workspace', async () => {
+        const response = await google.signIn();
+        assert.equal(response.status, 303);
         const setCookie = response.headers.get('set-cookie') ?? '';
         assert.match(setCookie, /HttpOnly/);
         assert.match(setCookie, /SameSite=Strict/);
@@ -150,8 +136,8 @@ describe(
           undefined,
         );
         assert.deepEqual((await body(session)).user, {
-          username: 'editor',
-          role: 'admin',
+          username: 'jean@hoprnet.org',
+          role: 'editor',
         });
       });
 
@@ -174,26 +160,6 @@ describe(
         assert.equal(crossSite.status, 403);
       });
 
-      it('throttles repeated failures from one address', async () => {
-        for (let attempt = 0; attempt < 10; attempt += 1) {
-          await routes.login.POST(
-            request('POST', '/api/v1/auth/login', {
-              body: { password: 'x' },
-              ip: '198.51.100.9',
-            }),
-            undefined,
-          );
-        }
-        const blocked = await routes.login.POST(
-          request('POST', '/api/v1/auth/login', {
-            body: { password: PASSWORD },
-            ip: '198.51.100.9',
-          }),
-          undefined,
-        );
-        assert.equal(blocked.status, 429);
-        assert.ok(blocked.headers.get('retry-after'));
-      });
     });
 
     describe('ad-hoc runs', () => {
@@ -305,7 +271,7 @@ describe(
         }
         assert.equal(listed.length, 1);
         assert.equal(listed[0].kind, 'preview');
-        assert.equal(listed[0].startedBy, 'editor');
+        assert.equal(listed[0].startedBy, 'jean@hoprnet.org');
 
         const started = Date.now();
         const cancel = await routes.cancel.POST(
@@ -983,36 +949,20 @@ describe(
         assert.equal((await body(session)).user, null);
       });
 
-      it('disables the env account, and ends its sessions, when its hash is unset', async () => {
-        const login = await routes.login.POST(
-          request('POST', '/api/v1/auth/login', {
-            body: { password: PASSWORD },
-            ip: '192.0.2.1',
-          }),
-          undefined,
-        );
-        const fresh = cookieFrom(login);
-        const hash = process.env.ARRAKIS_EDITOR_PASSWORD_HASH;
-        delete process.env.ARRAKIS_EDITOR_PASSWORD_HASH;
+      it('denies existing sessions when the Workspace changes or becomes unconfigured', async () => {
+        const fresh = cookieFrom(await google.signIn());
         try {
-          // What a restart does: the env account is re-synced.
-          const { syncEnvUsers } = await import('../lib/auth/session');
-          await syncEnvUsers();
-          const check = await routes.session.GET(
-            request('GET', '/api/v1/auth/session', { cookie: fresh }),
-            undefined,
-          );
-          assert.equal((await body(check)).user, null);
-          const again = await routes.login.POST(
-            request('POST', '/api/v1/auth/login', {
-              body: { password: PASSWORD },
-              ip: '192.0.2.1',
-            }),
-            undefined,
-          );
-          assert.equal(again.status, 401);
+          for (const domain of ['other.org', '', '*']) {
+            process.env.ARRAKIS_GOOGLE_WORKSPACE_DOMAIN = domain;
+            const check = await routes.session.GET(
+              request('GET', '/api/v1/auth/session', { cookie: fresh }), undefined,
+            );
+            assert.equal((await body(check)).user, null);
+            const write = await adhoc('SELECT 1');
+            assert.ok(write.status === 401 || write.status === 503);
+          }
         } finally {
-          process.env.ARRAKIS_EDITOR_PASSWORD_HASH = hash;
+          process.env.ARRAKIS_GOOGLE_WORKSPACE_DOMAIN = 'hoprnet.org';
         }
       });
     });

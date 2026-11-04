@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo 'Preparing the Arrakis Nix development environment...'
+nix develop --accept-flake-config --command bash -c '
+  node --version
+  npm --version
+  test -f node_modules/next/package.json
+  test -f node_modules/openid-client/package.json
+'
