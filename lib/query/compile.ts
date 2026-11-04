@@ -9,6 +9,7 @@ import {
   type SystemParameter,
 } from './params';
 import { isRelation, segments } from './scan';
+import { expandEventTopics } from './event-topic';
 
 export { isRelation };
 
@@ -25,6 +26,7 @@ export { isRelation };
  *                          list's type (`{{exits}}` is `{{list:exits}}`)
  *   {{list:name:values}}   the same values array (explicit form)
  *   {{list:name:names}}    labels aligned with the values array
+ *   event_topic('Event(type,...)')  Ethereum event signature as 32 bytes
  *   {{> slug}}             another saved query of kind `fragment`, inlined as a
  *                          parenthesized subquery: `FROM {{> clients}} AS c`
  *                          or `WITH c AS {{> clients}}`
@@ -274,6 +276,7 @@ export async function compile(
     stack: string[],
     args: Map<string, string> | null,
   ): Promise<string> => {
+    text = expandEventTopics(text);
     const { placeholders, trailing } = analyse(text, where);
     let out = '';
     let cursor = 0;

@@ -238,6 +238,14 @@ export default function GuidePage() {
                   </td>
                 </tr>
                 <tr>
+                  <td><code>{"event_topic('Transfer(address,address,uint256)')"}</code></td>
+                  <td>
+                    The Keccak-256 event topic as bytes, calculated by Arrakis
+                    before the query runs. Use a literal canonical event signature
+                    without parameter names, spaces, or <code>indexed</code>.
+                  </td>
+                </tr>
+                <tr>
                   <td>
                     <code>{'{{source}}'}</code>
                   </td>

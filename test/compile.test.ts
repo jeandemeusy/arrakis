@@ -43,6 +43,33 @@ describe('scan', () => {
 });
 
 describe('compile', () => {
+  it('compiles Ethereum event signatures into exact bytea constants', async () => {
+    const compiled = await compile(
+      "SELECT event_topic('Transfer(address,address,uint256)'), event_topic('KeyBinding(bytes32,bytes32,bytes32,address,uint256)')",
+      [], none,
+    );
+    assert.match(compiled.text, /\\xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef'::bytea/);
+    assert.match(compiled.text, /\\x11d94653de52fc143887956fe4b5e4120a850b1300ece0533dee6bd8ff91f732'::bytea/);
+    assert.equal(compiled.slots.length, 0);
+  });
+
+  it('expands event topics inside fragment arguments but not SQL literals or comments', async () => {
+    const fragments = async (slug: string) => slug === 'event-logs'
+      ? { slug, versionId: '1', sql: 'SELECT {{$topics}} AS topics', parameters: [] }
+      : null;
+    const compiled = await compile(
+      "SELECT * FROM {{> event-logs(ARRAY[event_topic('Transfer(address,address,uint256)')])}} AS e WHERE 'event_topic(''not a call'')' <> '' -- event_topic('bad')",
+      [], fragments,
+    );
+    assert.match(compiled.text, /ARRAY\['\\xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef'::bytea\]/);
+    assert.match(compiled.text, /'event_topic\(''not a call''\)'/);
+    assert.match(compiled.text, /-- event_topic\('bad'\)/);
+    assert.equal((await compile("SELECT custom . event_topic('not a signature')", [], none)).text, "SELECT custom . event_topic('not a signature')");
+    assert.equal((await compile("SELECT event_topic('Event((uint256,address)[],bytes32[2])')", [], none)).slots.length, 0);
+    for (const input of ["event_topic('Transfer(address, uint256)')", "event_topic('Transfer(address,uint)')", "event_topic('Bad(uint7)')", "event_topic('Bad(bytes33)')", "event_topic('Bad(uint256,)')", 'event_topic(column_name)']) {
+      await assert.rejects(compile(`SELECT ${input}`, [], none), /canonical event signature/);
+    }
+  });
   it('binds declared parameters with casts and reuses one slot per name', async () => {
     const parameters = parseDefinitions([
       { name: 'since', type: 'date', default: '2026-01-01' },

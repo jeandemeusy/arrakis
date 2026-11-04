@@ -103,6 +103,7 @@ export const FUNCTIONS = [
   'decode',
   'dense_rank',
   'encode',
+  'event_topic',
   'extract',
   'first_value',
   'generate_series',

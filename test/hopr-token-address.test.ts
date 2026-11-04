@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import pg from 'pg';
 import { adminUrl } from './support';
+import { compile } from '../lib/query/compile';
 
 // Exercise the bundle's actual SQL on Transfer-shaped data, including an event
 // where the same address is both sender and recipient.
@@ -53,7 +54,8 @@ test('token address history reconstructs balances and counts events', { skip: !a
       )`, [contract, index, signature, hex]);
     }
     const fragment = bundle.queries.find((entry: { slug: string }) => entry.slug === 'hopr-token-transfers');
-    const decoded = await client.query<{ amount: string }>(`SELECT amount FROM (${fragment.sql}) t ORDER BY tx_index`);
+    const compiled = await compile(fragment.sql, [], async () => null);
+    const decoded = await client.query<{ amount: string }>(`SELECT amount FROM (${compiled.text}) t ORDER BY tx_index`);
     for (let index = 0; index < amounts.length; index++) {
       const same = await client.query<{ equal: boolean }>(
         'SELECT $1::numeric * 1000000000000000000::numeric = $2::numeric AS equal',
