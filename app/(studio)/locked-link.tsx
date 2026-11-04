@@ -5,7 +5,7 @@ import { Lock } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 /**
- * A destination that exists but needs the editing password. Keeping it visible
+ * A destination that exists but needs Google Workspace sign-in. Keeping it visible
  * makes the studio discoverable; rendering a non-link prevents accidental
  * navigation while the hint works for both pointer and keyboard users.
  */

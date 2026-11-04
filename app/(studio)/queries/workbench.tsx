@@ -751,7 +751,7 @@ export function Workbench({
     return (
       <main className="studio-page">
         <p>
-          Writing queries needs the editor password.{' '}
+          Writing queries needs Google Workspace sign-in.{' '}
           <Link href="/login?next=/queries/new">Unlock editing</Link>
         </p>
       </main>

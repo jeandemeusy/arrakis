@@ -2,7 +2,7 @@ import 'server-only';
 
 import { Client } from 'pg';
 
-import { ensureEnvUsers, pruneAuthState } from '../auth/session';
+import { pruneAuthState } from '../auth/session';
 import { appDb } from '../db/app';
 import { resolveNetworks, type NetworkConfig } from '../networks';
 import { compile } from './compile';
@@ -212,7 +212,6 @@ async function tick(): Promise<void> {
     do {
       again = false;
       if (!(await holdLeadership())) return;
-      await ensureEnvUsers();
       await runDue();
       if (Date.now() - lastPrune > PRUNE_EVERY_MS) {
         lastPrune = Date.now();

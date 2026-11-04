@@ -16,9 +16,10 @@ import {
   createTestDatabases,
   request,
 } from './support';
+import { mockGoogle } from './google';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const PASSWORD = 'correct horse battery staple';
+
 const CLIENT = `0x${'06'.padStart(40, '0')}`;
 
 type Json = Record<string, unknown>;
@@ -39,7 +40,6 @@ describe(
   () => {
     let cookie = '';
     let routes: {
-      login: typeof import('../app/api/v1/auth/login/route');
       queries: typeof import('../app/api/v1/queries/route');
       run: typeof import('../app/api/v1/queries/[slug]/run/route');
       queryVisualizations: typeof import('../app/api/v1/queries/[slug]/visualizations/route');
@@ -80,20 +80,17 @@ describe(
 
     before(async () => {
       const databases = await createTestDatabases('arrakis_v');
-      const password = await import('../lib/auth/password');
+      const google = mockGoogle();
       process.env.APP_DATABASE_URL = databases.appUrl;
       process.env.NETWORKS = JSON.stringify([
         { id: 'jura', label: 'Jura', databaseUrl: databases.readOnly.jura },
         { id: 'dev', label: 'Dev', databaseUrl: databases.readOnly.dev },
       ]);
-      process.env.ARRAKIS_EDITOR_PASSWORD_HASH =
-        await password.hashPassword(PASSWORD);
       lib = {
         app: await import('../lib/db/app'),
         runner: await import('../lib/query/runner'),
       };
       routes = {
-        login: await import('../app/api/v1/auth/login/route'),
         queries: await import('../app/api/v1/queries/route'),
         run: await import('../app/api/v1/queries/[slug]/run/route'),
         queryVisualizations:
@@ -113,11 +110,7 @@ describe(
           await import('../app/api/v1/dashboards/[slug]/status/route'),
         lineage: await import('../app/api/v1/lineage/route'),
       };
-      const login = await routes.login.POST(
-        request('POST', '/api/v1/auth/login', { body: { password: PASSWORD } }),
-        undefined,
-      );
-      cookie = cookieFrom(login);
+      cookie = cookieFrom(await google.signIn());
 
       // The exits the redemption query reads: none listed.
       await (
@@ -465,7 +458,7 @@ describe(
 
       it('cannot read anything but results', async () => {
         const { status, data } = await preview({
-          sql: 'SELECT username, password_hash FROM users',
+          sql: 'SELECT username, google_subject FROM users',
         });
         assert.equal(status, 400);
         assert.match(String(data.error), /not allowed/);

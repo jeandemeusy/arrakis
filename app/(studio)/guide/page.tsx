@@ -96,8 +96,18 @@ export default function GuidePage() {
             </ol>
             <p>
               Anyone can read what is public. <strong>Unlock editing</strong> at
-              the bottom of the sidebar asks for the editor password; after that
-              you can write queries, build charts and arrange dashboards.
+              the bottom of the sidebar starts Google Workspace sign-in. All
+              members of the configured Workspace can edit the private/shared
+              studio: write queries, build charts and arrange dashboards. No
+              separate email allowlist or password is needed.
+            </p>
+            <p>
+              Sign-in lasts 12 hours from login, without automatic extension.
+              Local account disabling takes effect immediately; Google Workspace
+              offboarding can leave an existing session active for up to 12
+              hours. Changing or removing the configured Workspace denies
+              incompatible existing sessions once the configuration is applied
+              across all replicas.
             </p>
             <p>
               The switches at the foot of the sidebar change how it looks: the

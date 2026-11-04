@@ -24,7 +24,7 @@ dashboards, sessions — in a database of its own.
 - **Bundles** carry a dashboard, its charts and its queries to another Arrakis
   as one file.
 
-Everyone can read what is public; editing needs the editor password. The
+Everyone can read what is public; editing needs Google Workspace sign-in. The
 in-app **Guide** (`/guide`) explains all of it to users; this file is for
 whoever deploys and develops it.
 
@@ -33,15 +33,18 @@ whoever deploys and develops it.
 ```bash
 npm ci
 npm run dev:db -- --blokli   # a local PostgreSQL, with a made-up Blokli index to query
-npm run hash-password        # choose the editor password; prints its hash
 ```
 
-Put what `dev:db` prints, and the hash, in `.env.local`:
+Put what `dev:db` prints, and your Google OAuth client settings (see below), in
+`.env.local`:
 
 ```dotenv
 APP_DATABASE_URL=postgresql://postgres@127.0.0.1:54329/arrakis
 DATA_SOURCES='[{"id":"demo","label":"Demo","databaseUrl":"postgresql://blokli_reader@127.0.0.1:54329/blokli_demo"}]'
-ARRAKIS_EDITOR_PASSWORD_HASH=scrypt:15:8:1:…
+ARRAKIS_GOOGLE_WORKSPACE_DOMAIN=hoprnet.org
+ARRAKIS_GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
+ARRAKIS_GOOGLE_CLIENT_SECRET=your-client-secret
+ARRAKIS_PUBLIC_ORIGIN=http://localhost:3000
 ```
 
 Then `npm run dev`, open <http://localhost:3000/>, unlock editing, import
@@ -66,7 +69,10 @@ DATA_SOURCES='[
    "queryDatabaseUrl":"postgresql://reader:…@staging-replica:5432/app"}
 ]'
 APP_DATABASE_URL=postgresql://arrakis:…@app-db:5432/arrakis
-ARRAKIS_EDITOR_PASSWORD_HASH=scrypt:15:8:1:…
+ARRAKIS_GOOGLE_WORKSPACE_DOMAIN=hoprnet.org
+ARRAKIS_GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
+ARRAKIS_GOOGLE_CLIENT_SECRET=your-client-secret
+ARRAKIS_PUBLIC_ORIGIN=https://arrakis.example.com
 ```
 
 - `id` is lowercase letters, digits and dashes, unique; `label` is what the
@@ -83,17 +89,38 @@ ARRAKIS_EDITOR_PASSWORD_HASH=scrypt:15:8:1:…
 The app migrates it itself on start (`db/migrations`). Without it, there is
 nothing to save queries in and the studio says so.
 
-Editing is unlocked with one password: `npm run hash-password` prints the hash
-to put in `ARRAKIS_EDITOR_PASSWORD_HASH`; the password itself is never stored.
-Changing the variable and restarting rotates it; unsetting it disables editing
-and ends every session. Underneath it is one `editor` account in a `users`
-table — sessions, authorship and rate limiting all key on a user — so more
-editors are more rows, not a redesign.
+### Google Workspace sign-in
 
-Sessions are `HttpOnly`, `SameSite=Strict` cookies (`__Host-` and `Secure` in
-production) backed by the database, so every replica honours them. Ten failed
-logins from one address, or two hundred from everywhere, in 15 minutes locks
-logins for 15 minutes. State-changing requests from another origin are refused;
+Create a Google OAuth client of type **Web application**. Register the exact
+authorized redirect URI `<ARRAKIS_PUBLIC_ORIGIN>/api/v1/auth/callback` (for
+example, `https://arrakis.example.com/api/v1/auth/callback`, or
+`http://localhost:3000/api/v1/auth/callback` for local development).
+`ARRAKIS_PUBLIC_ORIGIN` must be the canonical HTTPS origin, without a path;
+`http://localhost` (with an optional port) is allowed only outside production.
+Keep the client ID, client secret and other configuration server-side, never
+in `NEXT_PUBLIC_*` variables. The only scopes are `openid email`; no Admin SDK
+or Google groups integration is needed.
+
+Every user belonging to `ARRAKIS_GOOGLE_WORKSPACE_DOMAIN` (normally
+`hoprnet.org`) can sign in and edit the private/shared studio. Membership is
+verified using Google's signed `hd` token claim, not an email suffix. There is
+no email allowlist. Public reading remains anonymous. The editor/admin
+distinction is not a granular permission system: signed-in Workspace users
+share editing access. Missing or invalid Google settings disable sign-in;
+there is no password fallback.
+
+Sessions are database-backed, `HttpOnly` cookies (`__Host-` and `Secure` in
+production), shared across replicas. They expire 12 hours after sign-in, with
+no sliding refresh. Disabling a user locally takes effect immediately. Google
+Workspace offboarding can leave an existing Arrakis session usable for at
+most 12 hours; disable the local user as well when immediate removal is needed.
+Changing or removing `ARRAKIS_GOOGLE_WORKSPACE_DOMAIN` denies incompatible
+existing sessions once the configuration is applied across all replicas.
+The migration disables legacy password users and revokes their old sessions,
+while preserving those user records for historical attribution. Remove the
+obsolete `ARRAKIS_EDITOR_PASSWORD_HASH` from deployment configuration.
+
+State-changing requests from another origin are refused;
 set `ARRAKIS_ALLOWED_ORIGINS` if the studio is served from a second hostname.
 Every response carries a Content Security Policy (scripts, styles, images and
 requests from the app's own origin only; no framing), `nosniff`, a strict
@@ -420,7 +447,8 @@ session.
 
 | Route | |
 |---|---|
-| `POST /api/v1/auth/login` `{password}` · `POST /api/v1/auth/logout` · `GET /api/v1/auth/session` | Sign in and out. |
+| `GET /api/v1/auth/login?next=/queries` · `GET /api/v1/auth/callback` | Full-page Google sign-in and callback; `next` must be a same-origin local path. |
+| `POST /api/v1/auth/logout` · `GET /api/v1/auth/session` | Sign out and read the current session. |
 | `GET /api/v1/networks` | Data source ids and labels. |
 | `GET·POST /api/v1/lists` · `PATCH·DELETE /api/v1/lists/:name` · `POST /api/v1/lists/:name/values` · `DELETE …/values/:id` | Lists and their values. Editors only. |
 | `GET /api/v1/schema?network=` | Tables and columns the source's role can read. |
