@@ -96,7 +96,7 @@ export function ListSettings() {
             the list&apos;s type, holding what is kept for the data source the
             run reads and what is kept for all of them. Changing a list reruns
             the scheduled queries that read it.
-            Use <code>{'{{list:name:names}}'}</code> for the corresponding labels.
+            Use <code>{'{{list:name:names}}'}</code> for the corresponding names.
           </p>
         </div>
         {user && (
@@ -255,7 +255,7 @@ function ListCard({
       <header>
         <div>
           <h2>
-            <code>{`{{list:${list.name}:values}}`}</code>
+            <code>{`{{list:${list.name}}}`}</code>
           </h2>
           <p className="studio-muted">
             {TYPE_HINT[list.type]}
@@ -295,7 +295,7 @@ function ListCard({
         <thead>
           <tr>
             <th scope="col">Value</th>
-            <th scope="col">Label</th>
+            <th scope="col">Name</th>
             {sources.length > 1 && <th scope="col">Data source</th>}
             <th scope="col">Added</th>
             <th scope="col">
@@ -357,10 +357,10 @@ function ListCard({
         />
         <input
           className="studio-input"
-          placeholder="Label (optional)"
+          placeholder="Name (optional)"
           value={label}
           onChange={(event) => setLabel(event.target.value)}
-          aria-label="Label"
+          aria-label="Name"
         />
         {sources.length > 1 && (
           <select
