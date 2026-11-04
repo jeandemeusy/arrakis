@@ -4,7 +4,7 @@
   "name": "gnosis-vpn",
   "title": "Gnosis VPN",
   "description": "Who uses Gnosis VPN, how much traffic it carries and where, read from the HOPR network’s on-chain ticket redemptions.",
-  "exportedAt": "2026-11-03T21:22:40.125Z",
+  "exportedAt": "2026-11-04T06:44:50.077Z",
   "lists": [
     {
       "name": "exits",
@@ -242,7 +242,7 @@
       "title": "Indexed contracts",
       "description": "The contracts this index subscribes to, by role.",
       "kind": "query",
-      "sql": "-- The contracts this index subscribes to, named by the events they emit.\n--\n-- Blokli records one row per (contract, event topic) it watches, so the\n-- distinct addresses are the contracts indexed and the topics — 32-byte event\n-- signature hashes — say what each one is.\nWITH role (topic, name) AS (\n  VALUES\n    ('ed22f34d154d253a7f6fd477439be59080a1554aa0d0642686d64223ab544c8a', 'Channels'),\n    ('004c0177ad15bb302b4419e9ac96065d6f436e0f61972f97bbe272834c40f934', 'Channels'),\n    ('197bba684a6afb7ba24f1d265605414b1d0051a6e295d6ff7b6e78e870d7a7f0', 'Channels'),\n    ('c4df5ba16814838ab2618829d68f8623bb897302f24dbdba2279dbe45adb3d14', 'Announcements'),\n    ('11d94653de52fc143887956fe4b5e4120a850b1300ece0533dee6bd8ff91f732', 'Announcements'),\n    ('a4de30a528becadf82649d1395c0e30dd18ae35b5a96ce71e9295bb14bc9f3bc', 'Announcements'),\n    ('776da40cbf2c223552661bd48502ceb72409b3362bb0c66d8989bd7e20e4497d', 'Node safe registry'),\n    ('1eb3e9b31552ebe06015df6569e31abbec0e73a88c3ccdd9fead65c4378b4e50', 'Node safe registry'),\n    ('2c906e9f9056ce9dab322be95fe710c2ecfa369bf6bf530bc81ced25caee90e1', 'Service registry'),\n    ('113517b01f8948e66b44bc59b45e47477fb89b357e7d1939b0d211dd15b698fe', 'Service registry'),\n    ('d290c349227ff04b271178af5d66f5375b072d8acfecd2ffcc80ec7ea77c69f5', 'Service registry'),\n    ('c156047b6a581b0578bc0cf242ee21ab84be919cf764ffd68ce50ded302323a7', 'Service registry'),\n    ('38a84f1ca3cac973fcc30eeaccfd5a063993a9bd564530c4790ef60291c6b161', 'Service registry'),\n    ('d4c5e06b1ae097ba02372652a7adaa6e4a8e00be527497a3ad0ebc3f761ef3fb', 'Ticket price oracle'),\n    ('02728c4a80373f4765559dc3a046edea88186424827238bb46245668315d3800', 'Winning probability oracle'),\n    ('06b541ddaa720db2b10a4d0cdac39b8d360425fc073085fac19bc82614677987', 'wxHOPR token'),\n    ('f4caeb2d6ca8932a215a353d0703c326ec2d81fc68170f320eb2ab49e9df61f9', 'wxHOPR token'),\n    ('83a5c31bfee49d254d95e3946d8e8434e5975382fa8b849182db9e251aaaaa26', 'Node stake factory'),\n    ('141df868a6331af528e38c83b7aa03edc19be66e37ae67f9285bf4f8e3c6a1a8', 'Safe'),\n    ('442e715f626346e8c54381002da614f62bee8d27386535b2521ec8540898556e', 'Safe')\n),\ncontract AS (\n  SELECT address, ARRAY_AGG(DISTINCT encode(topic, 'hex') ORDER BY encode(topic, 'hex')) AS topics\n  FROM log_topic_info\n  GROUP BY address\n)\nSELECT\n  COALESCE(\n    (\n      SELECT role.name\n      FROM unnest(contract.topics) WITH ORDINALITY AS t (topic, position)\n      JOIN role ON role.topic = t.topic\n      ORDER BY t.position\n      LIMIT 1\n    ),\n    'Indexed contract'\n  ) AS role,\n  {{> hex(contract.address)}} AS contract\nFROM contract\nORDER BY role, contract",
+      "sql": "-- The contracts this index subscribes to, named by the events they emit.\n--\n-- Blokli records one row per (contract, event topic) it watches, so the\n-- distinct addresses are the contracts indexed and the topics — 32-byte event\n-- signature hashes — say what each one is.\nWITH contract AS (\n  SELECT address, ARRAY_AGG(DISTINCT encode(topic, 'hex') ORDER BY encode(topic, 'hex')) AS topics\n  FROM log_topic_info\n  GROUP BY address\n)\nSELECT\n  {{> hex(contract.address)}} AS contract\nFROM contract\nORDER BY contract",
       "parameters": [],
       "refreshSeconds": 3600,
       "rowLimit": null,
@@ -1387,29 +1387,8 @@
       "description": "",
       "type": "table",
       "config": {
-        "steps": [
-          {
-            "by": [
-              {
-                "column": "role"
-              },
-              {
-                "column": "network"
-              }
-            ],
-            "op": "sort"
-          }
-        ],
-        "builder": {
-          "sort": [
-            {
-              "column": "role"
-            },
-            {
-              "column": "network"
-            }
-          ]
-        },
+        "steps": [],
+        "builder": {},
         "options": {
           "columns": [
             "network",
@@ -2028,9 +2007,9 @@
           "type": "range",
           "label": "Window",
           "labels": {
-            "100000": "Last 100k blocks",
-            "500000": "Last 500k blocks",
-            "2000000": "Last 2M blocks",
+            "100000": "Last 100k",
+            "500000": "Last 500k",
+            "2000000": "Last 2M",
             "all": "All blocks"
           },
           "default": "500000",
