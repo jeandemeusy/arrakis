@@ -363,7 +363,8 @@
           "name": "address",
           "type": "text",
           "label": "Address (0x...)",
-          "lowercase": true
+          "lowercase": true,
+          "showLabel": false
         }
       ],
       "widgets": [

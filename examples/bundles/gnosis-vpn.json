@@ -4,7 +4,7 @@
   "name": "gnosis-vpn",
   "title": "Gnosis VPN",
   "description": "Who uses Gnosis VPN, how much traffic it carries and where, read from the HOPR network’s on-chain ticket redemptions.",
-  "exportedAt": "2026-11-04T07:59:18.763Z",
+  "exportedAt": "2026-11-04T08:07:04.269Z",
   "lists": [
     {
       "name": "exits",
@@ -2464,11 +2464,11 @@
           "kind": "visualization",
           "chart": "gnosis-vpn/contracts",
           "width": 12,
-          "height": 80,
+          "height": 230,
           "options": {
             "layout": {
               "row": 43,
-              "rows": 3,
+              "rows": 5,
               "unit": "cells",
               "column": 0
             }
