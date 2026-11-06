@@ -575,6 +575,14 @@ describe(
         'https://localhost/b.json',
         'https://[::1]/b.json',
         'https://169.254.169.254/latest',
+        // The forms a hand-written blocklist used to miss.
+        'https://[::ffff:7f00:1]/b.json',
+        'https://[::ffff:127.0.0.1]/b.json',
+        'https://[64:ff9b::a9fe:a9fe]/b.json',
+        'https://[2002:7f00:1::]/b.json',
+        'https://198.18.0.1/b.json',
+        'https://192.0.0.8/b.json',
+        'https://2130706433/b.json',
       ]) {
         await assert.rejects(
           lib.fetch.fetchBundle(url),
@@ -582,6 +590,10 @@ describe(
           url,
         );
       }
+      for (const address of ['8.8.8.8', '1.1.1.1', '2606:4700:4700::1111'])
+        assert.equal(lib.fetch.publicAddress(address), true, address);
+      for (const address of ['10.1.2.3', 'fd00::1', '::ffff:10.0.0.1', '100.64.0.1'])
+        assert.equal(lib.fetch.publicAddress(address), false, address);
     });
 
     it('archives what a newer file of a bundle dropped', async () => {
