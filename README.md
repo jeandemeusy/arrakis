@@ -154,8 +154,15 @@ path (`lib/query/runner.ts`) that enforces this three times over:
 
 - **The role.** Before a data source's first query, and every five minutes after,
   its role is checked for any way to write — superuser, CREATE on the database
-  or a schema, INSERT/UPDATE/DELETE/TRUNCATE on any table. If it finds one,
-  queries on that source are refused with a message naming the privilege.
+  or a schema, INSERT/UPDATE/DELETE/TRUNCATE on any table; membership in
+  `pg_write_all_data`, `pg_read_server_files`, `pg_write_server_files`,
+  `pg_execute_server_program`, `pg_signal_backend`; a role it can switch to
+  that could write (a `NOINHERIT` membership); `dblink`, `lo_import`/
+  `lo_export` or the server-file functions; a usable foreign server. If it
+  finds one, queries on that source are refused with a message naming it.
+  Reading more than you meant to share is not something it can see: grant
+  only the tables the dashboards need (`pg_read_all_data` is allowed, since
+  it cannot write).
 - **The transaction.** Every run is `BEGIN READ ONLY`, with a time limit.
 - **The statement.** The SQL becomes the body of `DECLARE … CURSOR FOR`, which
   only accepts a query, wrapped as a subquery, where a data-modifying CTE is a

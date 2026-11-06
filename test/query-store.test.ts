@@ -475,6 +475,42 @@ describe(
         }
       });
 
+      it('refuses a role that can switch to one that writes', async () => {
+        const { Client } = await import('pg');
+        const admin = new Client({ connectionString: adminUrl! });
+        await admin.connect();
+        const url = new URL(databases.readOnly.jura);
+        url.username = 'arrakis_t_switch';
+        url.password = 'switch';
+        try {
+          await admin.query('DROP ROLE IF EXISTS arrakis_t_switch');
+          await admin.query("CREATE ROLE arrakis_t_switch LOGIN PASSWORD 'switch'");
+          // Not inherited, so its own privileges show nothing to write with;
+          // a query could still SET ROLE to the writer.
+          await admin.query(
+            'GRANT arrakis_t_rw TO arrakis_t_switch WITH INHERIT FALSE',
+          );
+          await admin.query(
+            `GRANT CONNECT ON DATABASE ${new URL(databases.readOnly.jura).pathname.slice(1)} TO arrakis_t_switch`,
+          );
+          process.env.NETWORKS = JSON.stringify([
+            { id: 'switcher', label: 'Switcher', databaseUrl: url.toString() },
+          ]);
+          const response = await adhoc('SELECT 1', { network: 'switcher' });
+          assert.equal(response.status, 503);
+          assert.match(
+            String((await body(response)).error),
+            /can switch to role arrakis_t_rw/,
+          );
+        } finally {
+          process.env.NETWORKS = networks();
+          await lib.runner.closeQueryPools();
+          await admin.query('DROP OWNED BY arrakis_t_switch').catch(() => undefined);
+          await admin.query('DROP ROLE IF EXISTS arrakis_t_switch');
+          await admin.end();
+        }
+      });
+
       it('leaves no session state behind on the pooled connection', async () => {
         process.env.ARRAKIS_QUERY_CONCURRENCY = '1';
         try {

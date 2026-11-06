@@ -22,8 +22,10 @@ import type { BindValue } from './params';
  * Read-only is enforced three times over:
  *
  *  1. The role. Before a network's first query, and every few minutes after,
- *     the role is checked for any write privilege; a network whose role could
- *     write is refused outright.
+ *     the role is checked for any write privilege — its own, a role it can
+ *     switch to, a predefined role with server access, dblink, a foreign
+ *     server, the file functions; a network whose role could write is
+ *     refused outright.
  *  2. The transaction. Each run is `BEGIN READ ONLY`, which rejects writes even
  *     if a privilege slipped through.
  *  3. The statement. The query is the body of `DECLARE … CURSOR FOR`, which
@@ -92,9 +94,14 @@ const roleChecks = new Map<
 /**
  * Describes any way the network's role could write, or null if it cannot.
  *
- * Checks superuser and the bypass/replication attributes, CREATE on the
- * database and on any schema, and INSERT/UPDATE/DELETE/TRUNCATE on any
- * relation outside the system catalogs.
+ * Checks superuser, CREATE on the database and on any schema, and
+ * INSERT/UPDATE/DELETE/TRUNCATE on any relation outside the system catalogs;
+ * then what reaches further: membership in the predefined roles that write
+ * or touch the server (pg_write_all_data, the server-file and -program roles,
+ * pg_signal_backend), a role it can SET ROLE to that could write (NOINHERIT
+ * memberships, which the privilege functions above do not follow), dblink
+ * and the file and large-object functions, and usable foreign servers.
+ * Reading everything (pg_read_all_data) is not a problem: it cannot write.
  */
 async function writePrivileges(client: PoolClient): Promise<string | null> {
   const { rows } = await client.query<{ problem: string }>(`
@@ -118,6 +125,57 @@ async function writePrivileges(client: PoolClient): Promise<string | null> {
           OR has_table_privilege(c.oid, 'UPDATE')
           OR has_table_privilege(c.oid, 'DELETE')
           OR has_table_privilege(c.oid, 'TRUNCATE'))
+      LIMIT 3)
+    UNION ALL
+    -- Roles it belongs to with powers beyond reading: writing anywhere, the
+    -- server's files and programs, other sessions.
+    (SELECT 'belongs to ' || r.rolname
+       FROM pg_roles r
+      WHERE r.rolname IN ('pg_write_all_data', 'pg_read_server_files',
+                          'pg_write_server_files', 'pg_execute_server_program',
+                          'pg_signal_backend', 'pg_database_owner')
+        AND r.rolname <> current_user
+        AND pg_has_role(current_user, r.oid, 'MEMBER')
+      LIMIT 3)
+    UNION ALL
+    -- A role it can SET ROLE to without inheriting from it (NOINHERIT): the
+    -- checks above see only what it inherits, a query can switch.
+    (SELECT 'can switch to role ' || r.rolname || ', which '
+            || CASE WHEN r.rolsuper THEN 'is a superuser'
+                    ELSE 'can write or create' END
+       FROM pg_roles r
+      WHERE r.rolname <> current_user
+        AND r.rolname NOT LIKE 'pg\\_%'
+        AND pg_has_role(current_user, r.oid, 'MEMBER')
+        AND (r.rolsuper
+          OR has_database_privilege(r.oid, current_database(), 'CREATE')
+          OR EXISTS (
+            SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE c.relkind IN ('r', 'p', 'v', 'm', 'f')
+              AND n.nspname NOT LIKE 'pg\\_%' AND n.nspname <> 'information_schema'
+              AND (has_table_privilege(r.oid, c.oid, 'INSERT')
+                OR has_table_privilege(r.oid, c.oid, 'UPDATE')
+                OR has_table_privilege(r.oid, c.oid, 'DELETE')
+                OR has_table_privilege(r.oid, c.oid, 'TRUNCATE'))))
+      LIMIT 3)
+    UNION ALL
+    -- Functions that reach past the transaction or onto the server:
+    -- dblink opens connections of its own, which READ ONLY does not bind;
+    -- the file and large-object functions read or write the server's files.
+    (SELECT 'can call ' || p.proname
+       FROM pg_proc p
+      WHERE p.proname IN ('dblink', 'dblink_exec', 'dblink_connect',
+                          'dblink_connect_u', 'lo_import', 'lo_export',
+                          'pg_read_file', 'pg_read_binary_file', 'pg_ls_dir')
+        AND has_function_privilege(p.oid, 'EXECUTE')
+        AND NOT EXISTS (
+          SELECT 1 FROM pg_roles WHERE rolname = current_user AND rolsuper)
+      LIMIT 3)
+    UNION ALL
+    (SELECT 'can use the foreign server ' || srvname
+            || ', whose connections the read-only transaction does not bind'
+       FROM pg_foreign_server
+      WHERE has_server_privilege(oid, 'USAGE')
       LIMIT 3)
   `);
   return rows.length ? rows.map((row) => row.problem).join('; ') : null;
