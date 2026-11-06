@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from 'react';
 import { FileUp, Link2, PackageOpen, Trash2 } from 'lucide-react';
 
 import { api, ApiError } from '../../api';
+import { diffLines } from '../../diff';
 import { useNav } from '../../nav';
 import { useSession } from '../../session';
 
@@ -20,9 +21,12 @@ type PlanItem = {
   kind: 'list' | 'query' | 'fragment' | 'chart' | 'dashboard';
   name: string;
   title: string;
-  action: 'create' | 'update' | 'replace' | 'archive' | 'keep';
+  action: 'create' | 'update' | 'replace' | 'restore' | 'archive' | 'keep';
   from?: string | null;
   reason?: string;
+  sql?: { before: string | null; after: string };
+  refreshSeconds?: number | null;
+  runsSql?: boolean;
 };
 
 type RetireItem = {
@@ -40,15 +44,57 @@ type Plan = {
   description: string;
   items: PlanItem[];
   conflicts: number;
+  digest: string;
 };
 
 const ACTION_LABEL = {
   create: 'New',
   update: 'Update',
   replace: 'Replaces yours',
+  restore: 'Restores archived',
   archive: 'Archived',
   keep: 'Kept',
 } as const;
+
+/** `3600` → "every hour", for a query's refresh schedule. */
+function every(seconds: number | null | undefined): string {
+  if (!seconds) return 'not scheduled';
+  if (seconds % 86_400 === 0)
+    return seconds === 86_400 ? 'every day' : `every ${seconds / 86_400} days`;
+  if (seconds % 3_600 === 0)
+    return seconds === 3_600 ? 'every hour' : `every ${seconds / 3_600} hours`;
+  if (seconds % 60 === 0)
+    return seconds === 60 ? 'every minute' : `every ${seconds / 60} minutes`;
+  return `every ${seconds} s`;
+}
+
+/**
+ * An item's SQL, as the import would leave it: the diff against what is here
+ * when it changes something, the whole text when it is new.
+ */
+function PlanSql({ sql }: { sql: { before: string | null; after: string } }) {
+  const changed = sql.before !== null && sql.before !== sql.after;
+  const same = sql.before !== null && sql.before === sql.after;
+  return (
+    <details className="plan-detail">
+      <summary>{same ? 'SQL, unchanged' : changed ? 'SQL changes' : 'SQL'}</summary>
+      {changed ? (
+        <pre className="diff">
+          {diffLines(sql.before ?? '', sql.after).map((line, index) => (
+            <span key={index} className={`diff-${line.kind}`}>
+              {line.kind === 'added' ? '+ ' : line.kind === 'removed' ? '- ' : '  '}
+              {line.text}
+            </span>
+          ))}
+        </pre>
+      ) : (
+        <pre className="diff">
+          <span>{sql.after}</span>
+        </pre>
+      )}
+    </details>
+  );
+}
 
 /**
  * Bundles: dashboards with their charts and queries, as one file another
@@ -69,6 +115,7 @@ export function BundleSettings() {
   const [bundle, setBundle] = useState<unknown>(null);
   const [plan, setPlan] = useState<Plan | null>(null);
   const [replace, setReplace] = useState(false);
+  const [publish, setPublish] = useState(false);
   const [busy, setBusy] = useState<'reading' | 'importing' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -132,6 +179,7 @@ export function BundleSettings() {
     setMessage(null);
     setPlan(null);
     setReplace(false);
+    setPublish(false);
     try {
       const answer = await api<{ plan: Plan; bundle: unknown }>(
         '/api/v1/bundles/preview',
@@ -177,10 +225,10 @@ export function BundleSettings() {
         };
       }>('/api/v1/bundles', {
         method: 'POST',
-        body: { bundle, replace },
+        body: { bundle, replace, publish, digest: plan.digest },
       });
       setMessage(
-        `${plan.title}: ${report.created.length} created, ${report.updated.length} updated, ${report.unchanged.length} unchanged${report.archived.length ? `, ${report.archived.length} archived` : ''}. Its queries are running now; charts fill in as their results are stored.`,
+        `${plan.title}: ${report.created.length} created, ${report.updated.length} updated, ${report.unchanged.length} unchanged${report.archived.length ? `, ${report.archived.length} archived` : ''}. Its queries are running now; charts fill in as their results are stored.${publish ? '' : ' What it created is private: only editors see it until you change its visibility.'}`,
       );
       setPlan(null);
       setBundle(null);
@@ -216,6 +264,15 @@ export function BundleSettings() {
         .filter(Boolean)
         .join(', ')
     : '';
+  const queries = plan
+    ? plan.items.filter(
+        (item) => item.kind === 'query' && item.action !== 'archive' && item.action !== 'keep',
+      )
+    : [];
+  const scheduled = queries.filter((item) => item.refreshSeconds).length;
+  const sqlCharts = plan
+    ? plan.items.filter((item) => item.runsSql && item.action !== 'archive').length
+    : 0;
 
   return (
     <main className="studio-page studio-medium">
@@ -294,6 +351,14 @@ export function BundleSettings() {
                 <p className="studio-muted">{plan.description}</p>
               )}
               <p>{counts}.</p>
+              <p className="bundle-warning">
+                Its {queries.length} quer{queries.length === 1 ? 'y runs' : 'ies run'}{' '}
+                on your data sources
+                {scheduled > 0 && `, ${scheduled} on a schedule`}
+                {sqlCharts > 0 &&
+                  `, and ${sqlCharts} chart${sqlCharts === 1 ? ' runs' : 's run'} SQL of ${sqlCharts === 1 ? 'its' : 'their'} own`}
+                . Read the SQL below before importing: it is someone else&apos;s.
+              </p>
               {plan.items.some((item) => item.action === 'archive') && (
                 <p className="studio-muted">
                   An earlier version of this bundle made items this one no
@@ -317,10 +382,19 @@ export function BundleSettings() {
                     <span className="plan-kind">{item.kind}</span>
                     <span className="plan-title" title={item.name}>
                       {item.title}
+                      {item.kind === 'query' && item.action !== 'archive' && item.action !== 'keep' && (
+                        <small className="studio-muted"> · {every(item.refreshSeconds)}</small>
+                      )}
+                      {item.runsSql && (
+                        <small className="plan-flag"> Runs its own SQL</small>
+                      )}
                       {item.reason && (
                         <small className="studio-muted"> · {item.reason}</small>
                       )}
                     </span>
+                    {item.sql && item.action !== 'archive' && item.action !== 'keep' && (
+                      <PlanSql sql={item.sql} />
+                    )}
                   </li>
                 ))}
               </ul>
@@ -332,13 +406,27 @@ export function BundleSettings() {
                     onChange={(event) => setReplace(event.target.checked)}
                   />
                   <span>
-                    Replace the {plan.conflicts} item
-                    {plan.conflicts === 1 ? '' : 's'} of the same name that did
-                    not come from this bundle. A replaced query keeps its
-                    history: the bundle&apos;s SQL becomes a new version.
+                    Replace or restore the {plan.conflicts} item
+                    {plan.conflicts === 1 ? '' : 's'} marked above: of the same
+                    name but not from this bundle, or archived here. A replaced
+                    query keeps its history: the bundle&apos;s SQL becomes a new
+                    version.
                   </span>
                 </label>
               )}
+              <label className="bundle-replace">
+                <input
+                  type="checkbox"
+                  checked={publish}
+                  onChange={(event) => setPublish(event.target.checked)}
+                />
+                <span>
+                  Publish what it creates, as its author shared it. Otherwise
+                  its new queries and dashboards are private: only editors see
+                  them until you change their visibility. What is already here
+                  keeps its visibility either way.
+                </span>
+              </label>
               <div className="bundle-actions">
                 <button
                   type="button"

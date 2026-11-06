@@ -71,6 +71,23 @@ describe(
     ) =>
       handler.POST(request('POST', path, { cookie, body: payload }), undefined);
 
+    /**
+     * Imports the way the studio does: preview first, then import with the
+     * plan's digest. Answers with the preview when that already refuses.
+     */
+    const install = async (payload: Json) => {
+      const { replace, publish, ...source } = payload;
+      const shown = await post(routes.preview, '/api/v1/bundles/preview', source);
+      if (shown.status !== 200) return shown;
+      const { plan } = (await shown.json()) as { plan: { digest: string } };
+      return post(routes.bundles, '/api/v1/bundles', {
+        ...source,
+        digest: plan.digest,
+        ...(replace === undefined ? {} : { replace }),
+        ...(publish === undefined ? {} : { publish }),
+      });
+    };
+
     before(async () => {
       const databases = await createTestDatabases('arrakis_b');
       const password = await import('../lib/auth/password');
@@ -134,7 +151,7 @@ describe(
     });
 
     it('imports a bundle, and importing it again changes nothing', async () => {
-      const first = await post(routes.bundles, '/api/v1/bundles', {
+      const first = await install({
         bundle: example,
       });
       assert.equal(
@@ -147,7 +164,7 @@ describe(
       assert.equal(report.created.length, 1 + 22 + 28 + 2);
 
       const again = await body<{ report: Report }>(
-        await post(routes.bundles, '/api/v1/bundles', { bundle: example }),
+        await install({ bundle: example }),
       );
       assert.equal(again.report.created.length, 0);
       assert.equal(
@@ -180,6 +197,110 @@ describe(
       );
     });
 
+    it('keeps what it imports private until published', async () => {
+      const db = await lib.app.appDb();
+      const { rows } = await db.query<{ visibility: string; n: number }>(
+        `SELECT visibility, count(*)::int AS n FROM (
+           SELECT visibility FROM queries WHERE bundle = 'gnosis-vpn'
+           UNION ALL SELECT visibility FROM dashboards WHERE bundle = 'gnosis-vpn'
+         ) AS imported GROUP BY visibility`,
+      );
+      assert.deepEqual(
+        rows.map((row) => row.visibility),
+        ['private'],
+      );
+
+      // Published here, then imported again: the update keeps it public.
+      await db.query(
+        "UPDATE dashboards SET visibility = 'public' WHERE slug = 'gnosis-vpn'",
+      );
+      const again = await install({ bundle: example });
+      assert.equal(again.status, 200);
+      const kept = await db.query<{ visibility: string }>(
+        "SELECT visibility FROM dashboards WHERE slug = 'gnosis-vpn'",
+      );
+      assert.equal(kept.rows[0].visibility, 'public');
+    });
+
+    it('installs only the bundle that was previewed', async () => {
+      const unreviewed = await post(routes.bundles, '/api/v1/bundles', {
+        bundle: example,
+      });
+      assert.equal(unreviewed.status, 400);
+
+      const shown = await body<{ plan: Plan & { digest: string } }>(
+        await post(routes.preview, '/api/v1/bundles/preview', {
+          bundle: example,
+        }),
+      );
+      const changed = structuredClone(example) as Json;
+      (changed.queries as Array<{ sql: string }>).at(-1)!.sql += '\n-- changed';
+      const swapped = await post(routes.bundles, '/api/v1/bundles', {
+        bundle: changed,
+        digest: shown.plan.digest,
+      });
+      assert.equal(swapped.status, 409);
+    });
+
+    it('shows the SQL it would run, and which charts run their own', async () => {
+      const { plan } = await body<{
+        plan: {
+          items: Array<{
+            kind: string;
+            action: string;
+            sql?: { before: string | null; after: string };
+            runsSql?: boolean;
+            refreshSeconds?: number | null;
+          }>;
+        };
+      }>(
+        await post(routes.preview, '/api/v1/bundles/preview', {
+          bundle: example,
+        }),
+      );
+      const queries = plan.items.filter(
+        (item) => item.kind === 'query' || item.kind === 'fragment',
+      );
+      assert.ok(queries.length > 0);
+      assert.ok(queries.every((item) => typeof item.sql?.after === 'string'));
+      assert.ok(queries.every((item) => item.sql?.before === item.sql?.after));
+      const sqlCharts = (
+        example.charts as Array<{ config: { sql?: string } }>
+      ).filter((chart) => chart.config.sql).length;
+      assert.equal(
+        plan.items.filter((item) => item.kind === 'chart' && item.runsSql).length,
+        sqlCharts,
+      );
+    });
+
+    it('asks before bringing back what was archived here', async () => {
+      const db = await lib.app.appDb();
+      const { rows } = await db.query<{ slug: string }>(
+        "SELECT slug FROM queries WHERE bundle = 'gnosis-vpn' AND kind = 'query' LIMIT 1",
+      );
+      const slug = rows[0].slug;
+      await db.query('UPDATE queries SET archived_at = now() WHERE slug = $1', [
+        slug,
+      ]);
+      const { plan } = await body<{ plan: Plan }>(
+        await post(routes.preview, '/api/v1/bundles/preview', {
+          bundle: example,
+        }),
+      );
+      assert.ok(
+        plan.items.some((item) => item.name === slug && item.action === 'restore'),
+      );
+      const refused = await install({ bundle: example });
+      assert.equal(refused.status, 400);
+      const archived = await db.query<{ archived: boolean }>(
+        'SELECT archived_at IS NOT NULL AS archived FROM queries WHERE slug = $1',
+        [slug],
+      );
+      assert.equal(archived.rows[0].archived, true);
+      const restored = await install({ bundle: example, replace: true });
+      assert.equal(restored.status, 200);
+    });
+
     it('rebinds an existing chart when its bundle changes the query', async () => {
       const changed = structuredClone(example) as Json;
       const charts = changed.charts as Array<{ key: string; query: string; title: string }>;
@@ -187,7 +308,7 @@ describe(
       const chart = charts[0];
       const previous = chart.query;
       chart.query = queries.find((query) => query.kind === 'query' && query.slug !== previous)!.slug;
-      const response = await post(routes.bundles, '/api/v1/bundles', { bundle: changed });
+      const response = await install({ bundle: changed });
       assert.equal(response.status, 200, JSON.stringify(await response.clone().json()));
       const report = await body<{ report: Report }>(response);
       assert.ok(report.report.updated.includes(`chart ${chart.title}`));
@@ -198,7 +319,7 @@ describe(
         [chart.key.includes('/') ? chart.key : `gnosis-vpn/${chart.key}`],
       );
       assert.equal(result.rows[0]?.slug, chart.query);
-      const restore = await post(routes.bundles, '/api/v1/bundles', { bundle: example });
+      const restore = await install({ bundle: example });
       assert.equal(restore.status, 200);
     });
 
@@ -422,11 +543,11 @@ describe(
         }),
       );
       assert.equal(plan.conflicts, 1);
-      const refused = await post(routes.bundles, '/api/v1/bundles', {
+      const refused = await install({
         bundle: other,
       });
       assert.equal(refused.status, 400);
-      const replaced = await post(routes.bundles, '/api/v1/bundles', {
+      const replaced = await install({
         bundle: other,
         replace: true,
       });
@@ -492,7 +613,7 @@ describe(
         ['chart gnosis-vpn/contracts', 'query indexed-contracts'],
       );
       const imported = await body<{ report: { archived: string[] } }>(
-        await post(routes.bundles, '/api/v1/bundles', { bundle: newer }),
+        await install({ bundle: newer }),
       );
       assert.equal(imported.report.archived.length, 2);
       const { rows } = await (

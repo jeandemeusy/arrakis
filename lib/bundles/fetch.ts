@@ -1,5 +1,6 @@
 import 'server-only';
 
+import { createHash } from 'node:crypto';
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
 
@@ -12,6 +13,9 @@ import { badRequest } from '../api/errors';
  * browser to its own origin), so it must not become a way to reach what only
  * the server can: only https, only public addresses, at most a few megabytes
  * and a few seconds, and no redirects to somewhere that was not checked.
+ *
+ * A URL may pin its content: `…/bundle.json#sha256=<hex>` is refused unless
+ * the file it downloads has exactly that hash.
  */
 
 const MAX_BYTES = 5 * 1024 * 1024;
@@ -62,7 +66,16 @@ async function checkedUrl(input: string): Promise<URL> {
   return url;
 }
 
+/** The sha256 a URL pins with `#sha256=<hex>`, or null. */
+function pinnedHash(input: string): string | null {
+  const hash = /#sha256=([0-9a-f]+)$/i.exec(input.trim())?.[1]?.toLowerCase();
+  if (hash === undefined) return null;
+  if (hash.length !== 64) throw badRequest('#sha256= must be 64 hex digits');
+  return hash;
+}
+
 export async function fetchBundle(input: string): Promise<unknown> {
+  const pinned = pinnedHash(input);
   let url = await checkedUrl(input.trim());
   for (let hop = 0; ; hop++) {
     const response = await fetch(url, {
@@ -100,8 +113,17 @@ export async function fetchBundle(input: string): Promise<unknown> {
       }
       chunks.push(value);
     }
+    const bytes = Buffer.concat(chunks);
+    if (pinned) {
+      const actual = createHash('sha256').update(bytes).digest('hex');
+      if (actual !== pinned) {
+        throw badRequest(
+          `The bundle at that URL does not match its #sha256 (it has ${actual})`,
+        );
+      }
+    }
     try {
-      return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+      return JSON.parse(bytes.toString('utf8'));
     } catch {
       throw badRequest('The bundle URL did not send JSON');
     }

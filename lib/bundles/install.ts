@@ -1,6 +1,8 @@
 import 'server-only';
 
-import { badRequest } from '../api/errors';
+import { createHash } from 'node:crypto';
+
+import { badRequest, HttpError } from '../api/errors';
 import type { Principal } from '../auth/session';
 import { appDb } from '../db/app';
 import {
@@ -32,9 +34,24 @@ import { planRetirement, retire, type Kept } from './retire';
  * those, and the plan says which they are. What an earlier file of the bundle
  * created and this one no longer has is archived (retire.ts), unless something
  * outside still uses it.
+ *
+ * A bundle is someone else's SQL, so an import is reviewed before it runs:
+ *  - the plan shows every query's SQL (as a diff against what it would
+ *    replace), its schedule, and which charts run SQL of their own;
+ *  - the import must carry the plan's digest, so what is installed is exactly
+ *    what was shown — never a file that changed at its URL in between;
+ *  - what it creates is private until the editor chooses to publish it;
+ *  - it never brings back what was archived here, or overwrites what came
+ *    from elsewhere, unless told to.
  */
 
-export type Action = 'create' | 'update' | 'replace' | 'archive' | 'keep';
+export type Action =
+  | 'create'
+  | 'update'
+  | 'replace'
+  | 'restore'
+  | 'archive'
+  | 'keep';
 
 export type PlanItem = {
   kind: 'list' | 'query' | 'fragment' | 'chart' | 'dashboard';
@@ -45,6 +62,12 @@ export type PlanItem = {
   from?: string | null;
   /** For an item the bundle dropped but that is kept: what still uses it. */
   reason?: string;
+  /** A query's or SQL chart's SQL: what it is now here, and what it becomes. */
+  sql?: { before: string | null; after: string };
+  /** A query's refresh interval, in seconds, once imported. */
+  refreshSeconds?: number | null;
+  /** A chart that runs hand-written SQL of its own over its result. */
+  runsSql?: boolean;
 };
 
 export type Plan = {
@@ -52,8 +75,16 @@ export type Plan = {
   title: string;
   description: string;
   items: PlanItem[];
+  /** Items that replace something from elsewhere or bring back something archived. */
   conflicts: number;
+  /** What the import must quote, to install exactly this. */
+  digest: string;
 };
+
+/** Identifies a parsed bundle's content, for the import to match the preview. */
+export function bundleDigest(bundle: Bundle): string {
+  return createHash('sha256').update(JSON.stringify(bundle)).digest('hex');
+}
 
 export type InstallReport = {
   bundle: string;
@@ -98,8 +129,14 @@ export async function planInstall(bundle: Bundle): Promise<Plan> {
       });
   }
   for (const query of bundle.queries) {
-    const { rows } = await db.query<{ bundle: string | null }>(
-      'SELECT bundle FROM queries WHERE slug = $1',
+    const { rows } = await db.query<{
+      bundle: string | null;
+      archived: boolean;
+      sql: string | null;
+    }>(
+      `SELECT q.bundle, q.archived_at IS NOT NULL AS archived, v.sql
+       FROM queries q LEFT JOIN query_versions v ON v.id = q.current_version_id
+       WHERE q.slug = $1`,
       [query.slug],
     );
     const existing = rows[0];
@@ -109,29 +146,42 @@ export async function planInstall(bundle: Bundle): Promise<Plan> {
       title: query.title,
       action: !existing
         ? 'create'
-        : existing.bundle === bundle.name
-          ? 'update'
-          : 'replace',
+        : existing.bundle !== bundle.name
+          ? 'replace'
+          : existing.archived
+            ? 'restore'
+            : 'update',
       ...(existing && existing.bundle !== bundle.name
         ? { from: existing.bundle }
+        : {}),
+      sql: { before: existing?.sql ?? null, after: query.sql },
+      ...(query.kind === 'query'
+        ? { refreshSeconds: query.refreshSeconds ?? null }
         : {}),
     });
   }
   for (const chart of bundle.charts) {
-    const { rows } = await db.query(
-      'SELECT 1 FROM visualizations WHERE seed_key = $1 AND archived_at IS NULL',
+    const { rows } = await db.query<{ config: { sql?: string } | null }>(
+      'SELECT config FROM visualizations WHERE seed_key = $1 AND archived_at IS NULL',
       [chartKey(bundle, chart.key)],
     );
+    const sql = (chart.config as { sql?: unknown }).sql;
     items.push({
       kind: 'chart',
       name: chart.key,
       title: chart.title,
       action: rows.length ? 'update' : 'create',
+      ...(typeof sql === 'string' && sql
+        ? {
+            runsSql: true,
+            sql: { before: rows[0]?.config?.sql ?? null, after: sql },
+          }
+        : {}),
     });
   }
   for (const dashboard of bundle.dashboards) {
-    const { rows } = await db.query<{ bundle: string | null }>(
-      'SELECT bundle FROM dashboards WHERE slug = $1',
+    const { rows } = await db.query<{ bundle: string | null; archived: boolean }>(
+      'SELECT bundle, archived_at IS NOT NULL AS archived FROM dashboards WHERE slug = $1',
       [dashboard.slug],
     );
     const existing = rows[0];
@@ -141,9 +191,11 @@ export async function planInstall(bundle: Bundle): Promise<Plan> {
       title: dashboard.title,
       action: !existing
         ? 'create'
-        : existing.bundle === bundle.name
-          ? 'update'
-          : 'replace',
+        : existing.bundle !== bundle.name
+          ? 'replace'
+          : existing.archived
+            ? 'restore'
+            : 'update',
       ...(existing && existing.bundle !== bundle.name
         ? { from: existing.bundle }
         : {}),
@@ -171,7 +223,10 @@ export async function planInstall(bundle: Bundle): Promise<Plan> {
     title: bundle.title,
     description: bundle.description,
     items,
-    conflicts: items.filter((item) => item.action === 'replace').length,
+    conflicts: items.filter(
+      (item) => item.action === 'replace' || item.action === 'restore',
+    ).length,
+    digest: bundleDigest(bundle),
   };
 }
 
@@ -183,18 +238,35 @@ function chartKey(bundle: Bundle, key: string): string {
 export async function installBundle(
   bundle: Bundle,
   principal: Principal,
-  options: { replace?: boolean } = {},
+  options: {
+    /** Overwrite items from elsewhere and bring back archived ones. */
+    replace?: boolean;
+    /** Make what it creates public and keep its dashboards' visibility. */
+    publish?: boolean;
+    /** The previewed plan's digest; when given, the bundle must match it. */
+    digest?: string;
+  } = {},
 ): Promise<InstallReport> {
   const plan = await planInstall(bundle);
+  if (options.digest !== undefined && options.digest !== plan.digest) {
+    throw new HttpError(
+      409,
+      'This is not the bundle that was previewed. Preview it again before importing.',
+    );
+  }
   if (plan.conflicts && !options.replace) {
     const names = plan.items
-      .filter((item) => item.action === 'replace')
-      .map((item) => `${item.kind} "${item.name}"`);
+      .filter((item) => item.action === 'replace' || item.action === 'restore')
+      .map(
+        (item) =>
+          `${item.kind} "${item.name}"${item.action === 'restore' ? ' (archived)' : ''}`,
+      );
     throw badRequest(
-      `This Arrakis already has ${names.join(', ')}, not from this bundle. Import with "replace" to overwrite them.`,
+      `This Arrakis already has ${names.join(', ')}, not from this bundle or archived. Import with "replace" to overwrite or restore them.`,
       { conflicts: names },
     );
   }
+  const publish = options.publish === true;
 
   const report: InstallReport = {
     bundle: bundle.name,
@@ -239,7 +311,8 @@ export async function installBundle(
         {
           slug: query.slug,
           kind: query.kind,
-          visibility: 'public',
+          // Someone else's SQL stays private until an editor publishes it.
+          visibility: publish ? 'public' : 'private',
           ...metadata,
           sql: query.sql,
           parameters: query.parameters,
@@ -328,7 +401,6 @@ export async function installBundle(
       slug: dashboard.slug,
       title: dashboard.title,
       description: dashboard.description,
-      visibility: dashboard.visibility,
       variables: dashboard.variables,
     };
     const existing = await getDashboard(dashboard.slug);
@@ -339,9 +411,16 @@ export async function installBundle(
           [dashboard.slug],
         );
       }
+      // An update keeps the visibility an editor here chose.
       await updateDashboard(dashboard.slug, input);
     } else {
-      await createDashboard(input, principal);
+      await createDashboard(
+        {
+          ...input,
+          visibility: publish ? dashboard.visibility : 'private',
+        },
+        principal,
+      );
     }
     await replaceWidgets(
       dashboard.slug,

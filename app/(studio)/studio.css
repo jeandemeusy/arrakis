@@ -6163,9 +6163,50 @@ a.settings-card:focus-visible {
   color: var(--warn-ink);
 }
 
-.plan-action.archive {
+.plan-action.archive,
+.plan-action.restore {
   background: var(--warn-halo);
   color: var(--warn-ink);
+}
+
+.plan-flag {
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: var(--radius-pill);
+  background: var(--warn-halo);
+  color: var(--warn-ink);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.plan-detail {
+  grid-column: 2 / -1;
+  min-width: 0;
+}
+
+.plan-detail summary {
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.plan-detail .diff {
+  max-height: 260px;
+  margin-top: 6px;
+}
+
+/* Someone else's SQL is read, not scrolled sideways. */
+.plan-detail .diff span {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.bundle-warning {
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  background: var(--warn-halo);
+  color: var(--warn-ink);
+  font-size: 13px;
 }
 
 .bundle .bundle-plan {
