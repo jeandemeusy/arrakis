@@ -11,7 +11,7 @@
     "build": "nix develop -c npm run build:nix",
     "build:nix": "next build --webpack",
     "start": "next start",
-    "lint": "oxlint app lib instrumentation.ts && stylelint 'app/**/*.css'",
+    "lint": "oxlint app lib instrumentation.ts proxy.ts && stylelint 'app/**/*.css'",
     "test": "node --import ./test/loader.mjs --test 'test/**/*.test.ts'",
     "hash-password": "node scripts/hash-password.mjs",
     "nix:refresh-deps": "sh scripts/refresh-npm-deps-hash.sh",

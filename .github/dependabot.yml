@@ -1,0 +1,10 @@
+# Keeps the pinned GitHub Actions (referenced by commit) up to date with their
+# security fixes. npm dependencies are not here: a lockfile change also needs
+# the Nix hash refreshed (`npm run nix:refresh-deps`), so those go through
+# `npm audit` in CI instead.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

@@ -10,9 +10,9 @@ on:
   # Build and publish any branch by hand, without a pull request.
   workflow_dispatch:
 
+# Read-only by default; only the job that pushes the image may write packages.
 permissions:
   contents: read
-  packages: write
 
 concurrency:
   group: publish-container-${{ github.ref }}
@@ -34,11 +34,11 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # The flake's own nixConfig (substituters, trusted keys) is not
+      # accepted: a change to flake.nix must not be able to point the build
+      # at another binary cache.
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25 # v22
-        with:
-          extra-conf: |
-            accept-flake-config = true
 
       - name: Verify Nix npm dependency hash
         run: sh scripts/check-npm-deps-hash.sh
@@ -48,9 +48,17 @@ jobs:
           nix develop --command npx tsc --noEmit
           nix develop --command npm run lint
 
+      # Known advisories in what the image ships. Development-only tools are
+      # left out: they never run in production.
+      - name: Audit production dependencies
+        run: nix develop --command npm audit --omit=dev --audit-level=high
+
   publish:
     needs: check
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     # Pushes to main, tags, pull requests from this repository, and manual runs
     # are published. A fork's pull request cannot write packages (its token is
     # read-only), so it is only checked.
@@ -61,11 +69,11 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # The flake's own nixConfig (substituters, trusted keys) is not
+      # accepted: a change to flake.nix must not be able to point the build
+      # at another binary cache.
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25 # v22
-        with:
-          extra-conf: |
-            accept-flake-config = true
 
       - name: Build the image
         run: nix build .#container --print-build-logs

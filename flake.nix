@@ -54,6 +54,7 @@
                   "lib"
                   "public"
                   "next.config.ts"
+                  "proxy.ts"
                   "package.json"
                   "package-lock.json"
                   "tsconfig.json"
@@ -62,7 +63,7 @@
           };
 
           # Refresh with: nix run nixpkgs#prefetch-npm-deps -- package-lock.json
-          npmDepsHash = "sha256-1t7+hDG3Oh/NlMezBVtPrVoiX6xatLA38zCh/ira40c=";
+          npmDepsHash = "sha256-BvPGuJrKAXIjy4NBkx77tBgfwiQ5vx9PvZRBZZ8myFA=";
 
           env = {
             NEXT_STANDALONE = "1";
@@ -126,13 +127,25 @@
             pkgs.cacert
           ];
 
+          # The only writable place in the image: the app itself lives in the
+          # read-only store, and scratch files go here.
+          extraCommands = ''
+            mkdir -m 1777 tmp
+          '';
+
           config = {
             Cmd = [ "${arrakis}/bin/arrakis" ];
+            # Not root: an unprivileged uid with no entry in /etc/passwd, which
+            # Node does not need. It owns nothing in the image, so a compromised
+            # server cannot rewrite the app it runs from.
+            User = "65532:65532";
             ExposedPorts."3000/tcp" = { };
             Env = [
               "NODE_ENV=production"
               "HOSTNAME=0.0.0.0"
               "PORT=3000"
+              "HOME=/tmp"
+              "TMPDIR=/tmp"
               "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
             ];
             WorkingDir = "${arrakis}/share/arrakis";

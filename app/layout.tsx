@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { headers } from 'next/headers';
 import './globals.css';
 
 import {
@@ -54,9 +55,13 @@ const THEME_BOOTSTRAP = `try{var t=localStorage.getItem(${JSON.stringify(
   DEFAULT_THEME,
 )};var d=t==='dark'||(t==='system'&&window.matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.dataset.themeChoice=t;document.documentElement.dataset.theme=d?'dark':'light'}catch(e){document.documentElement.dataset.theme='light'}`;
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
+  // The nonce `proxy.ts` put in this request's Content-Security-Policy; the
+  // pre-paint script runs only with it. Reading it also renders every page per
+  // request, which a nonce needs: a page built ahead of time would carry none.
+  const nonce = (await headers()).get('x-nonce') ?? undefined;
   return (
     // The script below may restyle <html> before React hydrates it, on
     // purpose; only this element's own attributes are exempt from the check.
@@ -68,6 +73,7 @@ export default function RootLayout({
     >
       <head>
         <script
+          nonce={nonce}
           // oxlint-disable-next-line react/no-danger -- a literal built from constants above
           dangerouslySetInnerHTML={{
             __html: STYLE_BOOTSTRAP + THEME_BOOTSTRAP,

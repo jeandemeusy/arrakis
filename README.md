@@ -39,10 +39,18 @@ npm run hash-password        # choose the editor password; prints its hash
 Put what `dev:db` prints, and the hash, in `.env.local`:
 
 ```dotenv
-APP_DATABASE_URL=postgresql://postgres@127.0.0.1:54329/arrakis
-DATA_SOURCES='[{"id":"demo","label":"Demo","databaseUrl":"postgresql://blokli_reader@127.0.0.1:54329/blokli_demo"}]'
+APP_DATABASE_URL=postgresql://arrakis:…@127.0.0.1:54329/arrakis
+DATA_SOURCES='[{"id":"demo","label":"Demo","databaseUrl":"postgresql://blokli_reader:…@127.0.0.1:54329/blokli_demo"}]'
 ARRAKIS_EDITOR_PASSWORD_HASH=scrypt:15:8:1:…
 ```
+
+The local database is set up like a real deployment: the app connects as
+`arrakis`, an ordinary role that owns its database, and every TCP connection
+needs a password (generated once, kept in `.pgdata`, and printed again on each
+start). Only the socket in `.pgdata`, readable by you alone, lets the
+superuser in without one. A `.pgdata` made by an older `dev:db` is converted on
+its next start — its tables are handed to `arrakis` — so update `.env.local`
+with the new URLs it prints.
 
 Then `npm run dev`, open <http://localhost:3000/>, unlock editing, import
 [`examples/bundles/gnosis-vpn.json`](./examples/bundles/gnosis-vpn.json) under
@@ -81,7 +89,10 @@ ARRAKIS_EDITOR_PASSWORD_HASH=scrypt:15:8:1:…
 
 `APP_DATABASE_URL` is Arrakis's own database, separate from every data source.
 The app migrates it itself on start (`db/migrations`). Without it, there is
-nothing to save queries in and the studio says so.
+nothing to save queries in and the studio says so. Connect with a role that
+owns this database and nothing more — **never a superuser**, in any
+environment: hand-written chart SQL runs inside this database, so whatever
+the role may do on the server, a chart may try.
 
 Editing is unlocked with one password: `npm run hash-password` prints the hash
 to put in `ARRAKIS_EDITOR_PASSWORD_HASH`; the password itself is never stored.
@@ -311,13 +322,14 @@ For anything the steps do not cover, a chart can be **SQL** over `{{result}}`
 (and `{{name}}` for a dashboard variable, bound as text). It runs read-only, in
 ten seconds at most, as `arrakis_results_reader`: a role that can read result
 tables and nothing else in the app database. The migration creates that role
-when the app's database user may (`CREATEROLE`, or a superuser such as the one
-`npm run dev:db` uses); otherwise SQL charts are refused with a message and step
-charts are unaffected. To set it up by hand:
+when the app's database user may (`CREATEROLE`), or uses the role when it is
+already there and granted to that user with ADMIN, which is how
+`npm run dev:db` provides it; otherwise SQL charts are refused with a message
+and step charts are unaffected. To set it up by hand, as a superuser:
 
 ```sql
 CREATE ROLE arrakis_results_reader NOLOGIN;
-GRANT arrakis_results_reader TO <app user> WITH SET TRUE;   -- PostgreSQL 16+
+GRANT arrakis_results_reader TO <app user> WITH ADMIN TRUE, SET TRUE;   -- PostgreSQL 16+
 GRANT USAGE ON SCHEMA results TO arrakis_results_reader;
 GRANT SELECT ON ALL TABLES IN SCHEMA results TO arrakis_results_reader;
 ```
@@ -489,7 +501,8 @@ TEST_ADMIN_DATABASE_URL=postgresql://postgres:…@localhost/postgres npm test
 ```
 
 The integration suite builds throwaway databases using that superuser
-connection, and is skipped without it. Its data sources are loaded from
+connection, and is skipped without it. With `npm run dev:db`, use the
+socket URL it prints (`postgresql://postgres@localhost:54329/postgres?host=<repo>/.pgdata`). Its data sources are loaded from
 [`test/fixtures`](./test/fixtures): a Blokli-shaped index, which also lets it
 run every query of the Gnosis VPN example bundle. Node 22.18 or newer runs the TypeScript
 directly; nothing else is needed.
