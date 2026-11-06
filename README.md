@@ -106,7 +106,15 @@ editors are more rows, not a redesign.
 Sessions are `HttpOnly`, `SameSite=Strict` cookies (`__Host-` and `Secure` in
 production) backed by the database, so every replica honours them. Ten failed
 logins from one address, or two hundred from everywhere, in 15 minutes locks
-logins for 15 minutes. State-changing requests from another origin are refused;
+logins for 15 minutes — except, for the second, from an address that signed in
+successfully in the last day, so an attack cannot lock the editors out.
+
+The address is the one the proxy in front saw: the entry
+`ARRAKIS_TRUSTED_PROXIES` places from the right of `X-Forwarded-For` (1 by
+default — one reverse proxy), never what the client wrote further left. Set
+it to the number of proxies the request crosses, or set
+`ARRAKIS_CLIENT_IP_HEADER` to a header your proxy sets itself (`x-real-ip`,
+`cf-connecting-ip`). State-changing requests from another origin are refused;
 set `ARRAKIS_ALLOWED_ORIGINS` if the studio is served from a second hostname.
 Every response carries a Content Security Policy (scripts, styles, images and
 requests from the app's own origin only; no framing), `nosniff`, a strict
@@ -122,6 +130,9 @@ referrer policy, `Cross-Origin-Opener-Policy` and, in production, HSTS
 | `ARRAKIS_QUERY_TIMEOUT_MAX_MS` | `600000` | Ceiling on any query's own time limit. |
 | `ARRAKIS_RESULT_ROW_LIMIT` | `5000000` | Most rows a stored result keeps; past it the result is marked cut. |
 | `ARRAKIS_SCHEDULER_CONCURRENCY` | `2` | Scheduled refreshes running at once, across every data source. |
+| `ARRAKIS_CHART_CONCURRENCY` | `4` | Charts computed at once on a replica; more wait. |
+| `ARRAKIS_CHART_QUEUE` | `32` | Charts waiting their turn before more are refused with `429`. |
+| `ARRAKIS_READ_RATE_LIMIT` | `300` | Requests a minute one address may make, signed out, for results, chart and dashboard data; then `429`. Per replica. |
 
 A query can set its own time limit and row cap under *Run limits* in its About
 panel; the server's ceilings above still apply. A run past its limit answers
@@ -143,8 +154,15 @@ path (`lib/query/runner.ts`) that enforces this three times over:
 
 - **The role.** Before a data source's first query, and every five minutes after,
   its role is checked for any way to write — superuser, CREATE on the database
-  or a schema, INSERT/UPDATE/DELETE/TRUNCATE on any table. If it finds one,
-  queries on that source are refused with a message naming the privilege.
+  or a schema, INSERT/UPDATE/DELETE/TRUNCATE on any table; membership in
+  `pg_write_all_data`, `pg_read_server_files`, `pg_write_server_files`,
+  `pg_execute_server_program`, `pg_signal_backend`; a role it can switch to
+  that could write (a `NOINHERIT` membership); `dblink`, `lo_import`/
+  `lo_export` or the server-file functions; a usable foreign server. If it
+  finds one, queries on that source are refused with a message naming it.
+  Reading more than you meant to share is not something it can see: grant
+  only the tables the dashboards need (`pg_read_all_data` is allowed, since
+  it cannot write).
 - **The transaction.** Every run is `BEGIN READ ONLY`, with a time limit.
 - **The statement.** The SQL becomes the body of `DECLARE … CURSOR FOR`, which
   only accepts a query, wrapped as a subquery, where a data-modifying CTE is a

@@ -1,3 +1,4 @@
+import { limitReader } from '@/lib/api/rate-limit';
 import { badRequest, notFound } from '@/lib/api/errors';
 import {
   integerParam,
@@ -5,6 +6,7 @@ import {
   route,
   suppliedFromSearch,
 } from '@/lib/api/handler';
+import { forReader, readerNetworks } from '@/lib/api/reader';
 import { json } from '@/lib/http';
 import { targetNetworks } from '@/lib/query/networks';
 import { readResult } from '@/lib/query/results';
@@ -25,6 +27,7 @@ type Context = { params: Promise<{ slug: string }> };
 export const GET = route(async (request: Request, context: Context) => {
   const { slug } = await context.params;
   const editor = Boolean(await optionalEditor(request));
+  if (!editor) limitReader(request);
   const query = await requireQuery(slug, editor);
   const url = new URL(request.url);
 
@@ -48,7 +51,10 @@ export const GET = route(async (request: Request, context: Context) => {
     supplied: suppliedFromSearch(url),
     limit: integerParam(url, 'limit', 1_000, 50_000),
     offset: integerParam(url, 'offset', 0, 100_000_000),
+  }).catch((error: unknown) => {
+    throw editor ? error : forReader(error);
   });
+  if (!editor) page.networks = readerNetworks(page.networks);
   return json(request, page, {
     headers: {
       'cache-control':

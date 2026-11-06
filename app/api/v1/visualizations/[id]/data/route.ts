@@ -1,5 +1,7 @@
+import { limitReader } from '@/lib/api/rate-limit';
 import { notFound } from '@/lib/api/errors';
 import { optionalEditor, route, varsFromSearch } from '@/lib/api/handler';
+import { forReader, readerNetworks } from '@/lib/api/reader';
 import { json } from '@/lib/http';
 import { visualizationData } from '@/lib/viz/dashboard-data';
 import { getVisualization, readableChart } from '@/lib/viz/store';
@@ -15,6 +17,7 @@ type Context = { params: Promise<{ id: string }> };
 export const GET = route(async (request: Request, context: Context) => {
   const { id } = await context.params;
   const editor = Boolean(await optionalEditor(request));
+  if (!editor) limitReader(request);
   const visualization = await getVisualization(id);
   if (!visualization || (!editor && !readableChart(visualization))) {
     throw notFound('No such visualization');
@@ -26,7 +29,10 @@ export const GET = route(async (request: Request, context: Context) => {
     url.searchParams.get('network') ?? 'all',
     varsFromSearch(url),
     sources.length ? sources : undefined,
-  );
+  ).catch((error: unknown) => {
+    throw editor ? error : forReader(error);
+  });
+  if (!editor) data.networks = readerNetworks(data.networks);
   return json(request, data, {
     headers: {
       'cache-control':

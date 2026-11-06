@@ -195,6 +195,55 @@ describe(
         assert.equal(blocked.status, 429);
         assert.ok(blocked.headers.get('retry-after'));
       });
+
+      it('counts the address the proxy saw, not one the client wrote', async () => {
+        for (let attempt = 0; attempt < 10; attempt += 1) {
+          await routes.login.POST(
+            request('POST', '/api/v1/auth/login', {
+              body: { password: 'x' },
+              // A fresh made-up address each time, then the proxy's entry.
+              ip: `10.0.0.${attempt}, 198.51.100.20`,
+            }),
+            undefined,
+          );
+        }
+        const blocked = await routes.login.POST(
+          request('POST', '/api/v1/auth/login', {
+            body: { password: PASSWORD },
+            ip: '10.0.0.99, 198.51.100.20',
+          }),
+          undefined,
+        );
+        assert.equal(blocked.status, 429);
+      });
+
+      it('keeps the global cap from locking out an address that signed in', async () => {
+        const db = await lib.app.appDb();
+        await db.query(
+          `INSERT INTO login_attempts (ip, username, succeeded)
+           SELECT '192.0.2.' || (n % 250), 'editor', false FROM generate_series(1, 200) AS n`,
+        );
+        try {
+          const stranger = await routes.login.POST(
+            request('POST', '/api/v1/auth/login', {
+              body: { password: PASSWORD },
+              ip: '192.0.2.251',
+            }),
+            undefined,
+          );
+          assert.equal(stranger.status, 429);
+          // The address the suite signed in from at the start.
+          const editor = await routes.login.POST(
+            request('POST', '/api/v1/auth/login', {
+              body: { password: PASSWORD },
+            }),
+            undefined,
+          );
+          assert.equal(editor.status, 200);
+        } finally {
+          await db.query("DELETE FROM login_attempts WHERE ip LIKE '192.0.2.%'");
+        }
+      });
     });
 
     describe('ad-hoc runs', () => {
@@ -423,6 +472,42 @@ describe(
         } finally {
           delete process.env.ARRAKIS_UNSAFE_ALLOW_WRITABLE_ROLE;
           process.env.NETWORKS = networks();
+        }
+      });
+
+      it('refuses a role that can switch to one that writes', async () => {
+        const { Client } = await import('pg');
+        const admin = new Client({ connectionString: adminUrl! });
+        await admin.connect();
+        const url = new URL(databases.readOnly.jura);
+        url.username = 'arrakis_t_switch';
+        url.password = 'switch';
+        try {
+          await admin.query('DROP ROLE IF EXISTS arrakis_t_switch');
+          await admin.query("CREATE ROLE arrakis_t_switch LOGIN PASSWORD 'switch'");
+          // Not inherited, so its own privileges show nothing to write with;
+          // a query could still SET ROLE to the writer.
+          await admin.query(
+            'GRANT arrakis_t_rw TO arrakis_t_switch WITH INHERIT FALSE',
+          );
+          await admin.query(
+            `GRANT CONNECT ON DATABASE ${new URL(databases.readOnly.jura).pathname.slice(1)} TO arrakis_t_switch`,
+          );
+          process.env.NETWORKS = JSON.stringify([
+            { id: 'switcher', label: 'Switcher', databaseUrl: url.toString() },
+          ]);
+          const response = await adhoc('SELECT 1', { network: 'switcher' });
+          assert.equal(response.status, 503);
+          assert.match(
+            String((await body(response)).error),
+            /can switch to role arrakis_t_rw/,
+          );
+        } finally {
+          process.env.NETWORKS = networks();
+          await lib.runner.closeQueryPools();
+          await admin.query('DROP OWNED BY arrakis_t_switch').catch(() => undefined);
+          await admin.query('DROP ROLE IF EXISTS arrakis_t_switch');
+          await admin.end();
         }
       });
 

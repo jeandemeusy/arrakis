@@ -968,6 +968,117 @@ describe(
         }
       });
 
+      it('tells a reader that a refresh failed, not what the database said', async () => {
+        const db = await lib.app.appDb();
+        const secret = 'connect ECONNREFUSED 10.9.8.7:5432';
+        const { rows } = await db.query<{ id: string }>(
+          `UPDATE query_results r SET attempt_status = 'failed', attempt_error = $1
+           FROM query_versions v, queries q
+           WHERE v.id = r.query_version_id AND q.id = v.query_id
+             AND q.slug = 'timed' AND q.current_version_id = v.id
+           RETURNING r.id`,
+          [secret],
+        );
+        assert.ok(rows.length > 0);
+        try {
+          const results = await import('../app/api/v1/queries/[slug]/results/route');
+          const read = async (cookieValue?: string) =>
+            JSON.stringify(
+              await body(
+                await results.GET(
+                  request('GET', '/api/v1/queries/timed/results?limit=1', cookieValue ? { cookie: cookieValue } : {}),
+                  context({ slug: 'timed' }),
+                ),
+              ),
+            );
+          const signedOut = await read();
+          assert.doesNotMatch(signedOut, /10\.9\.8\.7/);
+          assert.match(signedOut, /The last refresh failed/);
+          assert.match(await read(cookie), /10\.9\.8\.7/);
+
+          const chart = JSON.stringify(
+            await body(
+              await routes.visualizationData.GET(
+                request('GET', `/api/v1/visualizations/${daily}/data`),
+                context({ id: daily }),
+              ),
+            ),
+          );
+          assert.doesNotMatch(chart, /10\.9\.8\.7/);
+          const board = JSON.stringify(
+            await body(
+              await routes.dashboardData.GET(
+                request('GET', '/api/v1/dashboards/usage/data'),
+                context({ slug: 'usage' }),
+              ),
+            ),
+          );
+          assert.doesNotMatch(board, /10\.9\.8\.7/);
+        } finally {
+          await db.query(
+            `UPDATE query_results SET attempt_status = 'succeeded', attempt_error = NULL
+             WHERE attempt_error = $1`,
+            [secret],
+          );
+        }
+      });
+
+      it('limits how often one address may read, signed out', async () => {
+        const limits = await import('../lib/api/rate-limit');
+        process.env.ARRAKIS_READ_RATE_LIMIT = '3';
+        limits.resetReadLimits();
+        try {
+          const read = (ip: string, cookieValue?: string) =>
+            routes.dashboardData.GET(
+              request('GET', '/api/v1/dashboards/usage/data', {
+                ip,
+                ...(cookieValue ? { cookie: cookieValue } : {}),
+              }),
+              context({ slug: 'usage' }),
+            );
+          for (let n = 0; n < 3; n += 1)
+            assert.equal((await read('198.51.100.70')).status, 200);
+          const limited = await read('198.51.100.70');
+          assert.equal(limited.status, 429);
+          assert.ok(limited.headers.get('retry-after'));
+          // Another address has its own budget; a signed-in editor has none.
+          assert.equal((await read('198.51.100.71')).status, 200);
+          assert.equal((await read('198.51.100.70', cookie)).status, 200);
+        } finally {
+          delete process.env.ARRAKIS_READ_RATE_LIMIT;
+          limits.resetReadLimits();
+        }
+      });
+
+      it('answers a page past the last stored row without reading', async () => {
+        const results = await import('../app/api/v1/queries/[slug]/results/route');
+        const page = await body<{ rows: unknown[]; columns: unknown[] }>(
+          await results.GET(
+            request('GET', '/api/v1/queries/timed/results?offset=99000000'),
+            context({ slug: 'timed' }),
+          ),
+        );
+        assert.deepEqual(page.rows, []);
+        assert.ok(page.columns.length > 0);
+      });
+
+      it('draws charts in turn when more are asked for than may run at once', async () => {
+        process.env.ARRAKIS_CHART_CONCURRENCY = '1';
+        try {
+          const answers = await Promise.all(
+            Array.from({ length: 6 }, (_, n) =>
+              preview({ steps: [{ op: 'limit', n: n + 1 }] }),
+            ),
+          );
+          assert.deepEqual(
+            answers.map((answer) => answer.status),
+            [200, 200, 200, 200, 200, 200],
+          );
+        } finally {
+          delete process.env.ARRAKIS_CHART_CONCURRENCY;
+        }
+      });
+
       it('takes an archived visualization off its dashboards', async () => {
         const removed = await routes.visualization.DELETE(
           request('DELETE', `/api/v1/visualizations/${perClient}`, { cookie }),

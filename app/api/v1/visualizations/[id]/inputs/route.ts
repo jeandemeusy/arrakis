@@ -1,4 +1,6 @@
+import { limitReader } from '@/lib/api/rate-limit';
 import { HttpError, notFound } from '@/lib/api/errors';
+import { forReader, readerNetworks } from '@/lib/api/reader';
 import {
   noStore,
   optionalEditor,
@@ -16,6 +18,7 @@ type Context = { params: Promise<{ id: string }> };
 export const GET = route(async (request: Request, context: Context) => {
   const { id } = await context.params;
   const editor = Boolean(await optionalEditor(request));
+  if (!editor) limitReader(request);
   const chart = await getVisualization(id);
   if (!chart || (!editor && !readableChart(chart)))
     throw notFound('No such visualization');
@@ -69,7 +72,10 @@ export const GET = route(async (request: Request, context: Context) => {
         { op: 'limit', n: plan.scope === 'aggregate' ? 101 : 1 },
       ],
     },
+  }).catch((error: unknown) => {
+    throw editor ? error : forReader(error);
   });
+  if (!editor) data.networks = readerNetworks(data.networks);
   return noStore(request, {
     supported: true,
     scope: plan.scope,

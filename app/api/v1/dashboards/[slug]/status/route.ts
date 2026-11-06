@@ -1,3 +1,4 @@
+import { limitReader } from '@/lib/api/rate-limit';
 import {
   noStore,
   optionalEditor,
@@ -20,6 +21,7 @@ type Context = { params: Promise<{ slug: string }> };
 export const GET = route(async (request: Request, context: Context) => {
   const { slug } = await context.params;
   const editor = Boolean(await optionalEditor(request));
+  if (!editor) limitReader(request);
   const dashboard = await requireDashboard(slug, editor);
   const vars = resolveVariables(
     dashboard.variables,

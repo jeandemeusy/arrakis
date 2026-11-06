@@ -106,16 +106,35 @@ function tokenHash(token: string): Buffer {
 }
 
 /**
- * The caller's address, as reported by the proxy in front.
+ * The caller's address, as the proxies in front of the app saw it.
  *
- * Only meaningful behind a proxy that sets X-Forwarded-For — which is how the
- * container is deployed. Without one, every caller shares the `unknown` bucket
- * and the per-address limit degrades into the global one.
+ * A route handler never sees the socket, so the address comes from headers,
+ * and the client writes whatever it likes into them: only what a trusted
+ * proxy added counts. Each proxy appends the address it received from to
+ * X-Forwarded-For, so with ARRAKIS_TRUSTED_PROXIES proxies in front (1 by
+ * default) the caller is the entry that many places from the right; anything
+ * further left came from the client. ARRAKIS_CLIENT_IP_HEADER instead names a
+ * header the proxy sets outright (`x-real-ip`, `cf-connecting-ip`). With 0
+ * proxies, or a header that is missing, every caller shares one bucket and
+ * the per-address limit degrades into the global one.
  */
 export function clientIp(request: Request): string {
-  const forwarded = request.headers.get('x-forwarded-for');
-  const first = forwarded?.split(',')[0]?.trim();
-  return first || request.headers.get('x-real-ip')?.trim() || 'unknown';
+  const named = process.env.ARRAKIS_CLIENT_IP_HEADER?.trim().toLowerCase();
+  let address: string | undefined;
+  if (named) {
+    address = request.headers.get(named)?.trim();
+  } else {
+    const hops = Number.parseInt(process.env.ARRAKIS_TRUSTED_PROXIES ?? '1', 10);
+    const entries = (request.headers.get('x-forwarded-for') ?? '')
+      .split(',')
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+    if (Number.isInteger(hops) && hops > 0 && entries.length >= hops) {
+      address = entries[entries.length - hops];
+    }
+  }
+  // An address, not whatever text a misconfigured proxy passed along.
+  return address && /^[0-9a-f.:]{2,45}$/i.test(address) ? address : 'unknown';
 }
 
 async function assertNotThrottled(ip: string): Promise<void> {
@@ -130,7 +149,22 @@ async function assertNotThrottled(ip: string): Promise<void> {
   );
   const mine = Number(rows[0]?.mine ?? 0);
   const everyone = Number(rows[0]?.everyone ?? 0);
-  if (mine >= MAX_FAILURES_PER_IP || everyone >= MAX_FAILURES_GLOBAL) {
+  let blocked = mine >= MAX_FAILURES_PER_IP;
+  if (!blocked && everyone >= MAX_FAILURES_GLOBAL) {
+    // A guesser spread over many addresses trips the global cap. An address
+    // that signed in successfully in the last day is not locked out by it,
+    // so an attack cannot keep the editors themselves from signing in.
+    const { rows: known } = await db.query<{ known: boolean }>(
+      `SELECT EXISTS (
+         SELECT 1 FROM login_attempts
+         WHERE succeeded AND ip = $1 AND ip <> 'unknown'
+           AND attempted_at > now() - interval '1 day'
+       ) AS known`,
+      [ip],
+    );
+    blocked = !known[0]?.known;
+  }
+  if (blocked) {
     throw new HttpError(429, 'Too many failed logins. Try again later.', {
       headers: { 'retry-after': String(WINDOW_MINUTES * 60) },
     });

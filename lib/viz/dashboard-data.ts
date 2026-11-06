@@ -2,6 +2,7 @@ import 'server-only';
 
 import { toErrorShape, type ApiErrorShape } from './errors';
 import { badRequest } from '../api/errors';
+import { readerNetworks, readerShape } from '../api/reader';
 import { getQuery } from '../query/store';
 import {
   networks as configuredNetworks,
@@ -197,18 +198,25 @@ export async function dashboardData(
         return { id: widget.id, state: 'private' };
       }
       try {
+        const data = await visualizationData(
+          widget.visualization,
+          network,
+          vars,
+          sources,
+        );
         return {
           id: widget.id,
           state: 'ok',
-          data: await visualizationData(
-            widget.visualization,
-            network,
-            vars,
-            sources,
-          ),
+          // Signed out, a failed refresh says that it failed, not why.
+          data: editor ? data : { ...data, networks: readerNetworks(data.networks) },
         };
       } catch (error) {
-        return { id: widget.id, state: 'error', error: toErrorShape(error) };
+        const shape = toErrorShape(error);
+        return {
+          id: widget.id,
+          state: 'error',
+          error: editor ? shape : readerShape(shape),
+        };
       }
     }),
   );
