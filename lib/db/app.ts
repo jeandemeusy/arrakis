@@ -136,6 +136,9 @@ export async function transaction<T>(
 
 /** Closes the pool. Tests only: a server keeps it for its whole life. */
 export async function closeAppDb(): Promise<void> {
+  // The charts pool logs in to this same database; it goes with it.
+  const { closeChartsDb } = await import('./charts');
+  await closeChartsDb();
   const current = pool;
   pool = undefined;
   ready = undefined;

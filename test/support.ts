@@ -5,6 +5,7 @@
  * it the integration suites skip. It creates, from scratch on every run:
  *
  *   arrakis_t_app          the application database, owned by arrakis_t
+ *   arrakis_t_charts       the role chart SQL logs in as, holding nothing
  *   arrakis_t_jura/_dev    two Blokli indexes loaded from fixtures/blokli.sql
  *   arrakis_t_ro           a role that can only SELECT them
  *   arrakis_t_rw           a role that can also INSERT into `log`
@@ -48,6 +49,8 @@ async function admin<T>(
 
 export type TestDatabases = {
   appUrl: string;
+  /** The login hand-written chart SQL runs as: it may hold nothing else. */
+  chartsUrl: string;
   readOnly: { jura: string; dev: string };
   writable: string;
 };
@@ -76,10 +79,18 @@ export async function createTestDatabases(
     ]) {
       await client.query(`DROP DATABASE IF EXISTS ${database} WITH (FORCE)`);
     }
-    for (const role of [prefix, `${prefix}_ro`, `${prefix}_rw`]) {
+    for (const role of [
+      prefix,
+      `${prefix}_ro`,
+      `${prefix}_rw`,
+      `${prefix}_charts`,
+    ]) {
       await client.query(`DROP ROLE IF EXISTS ${role}`);
     }
     await client.query(`CREATE ROLE ${prefix} LOGIN PASSWORD 'app'`);
+    await client.query(
+      `CREATE ROLE ${prefix}_charts LOGIN NOINHERIT PASSWORD 'charts'`,
+    );
     await client.query(`CREATE ROLE ${prefix}_ro LOGIN PASSWORD 'ro'`);
     await client.query(`CREATE ROLE ${prefix}_rw LOGIN PASSWORD 'rw'`);
     await client.query(`CREATE DATABASE ${prefix}_app OWNER ${prefix}`);
@@ -129,6 +140,12 @@ export async function createTestDatabases(
   );
   return {
     appUrl: withDatabase(adminUrl, `${prefix}_app`, prefix, 'app'),
+    chartsUrl: withDatabase(
+      adminUrl,
+      `${prefix}_app`,
+      `${prefix}_charts`,
+      'charts',
+    ),
     readOnly: {
       jura: withDatabase(adminUrl, `${prefix}_jura`, `${prefix}_ro`, 'ro'),
       dev: withDatabase(adminUrl, `${prefix}_dev`, `${prefix}_ro`, 'ro'),

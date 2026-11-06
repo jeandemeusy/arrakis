@@ -82,6 +82,7 @@ describe(
       const databases = await createTestDatabases('arrakis_v');
       const password = await import('../lib/auth/password');
       process.env.APP_DATABASE_URL = databases.appUrl;
+      process.env.APP_CHARTS_DATABASE_URL = databases.chartsUrl;
       process.env.NETWORKS = JSON.stringify([
         { id: 'jura', label: 'Jura', databaseUrl: databases.readOnly.jura },
         { id: 'dev', label: 'Dev', databaseUrl: databases.readOnly.dev },
@@ -473,6 +474,32 @@ describe(
         assert.equal(write.status, 400);
       });
 
+      it('cannot leave its role for the app\'s and read the app database', async () => {
+        // The escape that SET ROLE allowed: switch back to the login role,
+        // then run a query string under it.
+        const { status, data } = await preview({
+          sql: `SELECT set_config('role', session_user, true) AS r,
+                       query_to_xml('SELECT username FROM users', true, false, '') AS x
+                FROM {{result}} LIMIT 1`,
+        });
+        assert.equal(status, 400, JSON.stringify(data));
+        assert.match(String(data.error), /not allowed/);
+        assert.doesNotMatch(JSON.stringify(data), /editor/);
+      });
+
+      it('cannot read another stored result by name', async () => {
+        const db = await lib.app.appDb();
+        const { rows } = await db.query<{ table_name: string }>(
+          'SELECT table_name FROM query_results WHERE table_name IS NOT NULL LIMIT 1',
+        );
+        assert.ok(rows[0], 'a stored result to aim at');
+        const { status, data } = await preview({
+          sql: `SELECT count(*) FROM results."${rows[0].table_name}"`,
+        });
+        assert.equal(status, 400);
+        assert.match(String(data.error), /not allowed/);
+      });
+
       it('leaves nothing on its connection for the next run', async () => {
         const set = await preview({
           sql: `SELECT set_config('arrakis.leak', 'left behind', false) AS v FROM {{result}} LIMIT 1`,
@@ -484,6 +511,25 @@ describe(
           });
           assert.notEqual(data.rows?.[0]?.[0], 'left behind');
         }
+      });
+
+      it('is refused while its login could do more than read its ticket', async () => {
+        const charts = await import('../lib/db/charts');
+        const own = process.env.APP_CHARTS_DATABASE_URL;
+        try {
+          process.env.APP_CHARTS_DATABASE_URL = process.env.APP_DATABASE_URL;
+          await charts.closeChartsDb();
+          const { status, data } = await preview({
+            sql: 'SELECT count(*) FROM {{result}}',
+          });
+          assert.equal(status, 503);
+          assert.match(String(data.error), /SQL charts are off/);
+        } finally {
+          process.env.APP_CHARTS_DATABASE_URL = own;
+          await charts.closeChartsDb();
+        }
+        const { status } = await preview({ sql: 'SELECT count(*) FROM {{result}}' });
+        assert.equal(status, 200);
       });
     });
 

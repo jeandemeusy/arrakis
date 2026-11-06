@@ -40,6 +40,7 @@ Put what `dev:db` prints, and the hash, in `.env.local`:
 
 ```dotenv
 APP_DATABASE_URL=postgresql://arrakis:…@127.0.0.1:54329/arrakis
+APP_CHARTS_DATABASE_URL=postgresql://arrakis_charts:…@127.0.0.1:54329/arrakis
 DATA_SOURCES='[{"id":"demo","label":"Demo","databaseUrl":"postgresql://blokli_reader:…@127.0.0.1:54329/blokli_demo"}]'
 ARRAKIS_EDITOR_PASSWORD_HASH=scrypt:15:8:1:…
 ```
@@ -74,6 +75,7 @@ DATA_SOURCES='[
    "queryDatabaseUrl":"postgresql://reader:…@staging-replica:5432/app"}
 ]'
 APP_DATABASE_URL=postgresql://arrakis:…@app-db:5432/arrakis
+APP_CHARTS_DATABASE_URL=postgresql://arrakis_charts:…@app-db:5432/arrakis
 ARRAKIS_EDITOR_PASSWORD_HASH=scrypt:15:8:1:…
 ```
 
@@ -320,19 +322,23 @@ redraw on their own when the run finishes.
 
 For anything the steps do not cover, a chart can be **SQL** over `{{result}}`
 (and `{{name}}` for a dashboard variable, bound as text). It runs read-only, in
-ten seconds at most, as `arrakis_results_reader`: a role that can read result
-tables and nothing else in the app database. The migration creates that role
-when the app's database user may (`CREATEROLE`), or uses the role when it is
-already there and granted to that user with ADMIN, which is how
-`npm run dev:db` provides it; otherwise SQL charts are refused with a message
-and step charts are unaffected. To set it up by hand, as a superuser:
+ten seconds at most, on a connection of its own: `APP_CHARTS_DATABASE_URL`,
+which logs in to the app database as a role that holds **nothing**. For each
+run the app issues a ticket for the stored tables behind `{{result}}`, and the
+role's one right — calling `chart_access.result_rows`, which the app grants it —
+turns that ticket into rows. So a chart reads its own query's result and
+nothing else: not another query's result, not the users or sessions. Without
+the variable, or while the role could do more than that, SQL charts are refused
+with the reason and step charts are unaffected.
 
 ```sql
-CREATE ROLE arrakis_results_reader NOLOGIN;
-GRANT arrakis_results_reader TO <app user> WITH ADMIN TRUE, SET TRUE;   -- PostgreSQL 16+
-GRANT USAGE ON SCHEMA results TO arrakis_results_reader;
-GRANT SELECT ON ALL TABLES IN SCHEMA results TO arrakis_results_reader;
+-- as a superuser, once
+CREATE ROLE arrakis_charts LOGIN NOINHERIT PASSWORD '…' CONNECTION LIMIT 8;
+ALTER ROLE arrakis_charts SET statement_timeout = '15s';
 ```
+
+Give it nothing else: no membership in any role, no grant on any table. It
+must not be the app's own role. `npm run dev:db` creates it.
 
 A **dashboard** is a grid of charts and headings, in order, each 1 to 12 columns
 wide. **Edit** turns the page into its own editor:

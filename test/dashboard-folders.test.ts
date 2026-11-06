@@ -13,6 +13,7 @@ describe(
     before(async () => {
       const databases = await createTestDatabases('arrakis_folders');
       process.env.APP_DATABASE_URL = databases.appUrl;
+      process.env.APP_CHARTS_DATABASE_URL = databases.chartsUrl;
       db = await import('../lib/db/app');
       folders = await import('../lib/viz/folders');
       store = await import('../lib/viz/store');

@@ -87,6 +87,7 @@ describe(
         password: await import('../lib/auth/password'),
       };
       process.env.APP_DATABASE_URL = databases.appUrl;
+      process.env.APP_CHARTS_DATABASE_URL = databases.chartsUrl;
       process.env.NETWORKS = networks();
       process.env.ARRAKIS_EDITOR_PASSWORD_HASH =
         await lib.password.hashPassword(PASSWORD);

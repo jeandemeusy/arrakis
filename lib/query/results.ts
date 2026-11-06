@@ -40,6 +40,11 @@ export function quote(identifier: string): string {
   return `"${identifier.replaceAll('"', '""')}"`;
 }
 
+/** Whether a name is one of the stored result tables this module makes. */
+export function isResultTable(name: string): boolean {
+  return TABLE.test(name);
+}
+
 function qualified(table: string): string {
   if (!TABLE.test(table)) throw new Error(`Not a result table name: ${table}`);
   return `${RESULTS_SCHEMA}.${quote(table)}`;
@@ -154,14 +159,6 @@ export async function materialize(options: {
              )`,
           );
           created = true;
-          // Hand-written chart SQL reads results as a separate, read-only
-          // role. Granting per table keeps that working even where the role
-          // was set up after the schema's default privileges were.
-          await db
-            .query(
-              `GRANT SELECT ON ${qualified(table)} TO arrakis_results_reader`,
-            )
-            .catch(() => undefined);
         }
         if (!rows.length) return;
         const arrays: unknown[][] = [
@@ -517,6 +514,8 @@ export async function readResult(options: {
  */
 export async function pruneResults(): Promise<void> {
   const db = await appDb();
+  // Chart runs delete their own tickets; these are from runs that died.
+  await db.query('DELETE FROM chart_access.tickets WHERE expires_at < now()');
   await db.query(`
     DELETE FROM query_results r
     USING query_versions v, queries q

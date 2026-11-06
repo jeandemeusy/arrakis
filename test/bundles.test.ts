@@ -75,6 +75,7 @@ describe(
       const databases = await createTestDatabases('arrakis_b');
       const password = await import('../lib/auth/password');
       process.env.APP_DATABASE_URL = databases.appUrl;
+      process.env.APP_CHARTS_DATABASE_URL = databases.chartsUrl;
       process.env.NETWORKS = JSON.stringify([
         { id: 'jura', label: 'Jura', databaseUrl: databases.readOnly.jura },
       ]);
