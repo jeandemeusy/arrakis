@@ -1,5 +1,7 @@
 'use client';
 
+import { Lock } from 'lucide-react';
+
 import type { Encoding, Options, VisualizationConfig, VisualizationType } from '@/lib/viz/config';
 import { asText } from '@/lib/viz/text';
 
@@ -37,7 +39,35 @@ export type WidgetPayload =
       };
     }
   | { state: 'error'; error: { status: number; message: string } }
-  | { state: 'loading' };
+  | { state: 'loading' }
+  /** Its query is private or archived: the reader sees the tile, not the data. */
+  | { state: 'private' };
+
+/** Bar heights for the stand-in shape behind a hidden tile: a plain silhouette. */
+const SILHOUETTE = [38, 54, 46, 70, 62, 84, 58, 76, 66, 90, 72, 80];
+
+/**
+ * What a reader sees in place of a chart whose query they may not read: the
+ * tile in its place and size, a blurred stand-in shape — not the data, which
+ * never reached the page — and a label saying why.
+ */
+function HiddenBody({ height }: { height: number }) {
+  return (
+    <div className="tile-hidden" style={{ minHeight: Math.min(height, 220) }}>
+      <div className="tile-hidden-shape" aria-hidden="true">
+        {SILHOUETTE.map((size, index) => (
+          <i key={index} style={{ height: `${size}%` }} />
+        ))}
+      </div>
+      <p className="tile-hidden-label">
+        <strong>
+          <Lock size={13} aria-hidden="true" /> Hidden
+        </strong>
+        <small>Its data is not public.</small>
+      </p>
+    </div>
+  );
+}
 
 export type ChartSpec = {
   type: VisualizationType;
@@ -171,6 +201,40 @@ export function WidgetTile({
   onExpand: (id: string | null) => void;
   onSelect?: (row: Record<string, unknown>) => void;
 }) {
+  if (payload.state === 'private') {
+    // Laid out like any tile, so it lines up with its neighbours; its actions
+    // are hidden (viz.css): there is nothing to enlarge or download.
+    return spec.type === 'number' ? (
+      <Tile
+        id={id}
+        className={`private-tile metric span-${width}`}
+        title={title}
+        figure="Hidden"
+        figureView={
+          <span className="tile-hidden-figure">
+            <span aria-hidden="true">888,888</span>
+            <span className="tile-hidden-tag">
+              <Lock size={12} aria-hidden="true" /> Hidden
+            </span>
+          </span>
+        }
+        note={<p>Its data is not public.</p>}
+        menu
+        expanded={expanded}
+        onExpand={onExpand}
+      />
+    ) : (
+      <Tile
+        id={id}
+        className={`private-tile service-chart span-${width}`}
+        title={title}
+        chart={<HiddenBody height={height} />}
+        menu
+        expanded={expanded}
+        onExpand={onExpand}
+      />
+    );
+  }
   const status = statusOf(payload);
   const data = payload.state === 'ok' ? payload.data : null;
   const columns = data?.columns ?? [];

@@ -8,7 +8,7 @@ import {
 import { getQuery } from '@/lib/query/store';
 import { targetNetworks } from '@/lib/query/networks';
 import { locateResults } from '@/lib/query/results';
-import { getVisualization } from '@/lib/viz/store';
+import { getVisualization, readableChart } from '@/lib/viz/store';
 import { runVisualization } from '@/lib/viz/run';
 import { valueInputs } from '@/lib/viz/value-inputs';
 
@@ -17,7 +17,7 @@ export const GET = route(async (request: Request, context: Context) => {
   const { id } = await context.params;
   const editor = Boolean(await optionalEditor(request));
   const chart = await getVisualization(id);
-  if (!chart || (!editor && chart.queryVisibility === 'private'))
+  if (!chart || (!editor && !readableChart(chart)))
     throw notFound('No such visualization');
   if (chart.type !== 'number')
     throw notFound('Input rows are available for number tiles');

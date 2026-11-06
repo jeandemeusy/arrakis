@@ -331,6 +331,8 @@ export type TileProps = {
   className?: string;
   /** Number variant. */
   figure?: string;
+  /** Shown in place of `figure` when the figure itself must not be shown. */
+  figureView?: ReactNode;
   /** Chart variant: cloned at a taller height when enlarged, exported as PNG. */
   chart?: ReactElement<{ height?: number }>;
   /** Exported as CSV when supplied, for the number and table variants. */
@@ -446,6 +448,7 @@ export function Tile({
   footer,
   className,
   figure,
+  figureView,
   chart,
   rows,
   children,
@@ -621,7 +624,7 @@ export function Tile({
             {sub}
             {flag}
           </span>
-          <strong>{details ? <button type="button" className="metric-value-detail" title="Why this value?" aria-label={`Why is ${title} ${figure}?`} onClick={() => detailsDialog.current?.showModal()}>{figure}</button> : figure}</strong>
+          <strong>{figureView ?? (details ? <button type="button" className="metric-value-detail" title="Why this value?" aria-label={`Why is ${title} ${figure}?`} onClick={() => detailsDialog.current?.showModal()}>{figure}</button> : figure)}</strong>
           {broken ? (
             <p className="metric-unavailable">
               {status?.reason}

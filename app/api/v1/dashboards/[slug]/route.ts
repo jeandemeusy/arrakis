@@ -7,6 +7,7 @@ import {
 } from '@/lib/api/handler';
 import {
   archiveDashboard,
+  forReader,
   requireDashboard,
   updateDashboard,
 } from '@/lib/viz/store';
@@ -18,7 +19,8 @@ type Context = { params: Promise<{ slug: string }> };
 export const GET = route(async (request: Request, context: Context) => {
   const { slug } = await context.params;
   const editor = Boolean(await optionalEditor(request));
-  return noStore(request, { dashboard: await requireDashboard(slug, editor) });
+  const dashboard = await requireDashboard(slug, editor);
+  return noStore(request, { dashboard: editor ? dashboard : forReader(dashboard) });
 });
 
 /** Title, description, visibility and variables. Widgets go through /widgets. */
