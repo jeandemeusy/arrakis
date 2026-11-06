@@ -266,6 +266,14 @@ export async function runVisualization(options: {
       }
       throw error;
     } finally {
+      // Whatever the SQL changed for the session — a setting through
+      // set_config(…, false), an advisory lock — must not reach the next
+      // run handed this connection: it goes back clean, or not at all.
+      if (!broken) {
+        await client.query('DISCARD ALL').catch(() => {
+          broken = true;
+        });
+      }
       client.release(broken);
     }
   }

@@ -472,6 +472,19 @@ describe(
         const write = await preview({ sql: 'DELETE FROM sessions' });
         assert.equal(write.status, 400);
       });
+
+      it('leaves nothing on its connection for the next run', async () => {
+        const set = await preview({
+          sql: `SELECT set_config('arrakis.leak', 'left behind', false) AS v FROM {{result}} LIMIT 1`,
+        });
+        assert.equal(set.status, 200, JSON.stringify(set.data));
+        for (let run = 0; run < 3; run += 1) {
+          const { data } = await preview({
+            sql: `SELECT current_setting('arrakis.leak', true) AS v FROM {{result}} LIMIT 1`,
+          });
+          assert.notEqual(data.rows?.[0]?.[0], 'left behind');
+        }
+      });
     });
 
     describe('saved visualizations and dashboards', () => {
