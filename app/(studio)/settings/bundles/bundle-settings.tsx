@@ -288,7 +288,7 @@ export function BundleSettings() {
       </header>
       {user === null && (
         <p className="studio-muted">
-          <Link href="/login?next=/settings/bundles">Unlock editing</Link> to
+          <Link href="/login?next=/settings/bundles">Sign in</Link> to
           import or export bundles.
         </p>
       )}

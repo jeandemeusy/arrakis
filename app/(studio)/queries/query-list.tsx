@@ -64,7 +64,7 @@ export function QueryList() {
           <p className="studio-muted">
             {user
               ? 'Every saved query and fragment. Private ones are visible to editors only.'
-              : 'Public queries behind the dashboard. Unlock editing to write your own.'}
+              : 'Public queries behind the dashboard. Sign in to write your own.'}
           </p>
         </div>
         <LockedLink

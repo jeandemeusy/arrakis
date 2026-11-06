@@ -341,21 +341,21 @@ export function Sidebar() {
             <button
               type="button"
               className="nav-link"
-              title="Lock editing"
+              title="Sign out"
               onClick={() => void signOut().then(() => router.refresh())}
             >
               <LogOut size={16} aria-hidden="true" />
-              <span>Lock editing</span>
+              <span>Sign out</span>
             </button>
           ) : (
             <Link
               className="nav-link"
-              title="Unlock editing"
+              title="Sign in"
               href={`/login?next=${encodeURIComponent(pathname)}`}
               onClick={close}
             >
               <LogIn size={16} aria-hidden="true" />
-              <span>Unlock editing</span>
+              <span>Sign in</span>
             </Link>
           )}
           <button

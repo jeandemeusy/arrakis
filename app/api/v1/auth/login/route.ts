@@ -5,7 +5,7 @@ import { authenticate, sessionCookie } from '@/lib/auth/session';
 export const dynamic = 'force-dynamic';
 
 /**
- * Unlocks editing.
+ * Signs in.
  *
  * `{ "password": "…" }` signs in as the single `editor` account. A `username`
  * is accepted too, so the form only has to grow a field once there are more
