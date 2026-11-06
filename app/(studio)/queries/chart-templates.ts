@@ -56,9 +56,34 @@ export function categoryColumn(
   );
 }
 
+/** `block`, `deployed_block`, `block_number`: a position on the chain. */
+const BLOCKISH = /(^|_)block(_number)?$/i;
+
+/**
+ * The block column a chart most likely plots over, when the result has no
+ * time column: `block` itself if there is one, else another block-like
+ * number that is not the head.
+ */
+export function blockColumn(columns: ScopeColumn[]): ScopeColumn | undefined {
+  const blocks = columns.filter(
+    (column) => NUMERIC.includes(column.type) && BLOCKISH.test(column.name),
+  );
+  return (
+    blocks.find((column) => column.name === 'block') ??
+    blocks.find((column) => !/^head/i.test(column.name))
+  );
+}
+
+/** The column holding where a block window ends: the head block. */
+function headColumn(columns: ScopeColumn[]): ScopeColumn | undefined {
+  return columns.find(
+    (column) => NUMERIC.includes(column.type) && /^head(_block)?$/i.test(column.name),
+  );
+}
+
 export function numberColumn(columns: ScopeColumn[]): ScopeColumn | undefined {
   return columns.find(
-    (column) => NUMERIC.includes(column.type) && column.name !== 'block',
+    (column) => NUMERIC.includes(column.type) && !BLOCKISH.test(column.name),
   );
 }
 
@@ -67,6 +92,42 @@ export function templates(columns: ScopeColumn[]): Template[] {
   const moment = momentColumn(columns);
   const category = categoryColumn(columns);
   const out: Template[] = [];
+  // Without a time column, a block column is the axis: windows count blocks
+  // back from the head, and bins are round block ranges.
+  const block = time ? undefined : blockColumn(columns);
+  const head = headColumn(columns);
+  const blockWindow = block
+    ? { column: block.name, ...(head ? { anchor: head.name } : {}) }
+    : undefined;
+  const value = numberColumn(columns);
+  if (block && value) {
+    // A result that already holds one value per block (a rolling count, a
+    // balance) is plotted as it is, point by point.
+    out.push({
+      id: 'block-series',
+      title: `${value.name} over blocks`,
+      description: `${value.name} at each ${block.name}, as a line.`,
+      type: 'line',
+      builder: {
+        window: blockWindow,
+        groups: [{ column: block.name }],
+        measures: [{ fn: 'max', columns: [value.name], as: value.name }],
+      },
+    });
+  }
+  if (block) {
+    out.push({
+      id: 'block-trend',
+      title: 'Trend over blocks',
+      description: `Rows per block range, by ${block.name}.`,
+      type: 'bar',
+      builder: {
+        window: blockWindow,
+        groups: [{ column: block.name, unit: 'auto' }],
+        measures: [COUNT],
+      },
+    });
+  }
   if (time) {
     out.push({
       id: 'trend',
@@ -85,10 +146,16 @@ export function templates(columns: ScopeColumn[]): Template[] {
     title: 'Single number',
     description: time
       ? `How many rows in the dashboard's range, by ${time.name}.`
-      : 'How many rows there are.',
+      : block
+        ? `How many rows in the dashboard's block window, by ${block.name}.`
+        : 'How many rows there are.',
     type: 'number',
     builder: {
-      ...(time ? { window: { column: time.name } } : {}),
+      ...(time
+        ? { window: { column: time.name } }
+        : blockWindow
+          ? { window: blockWindow }
+          : {}),
       measures: [COUNT],
     },
   });
@@ -191,7 +258,17 @@ export function templates(columns: ScopeColumn[]): Template[] {
     type: 'table',
     builder: time
       ? { sort: [{ column: time.name, desc: true }], limit: 500 }
-      : { limit: 500 },
+      : block
+        ? { sort: [{ column: block.name, desc: true }], limit: 500 }
+        : { limit: 500 },
+  });
+  // Any type, from nothing: the type bar above the form picks the rest.
+  out.push({
+    id: 'blank',
+    title: 'Blank chart',
+    description: 'Pick the type and fields yourself.',
+    type: 'line',
+    builder: adaptBuilder('line', { measures: [COUNT] }, columns),
   });
   return out;
 }
@@ -210,17 +287,18 @@ export function adaptBuilder(
   if (!next.measures?.length && type !== 'table') next.measures = [COUNT];
   const groups = next.groups ?? [];
   const time = timeColumn(columns);
+  const block = time ? undefined : blockColumn(columns);
   const moment = momentColumn(columns);
   const category = categoryColumn(columns);
   const axis = (column: ScopeColumn): { column: string; unit?: Unit } =>
-    TEMPORAL.includes(column.type)
+    TEMPORAL.includes(column.type) || column === block
       ? { column: column.name, unit: 'auto' }
       : { column: column.name };
   switch (type) {
     case 'line':
     case 'area':
     case 'bar': {
-      const fallback = time ?? category;
+      const fallback = time ?? block ?? category;
       if (!groups.length && fallback) next.groups = [axis(fallback)];
       break;
     }

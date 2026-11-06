@@ -867,12 +867,15 @@ export function VisualizationsPanel({
   const rangeUnits = ((): Record<string, 'time' | 'blocks'> => {
     const units: Record<string, 'time' | 'blocks'> = {};
     for (const step of activeSteps) {
-      if (step.op === 'bucket' && step.unit === 'auto')
-        units[step.var ?? 'range'] ??= 'time';
-      if (step.op !== 'range' || step.window !== undefined) continue;
+      if (step.op !== 'bucket' && step.op !== 'range') continue;
       const column = base.find((entry) => entry.name === step.column);
-      units[step.var ?? 'range'] =
-        column && NUMERIC.includes(column.type) ? 'blocks' : 'time';
+      const unit = column && NUMERIC.includes(column.type) ? 'blocks' : 'time';
+      // An auto bin sizes itself to the window, so it reads the same variable,
+      // in blocks when it bins a number column.
+      if (step.op === 'bucket' && step.unit === 'auto')
+        units[step.var ?? 'range'] ??= unit;
+      if (step.op === 'range' && step.window === undefined)
+        units[step.var ?? 'range'] = unit;
     }
     return units;
   })();
@@ -984,11 +987,28 @@ export function VisualizationsPanel({
 
   const changeType = (type: VisualizationType) => {
     if (!draft) return;
+    // A new chart still named after the template it started from takes the
+    // name of the type it becomes, so a line is not left titled "Share as a
+    // donut".
+    const list = templates(base);
+    const renamed =
+      !draft.id && list.some((entry) => entry.title === draft.title)
+        ? {
+            title:
+              list.find((entry) => entry.type === type && entry.id !== 'blank')
+                ?.title ?? `${TYPE_LABELS[type]} chart`,
+          }
+        : {};
     if (draft.mode === 'builder') {
-      update({ type, builder: adaptBuilder(type, draft.builder, base) });
+      update({
+        type,
+        ...renamed,
+        builder: adaptBuilder(type, draft.builder, base),
+      });
     } else {
       update({
         type,
+        ...renamed,
         encoding:
           Object.keys(draft.encoding).length && draft.type !== 'table'
             ? draft.encoding

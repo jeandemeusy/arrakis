@@ -108,6 +108,7 @@
   --tile-border: 1px;
   --tile-border-color: var(--line);
   --tile-shadow: 0 1px 2px rgb(0 0 0 / 0.04);
+  --tile-radius: 3px;
   --control-border: 1px;
   --radius: 8px;
   --radius-pill: 999px;
@@ -594,7 +595,7 @@ main {
   display: flex;
   flex-direction: column;
   border: var(--tile-border) solid var(--tile-border-color);
-  border-radius: var(--radius);
+  border-radius: var(--tile-radius);
   box-shadow: var(--tile-shadow);
 }
 
@@ -1182,6 +1183,7 @@ main {
   --tile-border: 3px;
   --tile-border-color: #000;
   --tile-shadow: 6px 6px 0 #000;
+  --tile-radius: 0px;
   --control-border: 2px;
   --radius: 0px;
   --radius-pill: 0px;
