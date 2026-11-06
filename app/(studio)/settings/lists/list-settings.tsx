@@ -111,7 +111,7 @@ export function ListSettings() {
       </header>
       {user === null && (
         <p className="studio-muted">
-          <Link href="/login?next=/settings/lists">Unlock editing</Link> to see
+          <Link href="/login?next=/settings/lists">Sign in</Link> to see
           and change lists.
         </p>
       )}

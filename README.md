@@ -53,7 +53,7 @@ superuser in without one. A `.pgdata` made by an older `dev:db` is converted on
 its next start — its tables are handed to `arrakis` — so update `.env.local`
 with the new URLs it prints.
 
-Then `npm run dev`, open <http://localhost:3000/>, unlock editing, import
+Then `npm run dev`, open <http://localhost:3000/>, sign in, import
 [`examples/bundles/gnosis-vpn.json`](./examples/bundles/gnosis-vpn.json) under
 **Settings → Bundles** for ready-made dashboards. The demo index registers its
 three exits in a service registry, so the bundle finds them on its own.
@@ -96,7 +96,7 @@ owns this database and nothing more — **never a superuser**, in any
 environment: hand-written chart SQL runs inside this database, so whatever
 the role may do on the server, a chart may try.
 
-Editing is unlocked with one password: `npm run hash-password` prints the hash
+Signing in takes one password, which lets you edit: `npm run hash-password` prints the hash
 to put in `ARRAKIS_EDITOR_PASSWORD_HASH`; the password itself is never stored.
 Changing the variable and restarting rotates it; unsetting it disables editing
 and ends every session. Underneath it is one `editor` account in a `users`

@@ -569,13 +569,20 @@ export function DashboardView({
     if (editing) return null;
     const entry = data?.widgets.find((candidate) => candidate.id === widget.id);
     if (!entry) return LOADING;
-    if (entry.state !== 'ok' && entry.state !== 'error') return null;
+    if (
+      entry.state !== 'ok' &&
+      entry.state !== 'error' &&
+      entry.state !== 'private'
+    )
+      return null;
     let payload = payloads.get(entry);
     if (!payload) {
       payload =
         entry.state === 'ok'
           ? { state: 'ok', data: entry.data }
-          : { state: 'error', error: entry.error };
+          : entry.state === 'private'
+            ? { state: 'private' }
+            : { state: 'error', error: entry.error };
       payloads.set(entry, payload);
     }
     return payload;

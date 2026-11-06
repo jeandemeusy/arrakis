@@ -19,6 +19,8 @@ export type DataResponse = {
         data: Extract<WidgetPayload, { state: 'ok' }>['data'];
       }
     | { id: string; state: 'hidden' | 'text' }
+    /** Its query is private or archived: the tile stays, the data does not come. */
+    | { id: string; state: 'private' }
     | { id: string; state: 'error'; error: { status: number; message: string } }
   >;
 };

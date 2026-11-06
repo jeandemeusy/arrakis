@@ -24,6 +24,8 @@ export type Visualization = {
   query: string;
   queryTitle: string;
   queryVisibility: 'private' | 'unlisted' | 'public';
+  /** Its query was archived: like a private one, it is for editors only. */
+  queryArchived: boolean;
   title: string;
   description: string;
   type: VisualizationType;
@@ -37,6 +39,7 @@ type VisualizationRow = {
   query: string;
   query_title: string;
   query_visibility: Visualization['queryVisibility'];
+  query_archived: boolean;
   title: string;
   description: string;
   type: VisualizationType;
@@ -47,7 +50,9 @@ type VisualizationRow = {
 
 const SELECT_VISUALIZATION = `
   SELECT v.id, q.slug AS query, q.title AS query_title,
-         q.visibility AS query_visibility, v.title, v.description, v.type,
+         q.visibility AS query_visibility,
+         q.archived_at IS NOT NULL AS query_archived,
+         v.title, v.description, v.type,
          v.config, u.username AS created_by, v.updated_at
   FROM visualizations v
   JOIN queries q ON q.id = v.query_id
@@ -60,6 +65,7 @@ function toVisualization(row: VisualizationRow): Visualization {
     query: row.query,
     queryTitle: row.query_title,
     queryVisibility: row.query_visibility,
+    queryArchived: row.query_archived,
     title: row.title,
     description: row.description,
     type: row.type,
@@ -440,6 +446,46 @@ export async function getDashboard(slug: string): Promise<Dashboard | null> {
     updatedAt: row.updated_at.toISOString(),
     archivedAt: row.archived_at?.toISOString() ?? null,
     widgets: await widgetsOf(row.id),
+  };
+}
+
+/**
+ * Whether someone who is not an editor may see what a chart shows: not when
+ * its query is private or archived, wherever the chart is placed.
+ */
+export function readableChart(visualization: Visualization): boolean {
+  return visualization.queryVisibility !== 'private' && !visualization.queryArchived;
+}
+
+/**
+ * A dashboard as a reader sees it. A chart whose query they may not read
+ * keeps its place, size and title, so the layout is the one its editors made,
+ * but nothing that would tell what it computes: no query, no config, no SQL.
+ * Its data answers `private` (dashboard-data.ts).
+ */
+export function forReader(dashboard: Dashboard): Dashboard {
+  return {
+    ...dashboard,
+    widgets: dashboard.widgets.map((widget) =>
+      widget.visualization && !readableChart(widget.visualization)
+        ? {
+            ...widget,
+            visualization: {
+              id: widget.visualization.id,
+              query: '',
+              queryTitle: '',
+              queryVisibility: 'private',
+              queryArchived: false,
+              title: widget.visualization.title,
+              description: '',
+              type: widget.visualization.type,
+              config: { steps: [], encoding: {}, options: {} },
+              createdBy: null,
+              updatedAt: widget.visualization.updatedAt,
+            },
+          }
+        : widget,
+    ),
   };
 }
 

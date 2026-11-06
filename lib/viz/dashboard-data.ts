@@ -8,7 +8,12 @@ import {
   targetNetworks,
 } from '../query/networks';
 import { runVisualization, type VisualizationData } from './run';
-import type { Dashboard, Variable, Visualization } from './store';
+import {
+  readableChart,
+  type Dashboard,
+  type Variable,
+  type Visualization,
+} from './store';
 import { normalizeVariableValue } from './variable-value';
 
 /**
@@ -23,6 +28,8 @@ import { normalizeVariableValue } from './variable-value';
 export type WidgetData =
   | { id: string; state: 'ok'; data: VisualizationData }
   | { id: string; state: 'hidden' }
+  /** Its query is private or archived, and the reader is not an editor. */
+  | { id: string; state: 'private' }
   | { id: string; state: 'text' }
   | { id: string; state: 'error'; error: ApiErrorShape };
 
@@ -159,6 +166,8 @@ export async function visualizationData(
 export async function dashboardData(
   dashboard: Dashboard,
   supplied: Record<string, string | undefined>,
+  /** Whether the reader may see charts on private or archived queries. */
+  editor: boolean,
 ): Promise<{
   vars: Record<string, string | undefined>;
   widgets: WidgetData[];
@@ -181,6 +190,11 @@ export async function dashboardData(
           state: 'error',
           error: { status: 404, message: 'This visualization was removed.' },
         };
+      }
+      // Checked before anything is computed: a private query's result is
+      // never read on a reader's behalf, not even to be discarded.
+      if (!editor && !readableChart(widget.visualization)) {
+        return { id: widget.id, state: 'private' };
       }
       try {
         return {

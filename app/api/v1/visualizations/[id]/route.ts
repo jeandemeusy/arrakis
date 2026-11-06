@@ -10,6 +10,7 @@ import {
   archiveVisualization,
   getVisualization,
   updateVisualization,
+  readableChart,
 } from '@/lib/viz/store';
 
 export const dynamic = 'force-dynamic';
@@ -20,7 +21,7 @@ export const GET = route(async (request: Request, context: Context) => {
   const { id } = await context.params;
   const editor = Boolean(await optionalEditor(request));
   const visualization = await getVisualization(id);
-  if (!visualization || (!editor && visualization.queryVisibility === 'private')) {
+  if (!visualization || (!editor && !readableChart(visualization))) {
     throw notFound('No such visualization');
   }
   return noStore(request, { visualization });

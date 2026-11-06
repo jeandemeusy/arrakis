@@ -2,7 +2,7 @@ import { notFound } from '@/lib/api/errors';
 import { optionalEditor, route, varsFromSearch } from '@/lib/api/handler';
 import { json } from '@/lib/http';
 import { visualizationData } from '@/lib/viz/dashboard-data';
-import { getVisualization } from '@/lib/viz/store';
+import { getVisualization, readableChart } from '@/lib/viz/store';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,7 +16,7 @@ export const GET = route(async (request: Request, context: Context) => {
   const { id } = await context.params;
   const editor = Boolean(await optionalEditor(request));
   const visualization = await getVisualization(id);
-  if (!visualization || (!editor && visualization.queryVisibility === 'private')) {
+  if (!visualization || (!editor && !readableChart(visualization))) {
     throw notFound('No such visualization');
   }
   const url = new URL(request.url);

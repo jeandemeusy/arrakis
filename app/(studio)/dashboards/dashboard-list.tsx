@@ -324,7 +324,7 @@ export function DashboardList() {
             </>
           ) : (
             <>
-              <Link href="/login?next=/">Unlock editing</Link> to create one.
+              <Link href="/login?next=/">Sign in</Link> to create one.
             </>
           )}
         </p>

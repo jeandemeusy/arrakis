@@ -109,7 +109,7 @@ export function RunsMonitor() {
       {user && <h2>Running now</h2>}
       {user === null && (
         <p className="studio-muted">
-          <Link href="/login?next=/settings/runs">Unlock editing</Link> to see
+          <Link href="/login?next=/settings/runs">Sign in</Link> to see
           what is running.
         </p>
       )}

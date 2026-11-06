@@ -37,11 +37,12 @@ export function LoginForm({ next }: { next: string }) {
         onSubmit={(event) => void submit(event)}
       >
         <h1>
-          <KeyRound size={18} aria-hidden="true" /> Unlock editing
+          <KeyRound size={18} aria-hidden="true" /> Sign in
         </h1>
         <p className="studio-muted">
-          Reading public queries needs nothing. Writing, running and changing
-          exits needs the editor password.
+          Reading what is public needs nothing. Signing in with the editor
+          password lets you write and run queries, build dashboards, and see
+          what is private.
         </p>
         <label className="studio-field">
           <span>Password</span>
@@ -65,7 +66,7 @@ export function LoginForm({ next }: { next: string }) {
           type="submit"
           disabled={busy || !password}
         >
-          {busy ? 'Checking…' : 'Unlock'}
+          {busy ? 'Checking…' : 'Sign in'}
         </button>
       </form>
     </main>

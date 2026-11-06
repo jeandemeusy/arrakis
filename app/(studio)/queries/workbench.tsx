@@ -752,7 +752,7 @@ export function Workbench({
       <main className="studio-page">
         <p>
           Writing queries needs the editor password.{' '}
-          <Link href="/login?next=/queries/new">Unlock editing</Link>
+          <Link href="/login?next=/queries/new">Sign in</Link>
         </p>
       </main>
     );

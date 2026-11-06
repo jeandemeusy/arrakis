@@ -38,7 +38,7 @@ export function LockedLink({
         {children}
       </Link>
     );
-  const hint = 'Locked: unlock editing to use this.';
+  const hint = 'Sign in to use this.';
   return (
     <a
       href={href}
@@ -68,7 +68,7 @@ export function LockedButton({
   onClick: () => void;
   children: ReactNode;
 }) {
-  const hint = 'Locked: unlock editing to use this.';
+  const hint = 'Sign in to use this.';
   return (
     <button
       type="button"

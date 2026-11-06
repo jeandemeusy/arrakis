@@ -95,9 +95,10 @@ export default function GuidePage() {
               </li>
             </ol>
             <p>
-              Anyone can read what is public. <strong>Unlock editing</strong> at
-              the bottom of the sidebar asks for the editor password; after that
-              you can write queries, build charts and arrange dashboards.
+              Anyone can read what is public. <strong>Sign in</strong> at the
+              bottom of the sidebar asks for the editor password; after that you
+              can write queries, build charts and arrange dashboards, and see
+              what is private.
             </p>
             <p>
               The switches at the foot of the sidebar change how it looks: the

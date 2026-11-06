@@ -6,7 +6,7 @@ import {
 } from '@/lib/api/handler';
 import { runStates } from '@/lib/query/results';
 import { dashboardTargets, resolveVariables } from '@/lib/viz/dashboard-data';
-import { requireDashboard } from '@/lib/viz/store';
+import { readableChart, requireDashboard } from '@/lib/viz/store';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,6 +28,11 @@ export const GET = route(async (request: Request, context: Context) => {
   const queries = [
     ...new Set(
       dashboard.widgets
+        // A reader is not told what a private tile's query is, nor when it runs.
+        .filter(
+          (widget) =>
+            editor || !widget.visualization || readableChart(widget.visualization),
+        )
         .map((widget) => widget.visualization?.query)
         .filter((query): query is string => Boolean(query)),
     ),

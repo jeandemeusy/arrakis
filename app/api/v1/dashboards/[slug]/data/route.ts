@@ -15,7 +15,11 @@ export const GET = route(async (request: Request, context: Context) => {
   const { slug } = await context.params;
   const editor = Boolean(await optionalEditor(request));
   const dashboard = await requireDashboard(slug, editor);
-  const data = await dashboardData(dashboard, varsFromSearch(new URL(request.url)));
+  const data = await dashboardData(
+    dashboard,
+    varsFromSearch(new URL(request.url)),
+    editor,
+  );
   return json(request, data, {
     headers: {
       'cache-control':

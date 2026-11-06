@@ -890,6 +890,84 @@ describe(
         );
       });
 
+      it('keeps a tile on a private or archived query, without its data', async () => {
+        const db = await lib.app.appDb();
+        type Shown = {
+          dashboard: {
+            widgets: Array<{
+              visualization: {
+                id: string;
+                title: string;
+                query: string;
+                queryTitle: string;
+                config: { steps: unknown[]; sql?: string };
+              } | null;
+            }>;
+          };
+        };
+        type Read = {
+          widgets: Array<{ id: string; state: string; data?: unknown }>;
+        };
+        const tileOf = async (cookieValue?: string) =>
+          (
+            await body<Shown>(
+              await routes.dashboard.GET(
+                request('GET', '/api/v1/dashboards/usage', cookieValue ? { cookie: cookieValue } : {}),
+                context({ slug: 'usage' }),
+              ),
+            )
+          ).dashboard.widgets.find((widget) => widget.visualization?.id === daily)!;
+        const dataOf = async (cookieValue?: string) =>
+          body<Read>(
+            await routes.dashboardData.GET(
+              request('GET', '/api/v1/dashboards/usage/data', cookieValue ? { cookie: cookieValue } : {}),
+              context({ slug: 'usage' }),
+            ),
+          );
+
+        for (const hide of [
+          "UPDATE queries SET visibility = 'private' WHERE slug = 'timed'",
+          'UPDATE queries SET archived_at = now() WHERE slug = \'timed\'',
+        ]) {
+          await db.query(hide);
+          try {
+            // The reader keeps the tile and its title, and nothing else.
+            const tile = await tileOf();
+            assert.equal(tile.visualization?.title, 'Redemptions per day');
+            assert.equal(tile.visualization?.query, '');
+            assert.equal(tile.visualization?.queryTitle, '');
+            assert.deepEqual(tile.visualization?.config.steps, []);
+
+            const shown = await dataOf();
+            const index = shown.widgets.findIndex((entry) => entry.state === 'private');
+            assert.ok(index >= 0, JSON.stringify(shown.widgets.map((entry) => entry.state)));
+            assert.equal(shown.widgets[index].data, undefined);
+
+            const status = await body<{ queries: Array<{ query: string }> }>(
+              await routes.dashboardStatus.GET(
+                request('GET', '/api/v1/dashboards/usage/status'),
+                context({ slug: 'usage' }),
+              ),
+            );
+            assert.ok(status.queries.every((entry) => entry.query !== 'timed'));
+
+            const direct = await routes.visualizationData.GET(
+              request('GET', `/api/v1/visualizations/${daily}/data`),
+              context({ id: daily }),
+            );
+            assert.equal(direct.status, 404);
+
+            // Editors still see it all.
+            assert.equal((await tileOf(cookie)).visualization?.query, 'timed');
+            assert.ok((await dataOf(cookie)).widgets.every((entry) => entry.state !== 'private'));
+          } finally {
+            await db.query(
+              "UPDATE queries SET visibility = 'public', archived_at = NULL WHERE slug = 'timed'",
+            );
+          }
+        }
+      });
+
       it('takes an archived visualization off its dashboards', async () => {
         const removed = await routes.visualization.DELETE(
           request('DELETE', `/api/v1/visualizations/${perClient}`, { cookie }),

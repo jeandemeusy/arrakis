@@ -25,7 +25,7 @@ export type Principal = {
 
 export type Credentials = { username?: string; password: string };
 
-/** The account the password-only login unlocks. */
+/** The account the password-only sign-in opens. */
 export const DEFAULT_USERNAME = 'editor';
 
 const SESSION_HOURS = 12;
