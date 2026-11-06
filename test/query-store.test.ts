@@ -195,6 +195,55 @@ describe(
         assert.equal(blocked.status, 429);
         assert.ok(blocked.headers.get('retry-after'));
       });
+
+      it('counts the address the proxy saw, not one the client wrote', async () => {
+        for (let attempt = 0; attempt < 10; attempt += 1) {
+          await routes.login.POST(
+            request('POST', '/api/v1/auth/login', {
+              body: { password: 'x' },
+              // A fresh made-up address each time, then the proxy's entry.
+              ip: `10.0.0.${attempt}, 198.51.100.20`,
+            }),
+            undefined,
+          );
+        }
+        const blocked = await routes.login.POST(
+          request('POST', '/api/v1/auth/login', {
+            body: { password: PASSWORD },
+            ip: '10.0.0.99, 198.51.100.20',
+          }),
+          undefined,
+        );
+        assert.equal(blocked.status, 429);
+      });
+
+      it('keeps the global cap from locking out an address that signed in', async () => {
+        const db = await lib.app.appDb();
+        await db.query(
+          `INSERT INTO login_attempts (ip, username, succeeded)
+           SELECT '192.0.2.' || (n % 250), 'editor', false FROM generate_series(1, 200) AS n`,
+        );
+        try {
+          const stranger = await routes.login.POST(
+            request('POST', '/api/v1/auth/login', {
+              body: { password: PASSWORD },
+              ip: '192.0.2.251',
+            }),
+            undefined,
+          );
+          assert.equal(stranger.status, 429);
+          // The address the suite signed in from at the start.
+          const editor = await routes.login.POST(
+            request('POST', '/api/v1/auth/login', {
+              body: { password: PASSWORD },
+            }),
+            undefined,
+          );
+          assert.equal(editor.status, 200);
+        } finally {
+          await db.query("DELETE FROM login_attempts WHERE ip LIKE '192.0.2.%'");
+        }
+      });
     });
 
     describe('ad-hoc runs', () => {

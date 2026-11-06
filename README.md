@@ -106,7 +106,15 @@ editors are more rows, not a redesign.
 Sessions are `HttpOnly`, `SameSite=Strict` cookies (`__Host-` and `Secure` in
 production) backed by the database, so every replica honours them. Ten failed
 logins from one address, or two hundred from everywhere, in 15 minutes locks
-logins for 15 minutes. State-changing requests from another origin are refused;
+logins for 15 minutes — except, for the second, from an address that signed in
+successfully in the last day, so an attack cannot lock the editors out.
+
+The address is the one the proxy in front saw: the entry
+`ARRAKIS_TRUSTED_PROXIES` places from the right of `X-Forwarded-For` (1 by
+default — one reverse proxy), never what the client wrote further left. Set
+it to the number of proxies the request crosses, or set
+`ARRAKIS_CLIENT_IP_HEADER` to a header your proxy sets itself (`x-real-ip`,
+`cf-connecting-ip`). State-changing requests from another origin are refused;
 set `ARRAKIS_ALLOWED_ORIGINS` if the studio is served from a second hostname.
 Every response carries a Content Security Policy (scripts, styles, images and
 requests from the app's own origin only; no framing), `nosniff`, a strict
