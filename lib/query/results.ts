@@ -480,6 +480,23 @@ export async function readResult(options: {
     };
     if (!located.tables.length) return page;
     const relation = storedRelation(located.tables, multi);
+    // Past the last stored row there is nothing to read; asking the database
+    // would still make it scan every row to find that out.
+    const stored = located.networks
+      .filter((network) =>
+        located.tables.some((entry) => entry.network === network.id),
+      )
+      .reduce((sum, network) => sum + (network.rowCount ?? 0), 0);
+    if (options.offset >= stored) {
+      const columns = located.tables[0].columns;
+      page.columns = multi
+        ? [
+            { name: 'network', type: 'text' },
+            ...columns.map(({ name, type }) => ({ name, type })),
+          ]
+        : columns.map(({ name, type }) => ({ name, type }));
+      return page;
+    }
     try {
       const { rows } = await db.query({
         text: `${relation.sql} LIMIT $1 OFFSET $2`,

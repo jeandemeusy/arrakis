@@ -1023,6 +1023,62 @@ describe(
         }
       });
 
+      it('limits how often one address may read, signed out', async () => {
+        const limits = await import('../lib/api/rate-limit');
+        process.env.ARRAKIS_READ_RATE_LIMIT = '3';
+        limits.resetReadLimits();
+        try {
+          const read = (ip: string, cookieValue?: string) =>
+            routes.dashboardData.GET(
+              request('GET', '/api/v1/dashboards/usage/data', {
+                ip,
+                ...(cookieValue ? { cookie: cookieValue } : {}),
+              }),
+              context({ slug: 'usage' }),
+            );
+          for (let n = 0; n < 3; n += 1)
+            assert.equal((await read('198.51.100.70')).status, 200);
+          const limited = await read('198.51.100.70');
+          assert.equal(limited.status, 429);
+          assert.ok(limited.headers.get('retry-after'));
+          // Another address has its own budget; a signed-in editor has none.
+          assert.equal((await read('198.51.100.71')).status, 200);
+          assert.equal((await read('198.51.100.70', cookie)).status, 200);
+        } finally {
+          delete process.env.ARRAKIS_READ_RATE_LIMIT;
+          limits.resetReadLimits();
+        }
+      });
+
+      it('answers a page past the last stored row without reading', async () => {
+        const results = await import('../app/api/v1/queries/[slug]/results/route');
+        const page = await body<{ rows: unknown[]; columns: unknown[] }>(
+          await results.GET(
+            request('GET', '/api/v1/queries/timed/results?offset=99000000'),
+            context({ slug: 'timed' }),
+          ),
+        );
+        assert.deepEqual(page.rows, []);
+        assert.ok(page.columns.length > 0);
+      });
+
+      it('draws charts in turn when more are asked for than may run at once', async () => {
+        process.env.ARRAKIS_CHART_CONCURRENCY = '1';
+        try {
+          const answers = await Promise.all(
+            Array.from({ length: 6 }, (_, n) =>
+              preview({ steps: [{ op: 'limit', n: n + 1 }] }),
+            ),
+          );
+          assert.deepEqual(
+            answers.map((answer) => answer.status),
+            [200, 200, 200, 200, 200, 200],
+          );
+        } finally {
+          delete process.env.ARRAKIS_CHART_CONCURRENCY;
+        }
+      });
+
       it('takes an archived visualization off its dashboards', async () => {
         const removed = await routes.visualization.DELETE(
           request('DELETE', `/api/v1/visualizations/${perClient}`, { cookie }),

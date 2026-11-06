@@ -1,3 +1,4 @@
+import { limitReader } from '@/lib/api/rate-limit';
 import { badRequest, notFound } from '@/lib/api/errors';
 import {
   integerParam,
@@ -26,6 +27,7 @@ type Context = { params: Promise<{ slug: string }> };
 export const GET = route(async (request: Request, context: Context) => {
   const { slug } = await context.params;
   const editor = Boolean(await optionalEditor(request));
+  if (!editor) limitReader(request);
   const query = await requireQuery(slug, editor);
   const url = new URL(request.url);
 

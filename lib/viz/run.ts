@@ -2,6 +2,8 @@ import 'server-only';
 
 import { createHash, randomBytes } from 'node:crypto';
 
+import type { PoolClient } from 'pg';
+
 import { HttpError, badRequest } from '../api/errors';
 import { appDb } from '../db/app';
 import { chartsDb } from '../db/charts';
@@ -64,6 +66,40 @@ function remember(key: string, data: VisualizationData) {
     if (oldest.done) break;
     cache.delete(oldest.value);
   }
+}
+
+/**
+ * Charts computed at once, on this replica. A chart that is not cached takes
+ * a connection for up to ten seconds; without a bound, a burst of them —
+ * someone cycling a text variable — would hold the app database's pool and
+ * stall logins and saves with it. Beyond ARRAKIS_CHART_CONCURRENCY (4) running
+ * and ARRAKIS_CHART_QUEUE (32) waiting, a chart answers 429.
+ */
+const computing = { running: 0, waiting: [] as Array<() => void> };
+
+function chartSetting(name: string, fallback: number): number {
+  const value = Number.parseInt(process.env[name] ?? '', 10);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+async function startComputing(): Promise<void> {
+  if (computing.running < chartSetting('ARRAKIS_CHART_CONCURRENCY', 4)) {
+    computing.running += 1;
+    return;
+  }
+  if (computing.waiting.length >= chartSetting('ARRAKIS_CHART_QUEUE', 32)) {
+    throw new HttpError(429, 'Too many charts are being drawn; try again shortly.', {
+      headers: { 'retry-after': '5' },
+    });
+  }
+  // The slot is handed over by the run that ends, not counted again here.
+  await new Promise<void>((resolve) => computing.waiting.push(resolve));
+}
+
+function stopComputing(): void {
+  const next = computing.waiting.shift();
+  if (next) next();
+  else computing.running -= 1;
 }
 
 /** How long a chart run's tickets stay valid, beyond its own time limit. */
@@ -229,21 +265,6 @@ export async function runVisualization(options: {
         text = text.replaceAll(slot, `$${values.length}::text`);
       }
       text = `SELECT * FROM (\n${text}\n) AS visualization LIMIT ${MAX_ROWS + 1}`;
-      if (tickets.length) await db.query(
-        `INSERT INTO chart_access.tickets (ticket, table_name, expires_at)
-         SELECT ticket, name, now() + make_interval(secs => $3)
-         FROM unnest($1::text[], $2::text[]) AS issued(ticket, name)`,
-        [
-          tickets,
-          ticketed.map((table) => {
-            if (!isResultTable(table)) {
-              throw new Error(`Not a result table name: ${table}`);
-            }
-            return table;
-          }),
-          (TIMEOUT_MS + TICKET_SLACK_MS) / 1000,
-        ],
-      );
     } else {
       const built = buildSql(
         { sql: relation.sql, columns: relation.columns },
@@ -254,7 +275,39 @@ export async function runVisualization(options: {
       declared = built.columns;
     }
 
-    const client = await (charts ?? db).connect();
+    // A slot first, then the tickets: a chart waiting its turn must not let
+    // them expire, and one turned away must not leave any behind.
+    await startComputing();
+    let client: PoolClient;
+    try {
+      if (tickets.length)
+        await db.query(
+          `INSERT INTO chart_access.tickets (ticket, table_name, expires_at)
+           SELECT ticket, name, now() + make_interval(secs => $3)
+           FROM unnest($1::text[], $2::text[]) AS issued(ticket, name)`,
+          [
+            tickets,
+            ticketed.map((table) => {
+              if (!isResultTable(table)) {
+                throw new Error(`Not a result table name: ${table}`);
+              }
+              return table;
+            }),
+            (TIMEOUT_MS + TICKET_SLACK_MS) / 1000,
+          ],
+        );
+      client = await (charts ?? db).connect();
+    } catch (error) {
+      stopComputing();
+      if (tickets.length) {
+        await db
+          .query('DELETE FROM chart_access.tickets WHERE ticket = ANY ($1)', [
+            tickets,
+          ])
+          .catch(() => undefined);
+      }
+      throw error;
+    }
     let broken = false;
     try {
       await client.query('BEGIN READ ONLY');
@@ -321,6 +374,7 @@ export async function runVisualization(options: {
         });
       }
       client.release(broken);
+      stopComputing();
       if (tickets.length) {
         await db
           .query('DELETE FROM chart_access.tickets WHERE ticket = ANY ($1)', [

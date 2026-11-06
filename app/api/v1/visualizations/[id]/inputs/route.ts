@@ -1,3 +1,4 @@
+import { limitReader } from '@/lib/api/rate-limit';
 import { HttpError, notFound } from '@/lib/api/errors';
 import { forReader, readerNetworks } from '@/lib/api/reader';
 import {
@@ -17,6 +18,7 @@ type Context = { params: Promise<{ id: string }> };
 export const GET = route(async (request: Request, context: Context) => {
   const { id } = await context.params;
   const editor = Boolean(await optionalEditor(request));
+  if (!editor) limitReader(request);
   const chart = await getVisualization(id);
   if (!chart || (!editor && !readableChart(chart)))
     throw notFound('No such visualization');

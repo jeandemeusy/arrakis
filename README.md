@@ -130,6 +130,9 @@ referrer policy, `Cross-Origin-Opener-Policy` and, in production, HSTS
 | `ARRAKIS_QUERY_TIMEOUT_MAX_MS` | `600000` | Ceiling on any query's own time limit. |
 | `ARRAKIS_RESULT_ROW_LIMIT` | `5000000` | Most rows a stored result keeps; past it the result is marked cut. |
 | `ARRAKIS_SCHEDULER_CONCURRENCY` | `2` | Scheduled refreshes running at once, across every data source. |
+| `ARRAKIS_CHART_CONCURRENCY` | `4` | Charts computed at once on a replica; more wait. |
+| `ARRAKIS_CHART_QUEUE` | `32` | Charts waiting their turn before more are refused with `429`. |
+| `ARRAKIS_READ_RATE_LIMIT` | `300` | Requests a minute one address may make, signed out, for results, chart and dashboard data; then `429`. Per replica. |
 
 A query can set its own time limit and row cap under *Run limits* in its About
 panel; the server's ceilings above still apply. A run past its limit answers
