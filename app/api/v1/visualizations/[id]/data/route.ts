@@ -1,5 +1,6 @@
 import { notFound } from '@/lib/api/errors';
 import { optionalEditor, route, varsFromSearch } from '@/lib/api/handler';
+import { forReader, readerNetworks } from '@/lib/api/reader';
 import { json } from '@/lib/http';
 import { visualizationData } from '@/lib/viz/dashboard-data';
 import { getVisualization, readableChart } from '@/lib/viz/store';
@@ -26,7 +27,10 @@ export const GET = route(async (request: Request, context: Context) => {
     url.searchParams.get('network') ?? 'all',
     varsFromSearch(url),
     sources.length ? sources : undefined,
-  );
+  ).catch((error: unknown) => {
+    throw editor ? error : forReader(error);
+  });
+  if (!editor) data.networks = readerNetworks(data.networks);
   return json(request, data, {
     headers: {
       'cache-control':

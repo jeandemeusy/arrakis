@@ -1,4 +1,5 @@
 import { HttpError, notFound } from '@/lib/api/errors';
+import { forReader, readerNetworks } from '@/lib/api/reader';
 import {
   noStore,
   optionalEditor,
@@ -69,7 +70,10 @@ export const GET = route(async (request: Request, context: Context) => {
         { op: 'limit', n: plan.scope === 'aggregate' ? 101 : 1 },
       ],
     },
+  }).catch((error: unknown) => {
+    throw editor ? error : forReader(error);
   });
+  if (!editor) data.networks = readerNetworks(data.networks);
   return noStore(request, {
     supported: true,
     scope: plan.scope,
