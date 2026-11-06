@@ -1,5 +1,5 @@
 {
-  description = "Arrakis — Gnosis VPN on-chain metrics dashboard";
+  description = "Arrakis — SQL queries, charts and dashboards over read-only databases";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -49,10 +49,12 @@
                 relative == topLevel
                 -> lib.elem topLevel [
                   "app"
+                  "db"
+                  "instrumentation.ts"
                   "lib"
                   "public"
-                  "sql"
                   "next.config.ts"
+                  "proxy.ts"
                   "package.json"
                   "package-lock.json"
                   "tsconfig.json"
@@ -61,7 +63,7 @@
           };
 
           # Refresh with: nix run nixpkgs#prefetch-npm-deps -- package-lock.json
-          npmDepsHash = "sha256-qn37V48DBPD5f5b3Z3QSdHpbRXbws8PLAAQsQ+x9YsA=";
+          npmDepsHash = "sha256-BvPGuJrKAXIjy4NBkx77tBgfwiQ5vx9PvZRBZZ8myFA=";
 
           env = {
             NEXT_STANDALONE = "1";
@@ -84,11 +86,12 @@
 
             mkdir -p $out/share/arrakis
             cp -r .next/standalone/. $out/share/arrakis/
-            # Standalone omits these two: static assets are served from disk, and
-            # the SQL is read at runtime relative to the working directory.
+            # Standalone omits these: static assets are served from disk, and
+            # the app database migrations are read at runtime relative to the
+            # working directory.
             cp -r .next/static $out/share/arrakis/.next/static
             cp -r public $out/share/arrakis/public
-            cp -r sql $out/share/arrakis/sql
+            cp -r db $out/share/arrakis/db
 
             mkdir -p $out/bin
             # Next reads HOSTNAME for its bind address, but HOSTNAME is also a
@@ -124,13 +127,25 @@
             pkgs.cacert
           ];
 
+          # The only writable place in the image: the app itself lives in the
+          # read-only store, and scratch files go here.
+          extraCommands = ''
+            mkdir -m 1777 tmp
+          '';
+
           config = {
             Cmd = [ "${arrakis}/bin/arrakis" ];
+            # Not root: an unprivileged uid with no entry in /etc/passwd, which
+            # Node does not need. It owns nothing in the image, so a compromised
+            # server cannot rewrite the app it runs from.
+            User = "65532:65532";
             ExposedPorts."3000/tcp" = { };
             Env = [
               "NODE_ENV=production"
               "HOSTNAME=0.0.0.0"
               "PORT=3000"
+              "HOME=/tmp"
+              "TMPDIR=/tmp"
               "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
             ];
             WorkingDir = "${arrakis}/share/arrakis";
@@ -153,7 +168,7 @@
           packages = [
             pkgs.nodejs_22
             pkgs.importNpmLock.hooks.linkNodeModulesHook
-            # psql, for poking at a Blokli index database directly.
+            # psql, for poking at a data source directly.
             pkgs.postgresql_16
           ];
 
@@ -164,7 +179,6 @@
             echo "arrakis · node $(node --version) · npm $(npm --version)"
             echo "  dependencies are linked from the Nix store"
             echo "  npm run dev           run against DATABASE_URL"
-            echo "  npm run dev:fixtures  run on synthetic data, no database needed"
           '';
         };
       }

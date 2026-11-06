@@ -1,23 +1,25 @@
 import type { Metadata } from 'next';
+import { headers } from 'next/headers';
 import './globals.css';
 
-import { DEFAULT_STYLE, STYLE_STORAGE_KEY, STYLES } from './chart-theme';
+import {
+  DEFAULT_STYLE,
+  DEFAULT_THEME,
+  STYLE_STORAGE_KEY,
+  STYLES,
+  THEME_STORAGE_KEY,
+  THEMES,
+} from './chart-theme';
 
 export const metadata: Metadata = {
   title: 'Arrakis',
   description:
-    'Public, on-chain Gnosis VPN adoption and HOPR network metrics powered by Blokli.',
+    'Query a database in SQL, keep the answers as charts, and arrange them on dashboards.',
+  icons: { icon: '/favicon.svg' },
   openGraph: {
     title: 'Arrakis',
-    description:
-      'Private access. Public proof. Finalized on-chain metrics powered by Blokli.',
+    description: 'SQL in, charts and dashboards out.',
     type: 'website',
-  },
-  twitter: {
-    card: 'summary_large_image',
-    title: 'Arrakis',
-    description:
-      'Private access. Public proof. Finalized on-chain metrics powered by Blokli.',
   },
 };
 
@@ -41,15 +43,41 @@ const STYLE_BOOTSTRAP = `try{var s=localStorage.getItem(${JSON.stringify(
   DEFAULT_STYLE,
 )}}`;
 
-export default function RootLayout({
+/**
+ * Light or dark, the same way: the remembered choice, `system` by default,
+ * resolved against the system's setting before the first paint.
+ */
+const THEME_BOOTSTRAP = `try{var t=localStorage.getItem(${JSON.stringify(
+  THEME_STORAGE_KEY,
+)});if(${JSON.stringify(
+  THEMES.map((entry) => entry.id),
+)}.indexOf(t)<0)t=${JSON.stringify(
+  DEFAULT_THEME,
+)};var d=t==='dark'||(t==='system'&&window.matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.dataset.themeChoice=t;document.documentElement.dataset.theme=d?'dark':'light'}catch(e){document.documentElement.dataset.theme='light'}`;
+
+export default async function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
+  // The nonce `proxy.ts` put in this request's Content-Security-Policy; the
+  // pre-paint script runs only with it. Reading it also renders every page per
+  // request, which a nonce needs: a page built ahead of time would carry none.
+  const nonce = (await headers()).get('x-nonce') ?? undefined;
   return (
-    <html lang="en" data-style={DEFAULT_STYLE}>
+    // The script below may restyle <html> before React hydrates it, on
+    // purpose; only this element's own attributes are exempt from the check.
+    <html
+      lang="en"
+      data-style={DEFAULT_STYLE}
+      data-theme="light"
+      suppressHydrationWarning
+    >
       <head>
         <script
+          nonce={nonce}
           // oxlint-disable-next-line react/no-danger -- a literal built from constants above
-          dangerouslySetInnerHTML={{ __html: STYLE_BOOTSTRAP }}
+          dangerouslySetInnerHTML={{
+            __html: STYLE_BOOTSTRAP + THEME_BOOTSTRAP,
+          }}
         />
       </head>
       <body>{children}</body>

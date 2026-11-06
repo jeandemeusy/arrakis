@@ -1,0 +1,433 @@
+{
+  "format": "arrakis-bundle",
+  "version": 1,
+  "name": "hopr-tokens",
+  "title": "HOPR tokens on Gnosis",
+  "description": "Transfer activity for xHOPR and wxHOPR from indexed Gnosis logs.",
+  "exportedAt": "2026-11-03T21:22:52.307Z",
+  "lists": [],
+  "queries": [
+    {
+      "slug": "hopr-token-transfers",
+      "title": "HOPR token transfers",
+      "description": "Fragment: ERC-20 Transfer events from the two Gnosis token contracts.",
+      "kind": "fragment",
+      "sql": "-- The Transfer signature and deployed Gnosis addresses are constrained together\n-- to use the (address, substring(topics from 1 for 32), block_number) index.\n-- Only indexed, non-removed events are available; this is not a balance snapshot.\nSELECT\n  CASE address WHEN '\\xd057604a14982fe8d88c5fc25aac3267ea142a08'::bytea THEN 'xHOPR' ELSE 'wxHOPR' END AS token,\n  block_number AS block, tx_index, log_index, transaction_hash,\n  substring(topics from 45 for 20) AS sender,\n  substring(topics from 77 for 20) AS recipient,\n  -- Decode four unsigned 64-bit words exactly, without running a 32-row\n  -- correlated generate_series for every event.\n  ((((('x' || substring(encode(data, 'hex'), 1, 16))::bit(64)::bigint)::numeric + 18446744073709551616::numeric) % 18446744073709551616::numeric) * 6277101735386680763835789423207666416102355444464034512896::numeric\n   + (((('x' || substring(encode(data, 'hex'), 17, 16))::bit(64)::bigint)::numeric + 18446744073709551616::numeric) % 18446744073709551616::numeric) * 340282366920938463463374607431768211456::numeric\n   + (((('x' || substring(encode(data, 'hex'), 33, 16))::bit(64)::bigint)::numeric + 18446744073709551616::numeric) % 18446744073709551616::numeric) * 18446744073709551616::numeric\n   + (((('x' || substring(encode(data, 'hex'), 49, 16))::bit(64)::bigint)::numeric + 18446744073709551616::numeric) % 18446744073709551616::numeric) * 1::numeric) * 0.000000000000000001::numeric AS amount\nFROM log\nWHERE address IN ('\\xd057604a14982fe8d88c5fc25aac3267ea142a08'::bytea, '\\xd4fdec44db9d44b8f2b6d529620f9c0c7066a2c1'::bytea)\n  AND substring(topics from 1 for 32) = event_topic('Transfer(address,address,uint256)')\n  AND NOT removed\n  AND octet_length(topics) >= 96\n  AND octet_length(data) >= 32",
+      "parameters": [],
+      "combine": "concat",
+      "timeoutSeconds": null
+    },
+    {
+      "slug": "hopr-token-supply-history",
+      "title": "HOPR token supply history",
+      "description": "Cumulative indexed mint amounts minus burn amounts per token and 100,000-block bin.",
+      "kind": "query",
+      "sql": "-- Zero-address transfers represent issuance and destruction. This is the\n-- cumulative indexed change from zero, not a verified totalSupply snapshot.\nWITH changes AS (\n  SELECT token, (block / 100000) * 100000 AS block_bin,\n    sum(CASE WHEN sender = decode(repeat('00', 20), 'hex') THEN amount ELSE 0 END\n      - CASE WHEN recipient = decode(repeat('00', 20), 'hex') THEN amount ELSE 0 END) AS change\n  FROM {{> hopr-token-transfers}} AS transfer\n  WHERE sender = decode(repeat('00', 20), 'hex')\n     OR recipient = decode(repeat('00', 20), 'hex')\n  GROUP BY token, (block / 100000)\n)\nSELECT token, block_bin,\n  sum(change) OVER (PARTITION BY token ORDER BY block_bin ROWS UNBOUNDED PRECEDING) AS supply\nFROM changes\nORDER BY token, block_bin",
+      "parameters": [],
+      "refreshSeconds": 3600,
+      "rowLimit": null,
+      "combine": "concat",
+      "timeoutSeconds": null
+    },
+    {
+      "slug": "hopr-token-activity",
+      "title": "HOPR token activity",
+      "description": "Transfer counts and amounts by token and 100,000-block bin.",
+      "kind": "query",
+      "sql": "SELECT token, (block / 100000) * 100000 AS block_bin, count(*) AS transfers, sum(amount) AS amount\nFROM {{> hopr-token-transfers}} AS transfer\nGROUP BY token, (block / 100000)\nORDER BY block_bin, token",
+      "parameters": [],
+      "refreshSeconds": 3600,
+      "rowLimit": null,
+      "combine": "concat",
+      "timeoutSeconds": null
+    },
+    {
+      "slug": "hopr-token-recent-transfers",
+      "title": "Recent HOPR token transfers",
+      "description": "The latest 500 indexed Transfer events, including mints and burns.",
+      "kind": "query",
+      "sql": "SELECT token, block, '0x' || encode(sender, 'hex') AS sender, '0x' || encode(recipient, 'hex') AS recipient, amount, '0x' || encode(transaction_hash, 'hex') AS transaction\nFROM {{> hopr-token-transfers}} AS transfer\nORDER BY block DESC, tx_index DESC, log_index DESC\nLIMIT 500",
+      "parameters": [],
+      "refreshSeconds": 900,
+      "rowLimit": null,
+      "combine": "concat",
+      "timeoutSeconds": null
+    },
+    {
+      "slug": "hopr-token-address-activity",
+      "title": "HOPR token address activity",
+      "kind": "query",
+      "description": "Indexed per-address, per-token transfer changes and event counts per block.",
+      "sql": "-- One row per address, token and block. Self-transfers count once and have\n-- zero net change. The zero address is not a holder; mints and burns still\n-- appear as incoming or outgoing transfers for their other party.\nWITH transfers AS MATERIALIZED {{> hopr-token-transfers}},\nmovements AS (\n  SELECT token, block, recipient AS address,\n    CASE WHEN sender = recipient THEN 0::numeric ELSE amount END AS change\n  FROM transfers\n  UNION ALL\n  SELECT token, block, sender AS address, -amount AS change\n  FROM transfers WHERE sender <> recipient\n)\nSELECT token, '0x' || encode(address, 'hex') AS address, block,\n  sum(change) AS change, count(*) AS transfers\nFROM movements\nWHERE address <> decode(repeat('00', 20), 'hex')\nGROUP BY token, address, block\nORDER BY token, address, block",
+      "parameters": [],
+      "refreshSeconds": 3600,
+      "rowLimit": null,
+      "combine": "concat",
+      "timeoutSeconds": null
+    }
+  ],
+  "charts": [
+    {
+      "key": "hopr-tokens/supply",
+      "query": "hopr-token-supply-history",
+      "title": "Token supply",
+      "description": "Cumulative indexed mints minus burns, at the end of each 100,000-block bin with supply changes.",
+      "type": "line",
+      "config": {
+        "steps": [],
+        "options": {
+          "step": true,
+          "legend": true,
+          "legendPosition": "below"
+        },
+        "encoding": {
+          "x": "block_bin",
+          "y": [
+            "supply"
+          ],
+          "series": "token"
+        }
+      }
+    },
+    {
+      "key": "hopr-tokens/volume",
+      "query": "hopr-token-activity",
+      "title": "Transfer amount by block",
+      "description": "Includes transfers to and from the zero address.",
+      "type": "bar",
+      "config": {
+        "steps": [],
+        "options": {
+          "legend": true,
+          "legendPosition": "below"
+        },
+        "encoding": {
+          "x": "block_bin",
+          "y": [
+            "amount"
+          ],
+          "series": "token"
+        }
+      }
+    },
+    {
+      "key": "hopr-tokens/counts",
+      "query": "hopr-token-activity",
+      "title": "Transfer events by block",
+      "description": "One count per indexed Transfer event.",
+      "type": "bar",
+      "config": {
+        "steps": [],
+        "options": {
+          "legend": true,
+          "legendPosition": "below"
+        },
+        "encoding": {
+          "x": "block_bin",
+          "y": [
+            "transfers"
+          ],
+          "series": "token"
+        }
+      }
+    },
+    {
+      "key": "hopr-tokens/recent",
+      "query": "hopr-token-recent-transfers",
+      "title": "Recent transfers",
+      "description": "Up to 500 events per data source.",
+      "type": "table",
+      "config": {
+        "steps": [],
+        "builder": {},
+        "options": {
+          "columns": [
+            "network",
+            "token",
+            "block",
+            "sender",
+            "recipient",
+            "amount",
+            "transaction"
+          ],
+          "pageSize": 20,
+          "tableColumns": {
+            "sender": {
+              "text": true,
+              "monospace": true
+            },
+            "recipient": {
+              "text": true,
+              "monospace": true
+            },
+            "transaction": {
+              "text": true,
+              "condensed": true,
+              "monospace": true
+            }
+          }
+        },
+        "encoding": {}
+      }
+    },
+    {
+      "key": "hopr-tokens/address-balance",
+      "query": "hopr-token-address-activity",
+      "title": "Balances",
+      "description": "Net indexed transfers by token.",
+      "type": "table",
+      "config": {
+        "sql": "SELECT token, sum(change) AS balance FROM {{result}} WHERE lower(address) = lower(trim({{address}})) GROUP BY token ORDER BY token",
+        "steps": [],
+        "options": {
+          "columns": [
+            "token",
+            "balance"
+          ],
+          "pageSize": 20
+        },
+        "encoding": {}
+      }
+    },
+    {
+      "key": "hopr-tokens/address-history",
+      "query": "hopr-token-address-activity",
+      "title": "Balance history",
+      "description": "Balance reconstructed at the end of each block with activity.",
+      "type": "line",
+      "config": {
+        "sql": "WITH history AS (\n  SELECT token, block, sum(change) OVER (PARTITION BY token ORDER BY block ROWS UNBOUNDED PRECEDING) AS balance\n  FROM {{result}} WHERE lower(address) = lower(trim({{address}}))\n),\nlast_per_token AS (\n  SELECT DISTINCT ON (token) token, block, balance\n  FROM history ORDER BY token, block DESC\n),\nend_block AS (SELECT max(block) AS block FROM history)\nSELECT token, block, balance FROM history\nUNION ALL\n-- Carry each token's last balance to the final observed block so a token\n-- without recent transfers does not disappear early from the chart.\nSELECT last_per_token.token, end_block.block, last_per_token.balance\nFROM last_per_token CROSS JOIN end_block\nWHERE last_per_token.block < end_block.block\nORDER BY block, token",
+        "steps": [],
+        "options": {
+          "step": true,
+          "legend": true,
+          "legendPosition": "below"
+        },
+        "encoding": {
+          "x": "block",
+          "y": [
+            "balance"
+          ],
+          "series": "token"
+        }
+      }
+    },
+    {
+      "key": "hopr-tokens/address-transfers",
+      "query": "hopr-token-address-activity",
+      "title": "Transfer events",
+      "description": "Self-transfers count once.",
+      "type": "number",
+      "config": {
+        "sql": "SELECT sum(transfers) AS transfers FROM {{result}} WHERE lower(address) = lower(trim({{address}}))",
+        "steps": [],
+        "options": {
+          "format": "number",
+          "caption": "indexed events"
+        },
+        "encoding": {
+          "y": [
+            "transfers"
+          ]
+        }
+      }
+    },
+    {
+      "key": "hopr-tokens/address-first-holding",
+      "query": "hopr-token-address-activity",
+      "title": "First holding",
+      "description": "First indexed block where the reconstructed balance of either token was positive.",
+      "type": "number",
+      "config": {
+        "sql": "WITH history AS (\n  SELECT token, block, sum(change) OVER (PARTITION BY token ORDER BY block ROWS UNBOUNDED PRECEDING) AS balance\n  FROM {{result}} WHERE lower(address) = lower(trim({{address}}))\n)\nSELECT min(block) AS block FROM history WHERE balance > 0",
+        "steps": [],
+        "options": {
+          "format": "number",
+          "caption": "block"
+        },
+        "encoding": {
+          "y": [
+            "block"
+          ]
+        }
+      }
+    },
+    {
+      "key": "hopr-tokens/address-last-activity",
+      "query": "hopr-token-address-activity",
+      "title": "Last transfer",
+      "description": "Latest indexed transfer involving this address.",
+      "type": "number",
+      "config": {
+        "sql": "SELECT max(block) AS block FROM {{result}} WHERE lower(address) = lower(trim({{address}}))",
+        "steps": [],
+        "options": {
+          "format": "number",
+          "caption": "block"
+        },
+        "encoding": {
+          "y": [
+            "block"
+          ]
+        }
+      }
+    }
+  ],
+  "dashboards": [
+    {
+      "slug": "hopr-tokens",
+      "title": "HOPR tokens on Gnosis",
+      "description": "Transfer activity for xHOPR and wxHOPR from indexed Gnosis logs.",
+      "visibility": "public",
+      "variables": [
+        {
+          "name": "network",
+          "type": "network",
+          "fixed": true,
+          "label": "Data source",
+          "default": "gnosis"
+        }
+      ],
+      "widgets": [
+        {
+          "kind": "text",
+          "text": "Token supply",
+          "width": 12,
+          "height": 80,
+          "options": {
+            "note": "The charts reconstruct supply as indexed mints minus burns; they equal actual total supply only if every relevant Transfer event since deployment is indexed and no starting supply is missing. Coverage cannot be verified from these logs alone."
+          }
+        },
+        {
+          "kind": "visualization",
+          "chart": "hopr-tokens/supply",
+          "width": 12,
+          "height": 280,
+          "options": {
+            "note": "Supply at the end of each 100,000-block bin with indexed mint or burn events.",
+            "requires": "network"
+          }
+        },
+        {
+          "kind": "text",
+          "text": "Transfer activity",
+          "width": 12,
+          "height": 80,
+          "options": {
+            "note": "Only indexed Transfer events are shown. Amounts use 18 decimals; mint and burn events are included. Coverage is limited to indexed history, so totals are not total supply or balances."
+          }
+        },
+        {
+          "kind": "visualization",
+          "chart": "hopr-tokens/volume",
+          "width": 6,
+          "height": 280,
+          "options": {
+            "note": "Token amounts per 100,000 blocks. Transfers between the two tokens should not be added as economic volume."
+          }
+        },
+        {
+          "kind": "visualization",
+          "chart": "hopr-tokens/counts",
+          "width": 6,
+          "height": 280,
+          "options": {
+            "note": "Transfer events per 100,000 blocks."
+          }
+        },
+        {
+          "kind": "visualization",
+          "chart": "hopr-tokens/recent",
+          "width": 12,
+          "height": 280,
+          "options": {
+            "note": "The latest 500 indexed events per data source. The zero address identifies mints or burns."
+          }
+        }
+      ]
+    },
+    {
+      "slug": "hopr-token-address",
+      "title": "HOPR token address balance",
+      "description": "An address's xHOPR and wxHOPR balances reconstructed from indexed Transfer events.",
+      "visibility": "public",
+      "variables": [
+        {
+          "name": "network",
+          "type": "network",
+          "label": "Data source",
+          "default": "gnosis",
+          "fixed": true
+        },
+        {
+          "name": "address",
+          "type": "text",
+          "label": "Address (0x...)",
+          "lowercase": true,
+          "showLabel": false
+        }
+      ],
+      "widgets": [
+        {
+          "kind": "text",
+          "text": "Address balances",
+          "width": 12,
+          "height": 80,
+          "options": {
+            "note": "Enter a 0x-prefixed address. Balances are reconstructed from indexed Transfer events, including mints and burns. They match on-chain balances only when all relevant history is indexed and the result is complete. An absent row does not prove a zero balance."
+          }
+        },
+        {
+          "kind": "visualization",
+          "chart": "hopr-tokens/address-transfers",
+          "width": 4,
+          "height": 160,
+          "options": {
+            "requires": "address",
+            "note": "Events involving this address across both tokens; self-transfers count once."
+          }
+        },
+        {
+          "kind": "visualization",
+          "chart": "hopr-tokens/address-first-holding",
+          "width": 4,
+          "height": 160,
+          "options": {
+            "requires": "address",
+            "note": "First block with a positive reconstructed balance of either token."
+          }
+        },
+        {
+          "kind": "visualization",
+          "chart": "hopr-tokens/address-last-activity",
+          "width": 4,
+          "height": 160,
+          "options": {
+            "requires": "address",
+            "note": "Most recent indexed transfer involving this address."
+          }
+        },
+        {
+          "kind": "visualization",
+          "chart": "hopr-tokens/address-history",
+          "width": 12,
+          "height": 320,
+          "options": {
+            "requires": "address",
+            "note": "Balances at the end of blocks with transfers. Each token is shown separately."
+          }
+        },
+        {
+          "kind": "visualization",
+          "chart": "hopr-tokens/address-balance",
+          "width": 12,
+          "height": 200,
+          "options": {
+            "requires": "address",
+            "note": "Current net indexed balance per token. Results may lag the chain until the query refreshes."
+          }
+        }
+      ]
+    }
+  ]
+}

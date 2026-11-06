@@ -7,10 +7,12 @@ on:
     tags:
       - 'v*'
   pull_request:
+  # Build and publish any branch by hand, without a pull request.
+  workflow_dispatch:
 
+# Read-only by default; only the job that pushes the image may write packages.
 permissions:
   contents: read
-  packages: write
 
 concurrency:
   group: publish-container-${{ github.ref }}
@@ -32,31 +34,46 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # The flake's own nixConfig (substituters, trusted keys) is not
+      # accepted: a change to flake.nix must not be able to point the build
+      # at another binary cache.
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25 # v22
-        with:
-          extra-conf: |
-            accept-flake-config = true
+
+      - name: Verify Nix npm dependency hash
+        run: sh scripts/check-npm-deps-hash.sh
 
       - name: Type check and lint
         run: |
           nix develop --command npx tsc --noEmit
           nix develop --command npm run lint
 
+      # Known advisories in what the image ships. Development-only tools are
+      # left out: they never run in production.
+      - name: Audit production dependencies
+        run: nix develop --command npm audit --omit=dev --audit-level=high
+
   publish:
     needs: check
     runs-on: ubuntu-latest
-    # Pull requests are built by `check` but never published.
-    if: github.event_name == 'push'
+    permissions:
+      contents: read
+      packages: write
+    # Pushes to main, tags, pull requests from this repository, and manual runs
+    # are published. A fork's pull request cannot write packages (its token is
+    # read-only), so it is only checked.
+    if: >-
+      github.event_name != 'pull_request'
+      || github.event.pull_request.head.repo.full_name == github.repository
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # The flake's own nixConfig (substituters, trusted keys) is not
+      # accepted: a change to flake.nix must not be able to point the build
+      # at another binary cache.
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25 # v22
-        with:
-          extra-conf: |
-            accept-flake-config = true
 
       - name: Build the image
         run: nix build .#container --print-build-logs
@@ -69,16 +86,35 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Tag and push
+        env:
+          EVENT: ${{ github.event_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          REF: ${{ github.ref }}
+          # For a pull request github.sha is a merge commit that exists only on
+          # GitHub; the tag names the commit that was pushed.
+          COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
           # buildLayeredImage writes a tarball; load it, then retag every name the
           # publish is meant to carry.
           docker load < result
-          tags="sha-${{ github.sha }}"
-          if [ "${{ github.ref_type }}" = "tag" ]; then
-            tags="$tags ${{ github.ref_name }}"
+          tags="sha-$COMMIT"
+          case "$EVENT" in
+            pull_request)
+              # Moves with the pull request: deploy this to test it unmerged.
+              tags="$tags pr-$PR_NUMBER"
+              ;;
+            workflow_dispatch)
+              # A branch run: tag it by branch (slashes are not valid in a tag).
+              tags="$tags branch-$(echo "$REF_NAME" | tr '/' '-' | tr -c 'A-Za-z0-9_.\n' '-')"
+              ;;
+          esac
+          if [ "$REF_TYPE" = "tag" ]; then
+            tags="$tags $REF_NAME"
           fi
-          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+          if [ "$REF" = "refs/heads/main" ]; then
             tags="$tags main"
           fi
           for tag in $tags; do

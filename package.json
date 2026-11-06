@@ -1,22 +1,26 @@
 {
-  "name": "gnosis-vpn-network-intelligence",
+  "name": "arrakis",
   "version": "0.1.0",
   "private": true,
   "engines": {
     "node": ">=22.13.0"
   },
   "scripts": {
-    "dev": "next dev",
-    "dev:fixtures": "DASHBOARD_FIXTURES=1 next dev",
+    "dev": "next dev --webpack",
+    "dev:db": "sh scripts/dev-db.sh",
     "build": "nix develop -c npm run build:nix",
     "build:nix": "next build --webpack",
     "start": "next start",
-    "lint": "oxlint app lib && stylelint 'app/**/*.css'",
+    "lint": "oxlint app lib instrumentation.ts proxy.ts && stylelint 'app/**/*.css'",
+    "test": "node --import ./test/loader.mjs --test 'test/**/*.test.ts'",
+    "hash-password": "node scripts/hash-password.mjs",
+    "nix:refresh-deps": "sh scripts/refresh-npm-deps-hash.sh",
     "format": "oxfmt && stylelint --fix 'app/**/*.css'"
   },
   "dependencies": {
+    "@noble/hashes": "^1.8.0",
     "lucide-react": "1.31.0",
-    "next": "^16.4.3",
+    "next": "^16.4.4",
     "pg": "^8.16.3",
     "react": "19.2.6",
     "react-dom": "19.2.6",

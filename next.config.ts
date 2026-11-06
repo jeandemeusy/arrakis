@@ -1,5 +1,32 @@
 import type { NextConfig } from 'next';
 
+const production = process.env.NODE_ENV === 'production';
+
+/**
+ * Headers every response carries. The Content-Security-Policy is not among
+ * them: it needs a fresh nonce per request, so `proxy.ts` sets it.
+ */
+const SECURITY_HEADERS = [
+  { key: 'X-Content-Type-Options', value: 'nosniff' },
+  { key: 'X-Frame-Options', value: 'DENY' },
+  { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+  {
+    key: 'Permissions-Policy',
+    value: 'camera=(), microphone=(), geolocation=(), payment=(), usb=()',
+  },
+  { key: 'Cross-Origin-Opener-Policy', value: 'same-origin' },
+  // Only once served over HTTPS for good: a browser that saw it keeps to
+  // HTTPS for this host for six months.
+  ...(production
+    ? [
+        {
+          key: 'Strict-Transport-Security',
+          value: 'max-age=15552000; includeSubDomains',
+        },
+      ]
+    : []),
+];
+
 const nextConfig: NextConfig = {
   // Emits .next/standalone with a self-contained server and only the traced
   // dependencies, which is what the container image ships.
@@ -14,24 +41,12 @@ const nextConfig: NextConfig = {
   // `react/react-compiler` as an error, so the code was written to be eligible.
   reactCompiler: true,
 
+  // The sidebar's controls sit in the bottom-left corner, where the dev
+  // indicator would cover them.
+  devIndicators: { position: 'bottom-right' },
+
   async headers() {
-    return [
-      {
-        // The page renders per request — it must not be prerendered at build
-        // time, where there is no index database and it would bake a "database
-        // connection pending" dashboard into the image. But the snapshot behind
-        // it only changes once a minute, so the render is identical for every
-        // visitor within that window and a cache in front should be allowed to
-        // say so. Next sends `no-store` for a dynamic page, which this replaces.
-        source: '/',
-        headers: [
-          {
-            key: 'cache-control',
-            value: 'public, max-age=0, s-maxage=60, stale-while-revalidate=120',
-          },
-        ],
-      },
-    ];
+    return [{ source: '/:path*', headers: SECURITY_HEADERS }];
   },
 };
 

@@ -2,17 +2,40 @@
 
 import {
   cloneElement,
+  isValidElement,
   useEffect,
   useRef,
+  useState,
   type CSSProperties,
   type ReactElement,
   type ReactNode,
 } from 'react';
-import { AlertTriangle, Download, Maximize, Search, X } from 'lucide-react';
+import Link from 'next/link';
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Clock,
+  Code2,
+  Download,
+  Loader2,
+  Maximize,
+  MoreHorizontal,
+  Search,
+  X,
+} from 'lucide-react';
 
-import type { PanelStatus } from '@/lib/snapshot';
 import type { Palette } from './chart-theme';
 import { usePalette } from './style';
+
+
+/**
+ * Whether what a tile shows is whole: `partial` when some of its sources
+ * answered and others did not, `failed` when none did.
+ */
+export type PanelStatus = {
+  state: 'ok' | 'partial' | 'failed' | 'pending';
+  reason: string | null;
+};
 
 /** One legend entry, shared by the rendered legend and the exported image. */
 export type LegendEntry = {
@@ -295,9 +318,9 @@ export type TileProps = {
   status?: PanelStatus;
   legend?: LegendEntry[];
   /**
-   * Whether the legend belongs in the card header. Off for the relayer charts,
-   * which share one key below the pair rather than repeating it twice — but the
-   * data is still carried, so the dialog and the export can use it.
+   * Whether the legend belongs in the card header. Off for charts that share
+   * one key with a neighbour rather than repeating it — but the data is still
+   * carried, so the dialog and the export can use it.
    */
   showLegend?: boolean;
   /** Plain-text note, drawn into the exported image of a number tile. */
@@ -313,9 +336,91 @@ export type TileProps = {
   /** Exported as CSV when supplied, for the number and table variants. */
   rows?: () => string[][];
   children?: ReactNode;
+  /** Where the figure comes from: its title and an action link there. */
+  source?: { href: string; label: string };
+  /** Information about the data behind the displayed value. */
+  details?: ReactNode;
+  /** Shown muted after the title: the query the figure is drawn from. */
+  subtitle?: string;
+  /** How fresh the data is, as a pill in the tile's footer. */
+  freshness?: Freshness;
+  /**
+   * The actions (source, download, enlarge) in a `•••` menu in a footer row,
+   * with the freshness pill, rather than floating over the tile's corner.
+   */
+  menu?: boolean;
   expanded: string | null;
   onExpand: (id: string | null) => void;
 };
+
+export type Freshness = {
+  state: 'fresh' | 'stale' | 'failed' | 'running' | 'updating';
+  /** Short: `11h ago`. */
+  label: string;
+  /** Long, for the tooltip. */
+  title: string;
+};
+
+function FreshnessPill({ freshness }: { freshness: Freshness }) {
+  const busy = freshness.state === 'running' || freshness.state === 'updating';
+  const Icon = busy
+    ? Loader2
+    : freshness.state === 'fresh'
+      ? CheckCircle2
+      : freshness.state === 'stale'
+        ? Clock
+        : AlertTriangle;
+  return (
+    <span
+      className={`tile-fresh ${freshness.state}`}
+      title={freshness.title}
+      role={busy ? 'status' : undefined}
+    >
+      <span className="tile-fresh-label">{freshness.label}</span>
+      <Icon size={13} aria-hidden="true" />
+    </span>
+  );
+}
+
+/** The `•••` button and its list, closing on a click elsewhere. */
+function TileMenu({ children, label }: { children: ReactNode; label: string }) {
+  const [open, setOpen] = useState(false);
+  const anchor = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (event: MouseEvent) => {
+      if (!anchor.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('mousedown', close);
+    document.addEventListener('keydown', escape);
+    return () => {
+      document.removeEventListener('mousedown', close);
+      document.removeEventListener('keydown', escape);
+    };
+  }, [open]);
+  return (
+    <div className="tile-menu" ref={anchor}>
+      <button
+        type="button"
+        aria-label={label}
+        aria-expanded={open}
+        title={label}
+        onClick={() => setOpen(!open)}
+      >
+        <MoreHorizontal size={16} aria-hidden="true" />
+      </button>
+      {open && (
+        // oxlint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- closes the menu after any choice; the choices are the buttons inside
+        <div className="tile-menu-list" onClick={() => setOpen(false)}>
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
 
 /**
  * The one panel every figure on the page is built from.
@@ -344,13 +449,36 @@ export function Tile({
   chart,
   rows,
   children,
+  source,
+  details,
+  subtitle,
+  freshness,
+  menu = false,
   expanded,
   onExpand,
 }: TileProps) {
   const dialog = useRef<HTMLDialogElement>(null);
+  const detailsDialog = useRef<HTMLDialogElement>(null);
   const frame = useRef<HTMLDivElement>(null);
+  const [frameHeight, setFrameHeight] = useState<number | null>(null);
   const palette = usePalette();
   const open = expanded === id;
+
+  useEffect(() => {
+    const node = frame.current;
+    if (!node?.closest('.dashboard-cell')) return;
+    const measure = () => {
+      const legend = node.querySelector<HTMLElement>('.viz-legend');
+      const plot = node.querySelector<HTMLElement>('.viz-plot');
+      const below = legend && plot && legend.offsetTop >= plot.offsetTop + plot.offsetHeight;
+      const height = node.clientHeight - (below ? legend.offsetHeight + 8 : 0);
+      if (height > 0) setFrameHeight(height);
+    };
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    measure();
+    return () => observer.disconnect();
+  }, [chart, children]);
 
   useEffect(() => {
     const node = dialog.current;
@@ -361,7 +489,7 @@ export function Tile({
 
   // Read the ref inside the handler, never while rendering.
   const isNumber = figure !== undefined;
-  const broken = status?.state === 'failed';
+  const broken = status?.state === 'failed' || status?.state === 'pending';
   // Nothing to export from a tile whose query never returned.
   const canDownload = Boolean(chart || rows || isNumber) && !broken;
   const download = () => {
@@ -374,7 +502,10 @@ export function Tile({
   const unavailable = (
     <div className="tile-unavailable">
       <AlertTriangle size={18} aria-hidden="true" />
-      <p>{status?.reason ?? 'This panel could not be loaded.'}</p>
+      <p>
+        {status?.reason ?? 'This panel could not be loaded.'}
+        {source && <> <Link href={source.href}>Open query</Link></>}
+      </p>
     </div>
   );
 
@@ -384,21 +515,82 @@ export function Tile({
       title={status.reason ?? undefined}
     >
       <AlertTriangle size={11} aria-hidden="true" />
-      {status.state === 'failed' ? 'unavailable' : 'partial'}
+      {status.state === 'failed' ? 'unavailable' : status.state === 'pending' ? 'waiting for data' : 'partial'}
     </span>
   );
 
   const body = (
     <div className="chart-frame" ref={frame}>
-      {broken ? unavailable : (chart ?? children)}
+      {broken
+        ? unavailable
+        : frameHeight && chart
+          ? cloneElement(chart, { height: frameHeight })
+          : frameHeight && isValidElement<{ height?: number }>(children)
+            ? cloneElement(children, { height: frameHeight })
+            : (chart ?? children)}
     </div>
   );
 
   // A table has a footer strip, so the controls join it and cannot overlap the
   // pager. A chart has none, so they float over its bottom-right corner.
   const hasFoot = Boolean(search || footer || rowCount !== undefined);
-  const actions = (
+  const heading = source ? (
+    <Link className="tile-title-link" href={source.href} title={source.label}>
+      {title}
+    </Link>
+  ) : (
+    title
+  );
+  const menuActions = (
+    <TileMenu label={`More on ${title}`}>
+      {details && <button type="button" onClick={() => detailsDialog.current?.showModal()}>
+        <Search size={14} aria-hidden="true" /> Why this value?
+      </button>}
+      {source && (
+        <Link href={source.href} title={source.label}>
+          <Code2 size={14} aria-hidden="true" /> Open the query
+        </Link>
+      )}
+      {canDownload && (
+        <button type="button" onClick={download}>
+          <Download size={14} aria-hidden="true" />
+          {chart ? 'Download image' : 'Download data'}
+        </button>
+      )}
+      <button type="button" onClick={() => onExpand(id)}>
+        <Maximize size={14} aria-hidden="true" /> Enlarge
+      </button>
+    </TileMenu>
+  );
+  const meta = (
+    <div className="tile-meta">
+      {freshness ? <FreshnessPill freshness={freshness} /> : <span />}
+      <div className="tile-meta-actions">
+        {className?.includes('table-card') && (
+          <button type="button" className="tile-expand" aria-label={`Enlarge ${title}`} title="Enlarge table" onClick={() => onExpand(id)}>
+            <Maximize size={14} aria-hidden="true" />
+          </button>
+        )}
+        {menuActions}
+      </div>
+    </div>
+  );
+  const sub =
+    subtitle && subtitle.trim().toLowerCase() !== title.trim().toLowerCase() ? (
+      <small className="tile-subtitle">{subtitle}</small>
+    ) : null;
+  const actions = menu ? meta : (
     <div className="chart-actions">
+      {source && (
+        <Link
+          className="tile-source"
+          href={source.href}
+          aria-label={source.label}
+          title={source.label}
+        >
+          <Code2 size={14} aria-hidden="true" />
+        </Link>
+      )}
       {canDownload && (
         <button
           type="button"
@@ -421,16 +613,20 @@ export function Tile({
   );
 
   return (
-    <div className={`chart-card ${className ?? ''}`}>
+    <div className={`chart-card ${menu ? 'menu-mode' : ''} ${className ?? ''}`}>
       {isNumber ? (
         <>
           <span>
-            {title}
+            {heading}
+            {sub}
             {flag}
           </span>
-          <strong>{figure}</strong>
+          <strong>{details ? <button type="button" className="metric-value-detail" title="Why this value?" aria-label={`Why is ${title} ${figure}?`} onClick={() => detailsDialog.current?.showModal()}>{figure}</button> : figure}</strong>
           {broken ? (
-            <p className="metric-unavailable">{status?.reason}</p>
+            <p className="metric-unavailable">
+              {status?.reason}
+              {source && <> <Link href={source.href}>Open query</Link></>}
+            </p>
           ) : (
             note
           )}
@@ -440,7 +636,10 @@ export function Tile({
           <div className="chart-title">
             <div>
               {eyebrow && <span>{eyebrow}</span>}
-              <h3>{title}</h3>
+              <h3>
+                {heading}
+                {sub}
+              </h3>
             </div>
             {flag}
             {badge}
@@ -481,6 +680,10 @@ export function Tile({
       )}
 
       {!hasFoot && actions}
+      {details && <dialog ref={detailsDialog} className="modal tile-details-modal" aria-label={`About ${title}`}>
+        <div className="modal-head"><h2>About {title}</h2><button type="button" aria-label="Close" onClick={() => detailsDialog.current?.close()}><X size={16} aria-hidden="true" /></button></div>
+        <div className="modal-body">{details}</div>
+      </dialog>}
       <dialog
         ref={dialog}
         className="modal"

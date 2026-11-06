@@ -1,131 +1,476 @@
 # Arrakis
 
-A public, read-only investor dashboard powered by a Blokli index database. The
-application is intentionally self-contained so it can live in a dedicated
-repository and be deployed beside any Blokli instance.
+Query a database in SQL, keep the answers as charts, and arrange the charts on
+dashboards — for anyone to read, with each figure traceable to the SQL behind
+it.
 
-## Data path
+Arrakis connects to any PostgreSQL database, or one that speaks its protocol
+(Supabase, Neon, RDS/Aurora, Timescale, AlloyDB…), through a role that can only
+read. It keeps its own state — queries, their versions, stored results, charts,
+dashboards, sessions — in a database of its own.
 
-`Blokli PostgreSQL → versioned SQL → Next.js backend → public dashboard`
+## How it works
 
-The browser never receives database credentials. Server-side queries in
-[`sql/v1`](./sql/v1) calculate current network totals, the
-active-user series, weekly usage, per-relayer and per-client breakdowns, and the
-client deployment log. The backend keeps a completed snapshot for 60 seconds so a page view costs no
-database work of its own. Concurrent requests arriving during a refresh share the
-one in-flight run rather than each starting their own, and failures are cached for
-10 seconds so an unreachable index database is not queried again on every request
-while it is down. The cache lives in the process, so each replica holds its own.
+`data source → saved, versioned SQL → stored result → charts → dashboards`
 
-Blokli already stores the indexed history, so the dashboard does not duplicate
-events in another datastore. If `RPC_URL` is configured, the backend samples a
-handful of anchor blocks with `eth_getBlockByNumber` and interpolates between
-them; Gnosis produces blocks on a steady five-second cadence, so this lands
-within seconds of the true timestamp without asking the RPC for tens of
-thousands of blocks. Without `RPC_URL`, the same cadence is assumed outright and
-dates are marked as estimated.
+- **Queries** are SQL with a few placeholders, saved and versioned. Running one
+  and storing it copies its rows into Arrakis's own database: its *stored
+  result*. A schedule refreshes it.
+- **Charts** shape a stored result — count, bucket by day, split into series —
+  and never read the data source, so a dashboard stays fast however heavy the
+  SQL behind it.
+- **Dashboards** arrange charts from any queries, with variables (a time range,
+  a data source, a selected value) that viewers change.
+- **Bundles** carry a dashboard, its charts and its queries to another Arrakis
+  as one file.
 
-Only the summary query is required. The remaining queries degrade
-independently, so a single unavailable relation empties one panel rather than
-blanking the dashboard.
+Everyone can read what is public; editing needs the editor password. The
+in-app **Guide** (`/guide`) explains all of it to users; this file is for
+whoever deploys and develops it.
+
+## Quick start
+
+```bash
+npm ci
+npm run dev:db -- --blokli   # a local PostgreSQL, with a made-up Blokli index to query
+npm run hash-password        # choose the editor password; prints its hash
+```
+
+Put what `dev:db` prints, and the hash, in `.env.local`:
+
+```dotenv
+APP_DATABASE_URL=postgresql://arrakis:…@127.0.0.1:54329/arrakis
+APP_CHARTS_DATABASE_URL=postgresql://arrakis_charts:…@127.0.0.1:54329/arrakis
+DATA_SOURCES='[{"id":"demo","label":"Demo","databaseUrl":"postgresql://blokli_reader:…@127.0.0.1:54329/blokli_demo"}]'
+ARRAKIS_EDITOR_PASSWORD_HASH=scrypt:15:8:1:…
+```
+
+The local database is set up like a real deployment: the app connects as
+`arrakis`, an ordinary role that owns its database, and every TCP connection
+needs a password (generated once, kept in `.pgdata`, and printed again on each
+start). Only the socket in `.pgdata`, readable by you alone, lets the
+superuser in without one. A `.pgdata` made by an older `dev:db` is converted on
+its next start — its tables are handed to `arrakis` — so update `.env.local`
+with the new URLs it prints.
+
+Then `npm run dev`, open <http://localhost:3000/>, unlock editing, import
+[`examples/bundles/gnosis-vpn.json`](./examples/bundles/gnosis-vpn.json) under
+**Settings → Bundles** for ready-made dashboards. The demo index registers its
+three exits in a service registry, so the bundle finds them on its own.
+`--blokli` rebuilds the demo index each time it is given, dated up to today.
+`npm run dev:db -- stop` stops the database and `-- reset` deletes it.
+
+(`dev` runs on webpack, like `build`: in the Nix shell `node_modules` is
+symlinked into the Nix store, outside the project, and Turbopack refuses to
+resolve `next` from there.)
 
 ## Configuration
 
-The dashboard reads one or more Blokli index databases. Copy `.env.example` to
-`.env.local` for local development.
+Data sources are configured in the deployment, not in the app.
 
 ```dotenv
-NETWORKS='[
-  {"id":"jura","label":"Jura","databaseUrl":"postgresql://dashboard:pw@jura-db:5432/blokli","rpcUrl":"https://rpc.gnosischain.com"},
-  {"id":"dev","label":"Dev","databaseUrl":"postgresql://dashboard:pw@dev-db:5432/blokli"}
+DATA_SOURCES='[
+  {"id":"prod","label":"Production","databaseUrl":"postgresql://reader:…@db:5432/app"},
+  {"id":"staging","label":"Staging","databaseUrl":"postgresql://reader:…@staging-db:5432/app",
+   "queryDatabaseUrl":"postgresql://reader:…@staging-replica:5432/app"}
 ]'
+APP_DATABASE_URL=postgresql://arrakis:…@app-db:5432/arrakis
+APP_CHARTS_DATABASE_URL=postgresql://arrakis_charts:…@app-db:5432/arrakis
+ARRAKIS_EDITOR_PASSWORD_HASH=scrypt:15:8:1:…
 ```
 
-- `id` is lowercase letters, digits and dashes, and must be unique. It appears in
-  `/api/v1/dashboard?network=<id>` but never in the page itself.
-- `label` is what the network selector shows. Defaults to the id.
-- `databaseUrl` must be a PostgreSQL connection string. Use a read-only role.
-- `rpcUrl` is optional and per network: set it to anchor that network's charts to
-  real block timestamps instead of an assumed five-second cadence.
-- `exits` is optional and per network: the addresses of that network's exit nodes.
-  See below.
+- `id` is lowercase letters, digits and dashes, unique; `label` is what the
+  pickers show.
+- `databaseUrl` is a PostgreSQL connection string, for a **read-only** role
+  (below). `queryDatabaseUrl`, optional, is where saved queries actually run —
+  a read replica, say.
+- A lone `DATABASE_URL` (and `QUERY_DATABASE_URL`) still works, as one source.
+  `NETWORKS`, this variable's former name, is read as `DATA_SOURCES`.
+- A malformed `DATA_SOURCES` is reported rather than ignored: a silent fallback
+  would hide a deployment mistake behind empty dashboards.
 
-A malformed `NETWORKS` is reported rather than ignored — a silent fallback to one
-network would hide a deployment mistake behind a plausible-looking dashboard.
+`APP_DATABASE_URL` is Arrakis's own database, separate from every data source.
+The app migrates it itself on start (`db/migrations`). Without it, there is
+nothing to save queries in and the studio says so. Connect with a role that
+owns this database and nothing more — **never a superuser**, in any
+environment: hand-written chart SQL runs inside this database, so whatever
+the role may do on the server, a chart may try.
 
-### Exit addresses
+Editing is unlocked with one password: `npm run hash-password` prints the hash
+to put in `ARRAKIS_EDITOR_PASSWORD_HASH`; the password itself is never stored.
+Changing the variable and restarting rotates it; unsetting it disables editing
+and ends every session. Underneath it is one `editor` account in a `users`
+table — sessions, authorship and rate limiting all key on a user — so more
+editors are more rows, not a redesign.
 
-Downstream volume can only be attributed if the exits are named. Nothing on chain
-separates an exit from a relay — both announce — so the alternative is identifying
-exits by elimination, and that breaks the moment an exit also relays for a client:
-it joins the relay set, its return traffic is filed as probing, and downstream
-understates itself with nothing on the page to show for it.
+Sessions are `HttpOnly`, `SameSite=Strict` cookies (`__Host-` and `Secure` in
+production) backed by the database, so every replica honours them. Ten failed
+logins from one address, or two hundred from everywhere, in 15 minutes locks
+logins for 15 minutes. State-changing requests from another origin are refused;
+set `ARRAKIS_ALLOWED_ORIGINS` if the studio is served from a second hostname.
+Every response carries a Content Security Policy (scripts, styles, images and
+requests from the app's own origin only; no framing), `nosniff`, a strict
+referrer policy, `Cross-Origin-Opener-Policy` and, in production, HSTS
+(`next.config.ts`).
 
-Name them per network:
+### Run limits
 
-```dotenv
-NETWORKS='[
-  {"id":"jura-prod","label":"Jura","databaseUrl":"postgresql://…",
-   "exits":["0x64885d2d2bc9df7b415aac184e020c632d715dff",
-            "0x12b78461da59e8317c61bd249ea0dea2aa9527de",
-            "0x1062696f8eec5b71bfa6be7e52df1d7457428106",
-            "0x00d7096439d1f731c73574adb7e4a9f3b7775326",
-            "0xd8efe2ebe14c8cc193d5a9f5afd81276549fad67",
-            "0xcd9d0e23cd999dfc0d1400d837f8e612dbbbdfaa",
-            "0x7220cfe91f369bfe79f883c2891e97407d7a4d48"]},
-  {"id":"jura-dev","label":"Dev","databaseUrl":"postgresql://…",
-   "exits":["0xe686ade652a815e0e26803c1a795f9d65c82e06e",
-            "0x7b2b69c52ec97907d7a3b2d2724ba92781b7def7",
-            "0x7f25c474f26488b2e29343c881f0cdc0e6d02abd"]}
-]'
+| Variable | Default | |
+|---|---|---|
+| `ARRAKIS_QUERY_TIMEOUT_MS` | `30000` | Time limit of a preview (an unsaved run). |
+| `ARRAKIS_MATERIALIZE_TIMEOUT_MS` | `120000` | Time limit of a stored run, by hand or scheduled. |
+| `ARRAKIS_QUERY_TIMEOUT_MAX_MS` | `600000` | Ceiling on any query's own time limit. |
+| `ARRAKIS_RESULT_ROW_LIMIT` | `5000000` | Most rows a stored result keeps; past it the result is marked cut. |
+| `ARRAKIS_SCHEDULER_CONCURRENCY` | `2` | Scheduled refreshes running at once, across every data source. |
+
+A query can set its own time limit and row cap under *Run limits* in its About
+panel; the server's ceilings above still apply. A run past its limit answers
+`408` with `details.timedOut`.
+
+Every run holding a connection to a data source is listed in `active_runs`
+with its backend pid, and shown under **Settings → Running now**, where an
+editor can cancel it. Cancelling calls `pg_cancel_backend` with the same
+read-only role, so it stops in the database at once, from any replica; the
+cancelled run answers `409` with `details.cancelled`. The workbench's *Run*
+button turns into *Cancel* while a preview runs, and *Run and store* into
+*Cancel run*. Rows left behind by a crashed process are pruned after two hours.
+
+### Read-only, three times over
+
+Queries are stored, versioned and run by the application, against your data
+sources, and **only ever read them**. Every query runs through one
+path (`lib/query/runner.ts`) that enforces this three times over:
+
+- **The role.** Before a data source's first query, and every five minutes after,
+  its role is checked for any way to write — superuser, CREATE on the database
+  or a schema, INSERT/UPDATE/DELETE/TRUNCATE on any table. If it finds one,
+  queries on that source are refused with a message naming the privilege.
+- **The transaction.** Every run is `BEGIN READ ONLY`, with a time limit.
+- **The statement.** The SQL becomes the body of `DECLARE … CURSOR FOR`, which
+  only accepts a query, wrapped as a subquery, where a data-modifying CTE is a
+  syntax error, and sent through the extended protocol, which refuses a second
+  statement.
+
+After every run the connection is reset with `DISCARD ALL` before it returns
+to the pool, so nothing a query sets on its session — an advisory lock, a
+`set_config` — outlives it. On PostgreSQL 14 and older, `public` grants CREATE
+to everyone by default; revoke it (`REVOKE CREATE ON SCHEMA public FROM
+PUBLIC`) or the role check will refuse the source.
+
+`queryDatabaseUrl` on a data source (or `QUERY_DATABASE_URL` for a single one)
+sends saved queries to a different connection — a read replica, say — and
+defaults to `databaseUrl`.
+
+## Using it
+
+### Writing queries
+
+Saved queries are SQL with a few placeholders, recognized only outside strings
+and comments:
+
+| Placeholder | Becomes |
+|---|---|
+| `{{name}}` | A declared parameter, bound as `$n::type` — never pasted into the SQL. Types: `text`, `integer`, `number`, `boolean`, `date`, `timestamp`, `address`, `text[]`, `integer[]`, `address[]`, `enum`. |
+| `{{list:name}}` | A list kept under Settings → Lists, as an array of its type (`text[]`, `numeric[]`, `bytea[]`): the values kept for the data source the run reads, and those kept for all of them. |
+| `{{source}}` | The id of the data source the run reads (also `{{network}}`). |
+| `{{> slug}}` | Another saved query of kind `fragment`, inlined in parentheses: `FROM {{> paid-orders}} AS o`, `WITH o AS {{> paid-orders}}`, or — for an expression fragment — `SELECT {{> cents(amount)}}`. |
+| `{{> slug(a, name => b)}}` | A fragment with arguments, given in order or by name. Each argument is an SQL expression, inlined in parentheses; it cannot contain `{{`, but `$name` passes on an argument of the fragment it is written in. |
+| `{{$name}}`, `{{$name = default}}` | Inside a fragment: an argument. A fragment run on its own uses the default, or `NULL`. |
+
+`$1`-style parameters and a second statement are rejected before anything runs.
+`{{exits}}`, from before lists existed, still reads the list named `exits`.
+
+**Fragments** are reusable SQL. One that is a query (it starts with `SELECT`,
+`WITH`, `VALUES` or `TABLE`) stands in for a table; anything else is an
+expression and stands in for a value, so the same mechanism covers a shared
+population and a shared formula. A fragment cannot use itself, directly or not.
+
+Editors can add SQL assertions to a fragment. Each must return exactly one
+boolean and can call the fragment with `{{> slug(...)}}`. Run it on a chosen
+data source against the current draft, without saving it or storing a result.
+The change-impact panel lists dependent queries, fragments and dashboards.
+
+**Lists** keep values out of the SQL, so editors change them without a new
+version: the accounts to leave out, the regions that count. Each value belongs
+to one data source or to every one. A list's values are part of each stored
+result's inputs: changing them makes the results of the queries that read it
+stale, and the scheduler reruns those. Removals are recorded, not deleted.
+
+**Versions are immutable.** Saving SQL creates the next version; nothing edits
+one in place, including a hand-written `UPDATE`, which a trigger refuses.
+Archiving a query hides it but keeps its history.
+
+**Results are materialized** into tables of their own in the app database, in
+the `results` schema. Reading a result never runs the query. A result records
+which fragment versions and list values produced it; when either changes, it is
+reported `stale`.
+
+**Scheduling.** A query with `refreshSeconds` (60 or more) is rerun on that
+interval, and within one scheduler tick (10 s) of its inputs changing. One
+replica leads, through an advisory lock in the app database; the others take
+over if it goes away. A failed run keeps the previous result serving and
+records the error on it. At most `ARRAKIS_SCHEDULER_CONCURRENCY` scheduled runs
+are in flight at once.
+
+**Query health** under Settings shows active runs, problems with default
+parameter values on each source, affected dashboards, and the 100 most recent
+stored runs recorded since history was enabled. Preview runs are not included.
+
+**Several data sources.** A query runs on one, or on all of them with their
+rows stacked under a `network` column — useful when they share a schema, like
+production and staging. A query whose figure only means something per source
+sets `combine: "hidden"`. A dashboard's data source variable decides whether
+viewers may pick *All, stacked* and can restrict which configured data sources
+appear. When restricted, *All, stacked* combines only the allowed sources.
+
+In the editor: highlighting, completion of tables, columns, fragments, lists and
+placeholders (type `{{`), Cmd/Ctrl+Enter to run (the selection only, when there
+is one), Cmd/Ctrl+S to save, Cmd/Ctrl+/ to comment lines, Shift+Alt+F to format
+(an in-house formatter, [`app/(studio)/sql-format.ts`](./app/(studio)/sql-format.ts),
+that changes only whitespace and the case of keywords), and **Explain** /
+**Explain and measure** (`EXPLAIN ANALYZE`, in the same read-only transaction
+and time limit) in the Run menu. The editor is a highlighted `<textarea>`
+written for this repository rather than an editor package, so the Nix
+`npmDepsHash` is untouched.
+
+### Charts and dashboards
+
+One query, one stored result, any number of charts. A chart never reads the data source:
+it shapes the stored rows, the server turns that into one SQL statement over
+the result table, and the chart type draws what comes out.
+
+Each chart is a tab of its query. The chart sits on top, full width, redrawn
+as you change things, with the rows behind it a click away; under it, panels
+say what it shows and how it is drawn:
+
+- **Result data** — what the chart shows (below);
+- **Chart options** — legend, stacking, normalize to percentage, total in the
+  tooltip, data labels, lines drawn as steps, and *keep series colours
+  stable*: colour each series by its name rather than its position, so a category
+  keeps its colour across charts and as others come and go;
+- **X-axis options** — a title, reversed order, and a range selector under the
+  chart to zoom into part of it;
+- **Y-axis options** — a title, logarithmic scale, whether to include 0, a
+  minimum and maximum, and the tick format; a second panel for the right axis
+  once a series is on it;
+- **Series** — one row per series as drawn: rename it, draw it as columns, a
+  line or an area whatever the chart type (a line over bars), put it on the
+  right axis, pick its colour (the style's swatches or any colour), hide it, or
+  drag it to reorder. *Restore colours* drops the picked ones. All of it is
+  saved by series name, so it follows a series however the data changes.
+
+On a dashboard, clicking a legend entry hides that series for the moment, and
+*All* toggles them together. A share chart's labels are its series: they take
+the same names, colours and hiding.
+
+**New chart** offers starting points built from the query's own columns —
+trend over time, single number, top 10, breakdown over time, hour × weekday,
+table of rows, a donut of a category, and *columns and a line* (a count as
+columns, a sum or distinct count as a line on the right axis). What a chart
+shows is described in one of three ways:
+
+- **Simple**, as a sentence: *show* a count, sum, average or distinct count,
+  *over* a column (a time column by hour, day, week, month, or day or week
+  depending on the range), *split* into series by another, for the *rows*
+  within the dashboard's range (or a fixed window) and matching some filters —
+  against a value, with the column's common values offered, or a dashboard
+  variable. *More* adds a trailing window (distinct users over the last 30
+  days, every day), top N, share of the total, a rank, filters on the results,
+  order and a limit. The axes follow from what you chose
+  ([`lib/viz/builder.ts`](./lib/viz/builder.ts) compiles it to steps).
+- **Steps**, the pipeline below, for what the simple form cannot say; a simple
+  chart turns into its steps in one click.
+- **SQL** over the stored result, below.
+
+While editing, a filter on an unset dashboard variable is previewed with the
+column's most common value, so the chart draws at once.
+
+| Step | Does |
+|---|---|
+| Filter | `=`, `!=`, `<`…, `contains`, `in`, null checks; against a value or a dashboard variable, optionally skipped while the variable is unset. |
+| Range | Keeps the trailing `7d`, `30d`, `12h`, `6m`… of a time column, or the last `500000` of a number column such as a block, named by a variable (default `range`) or fixed in the step. A time window counts back from the newest row or from now; a number window from its newest value, or from a column holding where it ends (`head_block`). `all` keeps everything. |
+| Bucket | A time to its hour, day, week or month, or to hour-of-day and day-of-week; or *day or week, by range* — daily up to 31 days, weekly beyond. A number into bins of a fixed width, or about forty round-width bins (1, 2 or 5 × 10ⁿ) over the window, each named by its start. |
+| Compute | `+ − × ÷` between columns or with a number; days or months between two dates. |
+| Window | `min`, `max`, `sum`, `count`, `first_value`, `row_number`, `rank` over partitions, as a new column — first-seen months for cohorts, say. |
+| Group and aggregate | `count`, `count distinct` (of one column or a combination), `sum`, `avg`, `min`, `max`. |
+| Rolling window | The same measures over the trailing N days at every date, optionally filling dates with no rows — distinct users over a week, every day. |
+| Top N + others | Keeps the N largest categories and folds the rest into one. |
+| Sort, Limit | |
+
+Every column a step names is checked against what the previous step produced,
+so a broken step says which column is missing and which exist. Values are
+bound, never pasted into the SQL. Charts are cached for a minute, keyed by the
+result tables they read, so a refresh shows straight away.
+
+Chart types: number, line, area, bar (stacked or not, split by a column),
+share, pie (or a donut with the total in its middle; past ten slices the rest
+fold into one), heatmap (hour × weekday fills every slot), cohort grid, and table. They
+draw with the dashboard's own tiles and palettes, in both visual styles. A
+tile names the chart and, muted beside it, the query it comes from; a number
+sizes itself to the tile; and its footer says how fresh the stored result is
+(green, amber when its query changed since, red when the last run failed),
+with a **⋯** menu to open the query, download (the image, or the data), or
+enlarge it.
+
+Changing a variable switches its control at once and changes the address
+without reloading the page. Each chart that reads the variable says
+*Updating…* (fading a little) until its new data arrives; the others are left
+alone, and only charts whose data changed are redrawn. The page also asks
+`/api/v1/dashboards/<slug>/status` every 20 seconds (every 3 while something
+runs) which of its queries are running: their charts say *Running…*, and
+redraw on their own when the run finishes.
+
+For anything the steps do not cover, a chart can be **SQL** over `{{result}}`
+(and `{{name}}` for a dashboard variable, bound as text). It runs read-only, in
+ten seconds at most, on a connection of its own: `APP_CHARTS_DATABASE_URL`,
+which logs in to the app database as a role that holds **nothing**. For each
+run the app issues a ticket for the stored tables behind `{{result}}`, and the
+role's one right — calling `chart_access.result_rows`, which the app grants it —
+turns that ticket into rows. So a chart reads its own query's result and
+nothing else: not another query's result, not the users or sessions. Without
+the variable, or while the role could do more than that, SQL charts are refused
+with the reason and step charts are unaffected.
+
+```sql
+-- as a superuser, once
+CREATE ROLE arrakis_charts LOGIN NOINHERIT PASSWORD '…' CONNECTION LIMIT 8;
+ALTER ROLE arrakis_charts SET statement_timeout = '15s';
 ```
 
-Or set `EXITS` to a comma-separated list to apply the same exits to every network;
-a network naming its own overrides it. Addresses are lowercased on read, so
-checksummed input is fine. A malformed address throws rather than being skipped —
-an exit dropped for a typo would take its traffic out of the downstream figure
-silently.
+Give it nothing else: no membership in any role, no grant on any table. It
+must not be the app's own role. `npm run dev:db` creates it.
 
-Once they are named, any redemption from a known exit to a relay is downstream —
-no correction is applied, because there is nothing left to guess. The page says
-"measured" rather than "inferred" and drops the caveat from the chart notes.
+A **dashboard** is a grid of charts and headings, in order, each 1 to 12 columns
+wide. **Edit** turns the page into its own editor:
 
-With no exits configured anywhere the elimination heuristic runs instead: exits
-are taken to be announced payers that never relay, and because every node probes
-the network, a probe floor is estimated from relay-to-relay traffic and
-subtracted. That is a real estimate with a real error bar, and the page says so.
-`totals.gigabytesDownstreamRaw` and `totals.probeFloorGigabytes` expose what the
-correction did.
+- undo and redo changes to the current draft, and duplicate a tile from its
+  toolbar; the history is cleared when editing ends;
+- a bar floats at the top with *Add chart* (any chart saved on a query, found
+  as you type), *Heading*, *Variables*, *Settings* (visibility, archive), and
+  *Cancel* / *Save*, with a dot that turns amber once something changed;
+- the title, description and headings are edited where they are shown;
+- hovering a tile shows its tools: a grip to drag it elsewhere (a bar shows
+  where it will land; with the grip focused, the arrow keys move it), its
+  settings — title, note, what a click sets, when it shows — in a drawer on
+  the right, and remove;
+- drag a tile's bottom-right corner to resize it (or its right or bottom edge
+  for one direction): the width snaps to twelfths of the grid, whose columns
+  show faintly while editing, and the height to 40px steps, from 80 to 1200;
+  the tile redraws as you drag, and the arrow keys do the same on a focused
+  grip. Its **variables** are what viewers change: a time range, a data source, or a
+text variable such as a selected client. A chart reads them through its steps,
+and a widget can be linked so that clicking a row or bar sets a variable here or
+on another dashboard, and can be shown only while a variable is set — which is
+how a drill-down works. Variables travel in the address
+(`/dashboards/usage?range=7d&client=0x…`), so any view can be linked to.
+Editors can save named views of the current variables for dashboard readers.
+Tile settings let them choose a destination dashboard and one of its variables
+for a row or bar click. Click a number or select **Why this value?** from a
+tile's menu to inspect its query, selected variables, source freshness, chart
+steps and transformed result. For supported number tiles, **Show input rows**
+also displays up to 100 stored query rows entering the calculation, after its
+row-level filters and calculations. This reads the stored result, not the live
+source. Grouped calculations, custom SQL and other cases that cannot be
+traced reliably are identified as such; the complete stored query result can
+be opened where permissions allow.
 
-`totals.exitsNamed` and `totals.exitsSeen` report how many exits are configured
-and how many were actually observed paying a relay. Seen below named means some
-have gone quiet — worth chasing, since their traffic is missing from the figure.
+Dashboards are private, unlisted or public, like queries. Every chart's title
+(and *Open the query* in its menu) opens the query it is drawn from, on that
+chart's tab — `/queries/<slug>?tab=charts&chart=<id>` — so any figure can be
+traced to its SQL; charts on a private query only link for editors.
 
-**Single network.** A lone `DATABASE_URL` (with optional `RPC_URL`) still works and
-is read as one unnamed network, so an existing deployment needs no change. The
-selector is hidden when only one network is configured.
+### Bundles
 
-## Networks in the UI
+A bundle is a dashboard with everything it needs, as one JSON file: the
+dashboard, those its charts link to, the charts, their queries, the fragments
+those use, and the definitions of the lists they read (never the values, which
+are each Arrakis's own). [`lib/bundles/format.ts`](./lib/bundles/format.ts)
+describes the format.
 
-The selector switches between each network and **All networks**. Every view is
-computed server-side and sent together, so switching is instant and costs no
-further database work.
+- **Export:** an editor downloads one from a dashboard's **Share** menu
+  (`GET /api/v1/dashboards/:slug/bundle`).
+- **Import:** **Settings → Bundles**, from a file or an https URL. The server
+  downloads URLs itself (the page's CSP keeps the browser to its own origin), so
+  it only fetches https, from public addresses, at most 5 MB in 10 seconds,
+  and checks every redirect again.
+- **What it does:** the import first shows, item by item, what it would create,
+  update or replace. Everything it creates is marked with the bundle's name, so
+  importing a newer file of the same bundle updates what the last one created.
+  A query or dashboard of the same slug that came from elsewhere is a conflict,
+  overwritten only when asked (`replace`). Lists are created empty. What an
+  earlier file created and the newer one no longer has is archived.
+- **Removing one:** **Remove…** beside an imported bundle lists what it would
+  archive, then archives its dashboards, charts and queries. Lists stay, values
+  and all. Either way, something still used from outside the bundle is kept,
+  with the reason: a fragment a query of yours inlines, a query a chart of yours
+  reads, a chart on a dashboard of yours. Nothing is deleted: archived queries
+  are under **Queries → Show archived**, and importing the bundle again brings
+  everything back.
 
-In the combined view:
+An example ships in [`examples/bundles`](./examples/bundles):
+[`gnosis-vpn.json`](./examples/bundles/gnosis-vpn.json), the Gnosis VPN
+dashboards for a Blokli index of the HOPR network. It detects the Gnosis VPN
+exits itself from the network's service registry (entries of type `gvpn:exit`:
+the registered node is the exit, its JSON metadata names it and says where it
+is reached); the list `exits` adds any the
+registry lacks, or stands in on a network without one.
+They read the raw event log (Blokli's `log` table) and decode the events in
+SQL; apart from that, only the last indexed block (`chain_info`) and the
+contract list (`log_topic_info`) come from Blokli's own tables.
 
-- **Ticket price, winning probability and ticket value show nothing.** Each network
-  runs its own oracles, so a single figure would be a fiction.
-- **Everything else aggregates.** Volume is exact rather than approximate: each
-  redemption is priced with its own network's winning probability at its own block
-  before anything is summed, so networks that price traffic differently still add up
-  correctly.
-- **Participants are counted per network.** The same address on two networks is two
-  clients, because the two chains are unrelated. User counts are a union over the
-  trailing window, not a sum of the per-network counts.
-- **A network that cannot be read is left out** of the totals and named in a warning,
-  rather than taking the whole page down.
+### Search, lineage, guide, sharing
 
-## Toolchain
+Cmd/Ctrl+K searches dashboards, queries, charts, fragments, tables and the
+guide. `/lineage` lays out tables → fragments → queries → charts → dashboards
+and lights up what an item reads and what reads it; both read
+`GET /api/v1/lineage` (tables for editors only, matched by name in each query's
+own SQL). `/guide` explains the model, with a FAQ, and the **?** beside the
+main controls links to its sections. **Share** on a dashboard or query gives
+its link and sets who it opens for — editors only (private), anyone with the
+link (unlisted) or everyone (public). The Editorial style follows the system's
+light or dark setting, or a Light / Dark / System switch in the sidebar.
+
+### API
+
+Reads are public for `public` and `unlisted` queries; `private` ones answer 404
+unless signed in. Everything that runs SQL ad hoc or changes state requires a
+session.
+
+| Route | |
+|---|---|
+| `POST /api/v1/auth/login` `{password}` · `POST /api/v1/auth/logout` · `GET /api/v1/auth/session` | Sign in and out. |
+| `GET /api/v1/networks` | Data source ids and labels. |
+| `GET·POST /api/v1/lists` · `PATCH·DELETE /api/v1/lists/:name` · `POST /api/v1/lists/:name/values` · `DELETE …/values/:id` | Lists and their values. Editors only. |
+| `GET /api/v1/schema?network=` | Tables and columns the source's role can read. |
+| `POST /api/v1/run` `{sql, parameters?, values?, network?, timeoutSeconds?, runKey?, explain?}` | Run unsaved SQL; up to 10,000 rows, nothing stored. `runKey` lets it be cancelled; `explain: "plan" \| "analyze"` returns the query plan instead. |
+| `GET /api/v1/runs` · `POST /api/v1/runs/cancel` `{id \| runKey \| query}` | Runs in progress; cancel one, or every run of a query. |
+| `GET /api/v1/lineage` | Tables (editors only), fragments, queries, charts and dashboards, and what reads what. |
+| `GET·POST /api/v1/queries` | List, create. |
+| `GET·PATCH·DELETE /api/v1/queries/:slug` | Read, change metadata, archive. |
+| `GET·POST /api/v1/queries/:slug/versions` | History, save new SQL. |
+| `POST /api/v1/queries/:slug/fork` `{slug, title?}` | Private copy. |
+| `POST /api/v1/queries/:slug/run` `{network?, values?}` | Run now and store the result. |
+| `GET /api/v1/queries/:slug/results?network=&limit=&offset=&p.name=` | The stored result. Never runs anything. |
+| `GET·POST /api/v1/queries/:slug/visualizations` | Charts on a query. |
+| `GET /api/v1/visualizations` · `GET·PATCH·DELETE /api/v1/visualizations/:id` | All charts; one chart. |
+| `GET /api/v1/visualizations/:id/data?network=&v.name=` | A chart's rows, from stored results. |
+| `POST /api/v1/visualizations/preview` `{query, config, network?, vars?}` | Rows for an unsaved chart. |
+| `GET·POST /api/v1/dashboards` · `GET·PATCH·DELETE /api/v1/dashboards/:slug` | Dashboards. |
+| `PUT /api/v1/dashboards/:slug/widgets` `{widgets: [...]}` | Replace the layout. |
+| `GET /api/v1/dashboards/:slug/data?v.name=` | Every widget's rows in one call. |
+| `GET /api/v1/dashboards/:slug/bundle` | The dashboard as a bundle file. Editors only. |
+| `GET·POST /api/v1/bundles` `{bundle \| url, replace?}` · `POST /api/v1/bundles/preview` | Imported bundles; import one; what an import would do. |
+| `GET·DELETE /api/v1/bundles/{name}` | What removing a bundle would archive and keep; remove it. |
+
+In the API a data source is a `network` (the name it had first). `network=all`
+(the default where accepted) stacks every source's rows under a leading
+`network` column; a query with `combine: "hidden"` has no such view. Charts
+always see a `network` column, even for one source, so a chart that counts or
+splits by source works whichever one a viewer picks.
+
+## Development
+
+### Toolchain
 
 The repository ships a Nix flake with Node 22 and `psql`. With direnv installed:
 
@@ -136,47 +481,39 @@ direnv allow
 `nix fmt` formats the Nix; application code goes through `npm run format`, which
 runs oxfmt with the project's own configuration. The shell loads on `cd` into the
 directory, and `.env.local` (git-ignored) is
-sourced for `DATABASE_URL`, `RPC_URL` and friends. Without direnv, `nix develop`
+sourced for `DATA_SOURCES` and friends. Without direnv, `nix develop`
 gives the same shell. Without Nix, install Node 22.13 or newer by hand.
 
-## Run
-
-Node.js 22.13 or newer is required.
-
-```bash
-npm ci
-npm run dev
-```
-
-For production:
+After changing `package.json` or `package-lock.json`, refresh the Nix dependency
+pin before committing:
 
 ```bash
-npm run build
-npm start
+npm run nix:refresh-deps
 ```
 
-The JSON representation of the current snapshot is available at
-`/api/v1/dashboard`; it returns HTTP 503 when the database cannot be reached.
-`/api/v1/client?network=<id>&key=<client key>` returns one client's drill-down
-record, which is excluded from the snapshot above: it holds one record per client
-and would otherwise be most of the payload, for the one record a click needs.
-Kubernetes can use `/api/health/live` for liveness and `/api/health/ready` for
-readiness. Readiness checks the cached analytics snapshot and returns HTTP 503
-when the index database is unavailable.
+### Build and run
 
-JSON responses are compressed (brotli, else gzip) when the caller accepts it,
-which takes the full payload from roughly 750 KiB to 80 KiB. Next does not
-compress route-handler responses itself, so this is done in `lib/http.ts` rather
-than left to whatever fronts the container.
+```bash
+npm run build && npm start
+```
 
-The page is rendered per request — it must not be prerendered at build time,
-where there is no index database to read and it would bake a "database
-connection pending" dashboard into the image. Because the snapshot behind it only
-changes once a minute, it is served with `s-maxage=60`, so a CDN or ingress cache
-can serve one render to every visitor inside that window. Without a shared cache
-in front, every request renders.
+`/api/health/live` is for liveness; `/api/health/ready` answers 503 unless the
+app database (when configured) and at least one data source answer.
 
-## Container publishing
+### Tests
+
+```bash
+TEST_ADMIN_DATABASE_URL=postgresql://postgres:…@localhost/postgres npm test
+```
+
+The integration suite builds throwaway databases using that superuser
+connection, and is skipped without it. With `npm run dev:db`, use the
+socket URL it prints (`postgresql://postgres@localhost:54329/postgres?host=<repo>/.pgdata`). Its data sources are loaded from
+[`test/fixtures`](./test/fixtures): a Blokli-shaped index, which also lets it
+run every query of the Gnosis VPN example bundle. Node 22.18 or newer runs the TypeScript
+directly; nothing else is needed.
+
+### Container publishing
 
 The image is built from the flake, so the container and the development shell
 resolve the same pinned toolchain:
@@ -195,98 +532,3 @@ a push to `main` or a `v*` tag builds the image and publishes it to
 `ghcr.io/jeandemeusy/arrakis`. Every build receives an immutable
 `sha-<full-commit-sha>` tag; version tags and the mutable `main` convenience tag
 are also published.
-
-## Working on the UI without a database
-
-```bash
-npm run dev:fixtures
-```
-
-`DASHBOARD_FIXTURES=1` makes `loadAnalytics` return a synthetic snapshot instead of
-querying, so the whole page renders with no `DATABASE_URL`, no index database and no
-deploy in the loop. The generator is seeded, so reloads produce identical numbers
-and a styling change is the only thing that moves between two screenshots. It
-deliberately produces a long relayer tail, a wide client spread and uneven daily
-activity, since those are the shapes that break layouts.
-
-`DASHBOARD_FIXTURES=degraded` serves the same data with the second network
-reporting failed queries, which is the only way to see the unavailable and partial
-tile states without breaking a real database.
-
-The fixture fabricates the finished snapshot rather than exercising the aggregation
-in `lib/analytics.ts`. It validates rendering only — never read agreement there as
-evidence that the real derivations are correct.
-
-## Metric definitions
-
-Every published figure is reconstructed from chain events. No number on the page
-is self-reported.
-
-**Client traffic only.** This is a dashboard about the VPN, so it counts what VPN
-clients did. Relays announce themselves on chain; an account that never announced
-is not infrastructure, so a channel it opened is a client paying for its own
-sessions. Every metric below is restricted to those channels — channels sourced
-by announced accounts are relay-to-relay hops, not client usage.
-
-**Redemptions.** Blokli appends one `channel_state` row per on-chain channel
-event, and `TicketRedeemed` is the only event that advances `ticket_index`. A row
-whose ticket index exceeds its predecessor's (within the same channel epoch) is
-therefore a redemption. The increment is _not_ the number of tickets redeemed: a
-client numbers a ticket for every packet it sends, only winning tickets are
-redeemed, and the contract advances the index past the winner to block replay —
-so the jump swallows every losing ticket issued in between and estimates the
-packets that redemption paid for. Exactly one ticket is redeemed per
-redemption. See [`sql/v1/redemptions.sql`](./sql/v1/redemptions.sql).
-
-**Active users.** A client is an account that bound a key (`account`, written from
-`KeyBinding`) but never announced an address (`announcement`, written from
-`AddressAnnouncement`). It is active in a window when a redemption landed on
-one of its channels inside that window, or when it was first deployed inside it —
-so a new client registers on deployment rather than only once its first tickets
-are redeemed. Windows are inclusive of both endpoints: 7 days is `day-6..day`,
-30 days is `day-30..day`. The series is plotted from 2026-01-01, matching the
-published `start_day`; the trailing windows still read activity from before it.
-
-**Ticket parameters.** Ticket price and winning probability are both oracle values
-that Blokli stores only at their latest setting, so each timeline is recovered by
-decoding the oracle's own logs — `TicketPriceUpdated` and `WinProbUpdated` — from
-the raw `log` table, in one pass
-([`sql/v1/oracle-updates.sql`](./sql/v1/oracle-updates.sql)). Ticket value is the price divided by the winning probability — the face value of a
-ticket with one remaining hop; a ticket issued earlier in a multi-hop path is worth
-that times the remaining hop count (`hopr-impls/ticket-manager/src/factory.rs`).
-
-**Data volume.** A ticket is issued per packet but only wins with probability `p`,
-so a redeemed ticket stands in for `1/p` packets of 650 bytes. Each redemption
-therefore accounts for `650 / (2^30 * p)` GB, with `p` the winning probability in
-force at that redemption's block. Redemptions predating the first oracle update
-have no probability on record and are excluded rather than guessed. Blokli keeps only
-the current probability in `chain_info`, so the timeline is recovered by decoding
-`WinProbUpdated` logs from the raw `log` table
-([`sql/v1/oracle-updates.sql`](./sql/v1/oracle-updates.sql)); the 7-byte
-encoding is decoded exactly as `WinningProbability::as_f64` does. When the log
-table is not in this database the page falls back to the current probability and
-says so in a banner.
-
-These deliberately avoid the service registry: the `gvpn:exit` service type
-requires migration `m006`, which is not present on every deployed index.
-
-Queries are versioned under `sql/v1`. Change their definitions by introducing a
-new version rather than silently rewriting previously published methodology.
-
-### Indexes the queries want
-
-The dashboard connects with a read-only role and creates nothing, so these belong
-to whoever runs the Blokli index. Without them the two heaviest queries still
-work, they just read more than they need to:
-
-```sql
-CREATE INDEX ON channel_state (channel_id, published_block, published_tx_index, published_log_index);
-CREATE INDEX ON announcement (account_id);
-CREATE INDEX ON log (topics);
-```
-
-The first turns the redemption queries' per-channel window function into an index
-scan instead of a sort. The second is probed once per channel to tell a client
-from a relay. The third is what makes the oracle history a range scan rather than
-a sequential read of the largest table in the schema — the queries match event
-signatures as prefix ranges over `topics` specifically so that it can be used.

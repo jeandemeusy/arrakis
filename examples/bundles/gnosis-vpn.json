@@ -1,0 +1,2629 @@
+{
+  "format": "arrakis-bundle",
+  "version": 1,
+  "name": "gnosis-vpn",
+  "title": "Gnosis VPN",
+  "description": "Who uses Gnosis VPN, how much traffic it carries and where, read from the HOPR network’s on-chain ticket redemptions.",
+  "exportedAt": "2026-11-04T08:07:04.269Z",
+  "lists": [
+    {
+      "name": "exits",
+      "type": "bytes",
+      "description": "Exit node addresses, per data source. Downstream volume counts only the exits listed here."
+    }
+  ],
+  "queries": [
+    {
+      "slug": "event-logs",
+      "title": "Event logs",
+      "description": "Fragment: every stored log of the given events, by signature hash — the raw rows Blokli keeps in `log`, less those a reorg removed. FROM {{> event-logs(ARRAY['\\x…'::bytea])}} AS e.",
+      "kind": "fragment",
+      "sql": "-- Every stored log of the given events, by signature hash: the raw rows\n-- Blokli keeps in `log` for the contracts it watches, less those a reorg\n-- removed. The other fragments read the chain through this one.\n--\n--   FROM {{> event-logs(ARRAY[event_topic('TicketRedeemed(bytes32,bytes32)')])}} AS e\n--\n-- `topics` is the event's topics concatenated, 32 bytes each, the signature\n-- first; an indexed address is the last 20 bytes of its topic. `data` is the\n-- ABI encoding of the arguments that are not indexed, a 32-byte word each.\n--\n-- Blokli indexes `log` by position only, so this reads the whole table; an\n-- index on SUBSTRING(topics FROM 1 FOR 32) would let it read only the events\n-- asked for.\nSELECT block_number, tx_index, log_index, address, topics, data\nFROM log\nWHERE removed = FALSE\n  AND SUBSTRING(topics FROM 1 FOR 32) = ANY ({{$signatures = ARRAY[event_topic('ChannelOpened(bytes32,address,address,bytes32)')]}})",
+      "parameters": [],
+      "combine": "concat",
+      "timeoutSeconds": null
+    },
+    {
+      "slug": "key-bindings",
+      "title": "Key bindings",
+      "description": "Fragment: every account — a chain key bound to a packet key — once, at its first KeyBinding event, with its key id.",
+      "kind": "fragment",
+      "sql": "-- Every account: a chain key bound to a packet key, once, at its first\n-- binding, where Blokli creates the account (the key id is its account id).\n--\n-- The Announcements contract's KeyBinding(bytes32 ed25519_sig_0,\n-- bytes32 ed25519_sig_1, bytes32 ed25519_pub_key, address chain_key,\n-- uint256 key_id) indexes nothing: the chain key is the last 20 bytes of data\n-- word 3, the key id word 4. Blokli refuses a key id above 2³²−1, and so does\n-- this; it also verifies the binding's ed25519 signature, which SQL cannot.\nSELECT DISTINCT ON (chain_key)\n  chain_key,\n  key_id,\n  block_number,\n  tx_index,\n  log_index\nFROM (\n  SELECT\n    SUBSTRING(data FROM 109 FOR 20) AS chain_key,\n    ('x' || encode(SUBSTRING(data FROM 157 FOR 4), 'hex'))::bit(32)::bigint AS key_id,\n    block_number,\n    tx_index,\n    log_index\n  FROM {{> event-logs(ARRAY[event_topic('KeyBinding(bytes32,bytes32,bytes32,address,uint256)')])}} AS e\n  WHERE OCTET_LENGTH(data) >= 160\n    AND SUBSTRING(data FROM 129 FOR 28) = decode(repeat('00', 28), 'hex')\n) AS binding\nORDER BY chain_key, block_number, tx_index, log_index",
+      "parameters": [],
+      "combine": "concat",
+      "timeoutSeconds": null
+    },
+    {
+      "slug": "vpn-nodes",
+      "title": "VPN nodes",
+      "description": "Fragment: every announced node (relays and exits), by address, from the announcement events.",
+      "kind": "fragment",
+      "sql": "-- The network's infrastructure, relays and exits alike: every account whose\n-- latest announcement stands. Announcements do not tell relays from exits; the\n-- exits are told by the service registry (registry-entries) and the list\n-- \"exits\" (Settings → Lists).\n--\n-- The Announcements contract's AddressAnnouncement(address node,\n-- string baseMultiaddr) announces and RevokeAnnouncement(address node)\n-- withdraws every announcement before it. Neither indexes its arguments, so\n-- the node is data word 0. An empty address is skipped, as Blokli skips it:\n-- its encoding is then three words, no more. Only accounts count.\nWITH account AS MATERIALIZED {{> key-bindings}}\nSELECT announced.node AS address\nFROM (\n  SELECT DISTINCT ON (node) node, revoked\n  FROM (\n    SELECT\n      SUBSTRING(data FROM 13 FOR 20) AS node,\n      SUBSTRING(topics FROM 1 FOR 32) = event_topic('RevokeAnnouncement(address)') AS revoked,\n      block_number,\n      tx_index,\n      log_index\n    FROM {{> event-logs(ARRAY[event_topic('AddressAnnouncement(address,string)'), event_topic('RevokeAnnouncement(address)')])}} AS e\n    WHERE OCTET_LENGTH(data) >= 32\n      AND (SUBSTRING(topics FROM 1 FOR 32) = event_topic('RevokeAnnouncement(address)') OR OCTET_LENGTH(data) > 96)\n  ) AS event\n  ORDER BY node, block_number DESC, tx_index DESC, log_index DESC\n) AS announced\nWHERE NOT announced.revoked\n  AND announced.node IN (SELECT chain_key FROM account)",
+      "parameters": [],
+      "combine": "concat",
+      "timeoutSeconds": null
+    },
+    {
+      "slug": "vpn-clients",
+      "title": "VPN clients",
+      "description": "Fragment: every account that is not an announced node — the VPN clients — with the block it was deployed in.",
+      "kind": "fragment",
+      "sql": "-- VPN clients: accounts that bound a key but are not announced nodes, so\n-- they are not infrastructure. An account starts with its key binding, so\n-- that block is when the client was deployed.\nSELECT\n  account.key_id AS account_id,\n  account.chain_key AS client,\n  account.block_number AS deployed_block\nFROM {{> key-bindings}} AS account\nWHERE account.chain_key NOT IN (SELECT address FROM {{> vpn-nodes}} AS node)",
+      "parameters": [],
+      "combine": "concat",
+      "timeoutSeconds": null
+    },
+    {
+      "slug": "registry-entries",
+      "title": "Registered exits",
+      "description": "The gvpn:exit entries standing in the service registry.",
+      "kind": "fragment",
+      "sql": "-- The Gnosis VPN exits the service registry lists: one row per registered\n-- gvpn:exit entry that stands. The exit is the registered node: its address\n-- is what pays relays for the return path.\n--\n-- The HoprServiceRegistry emits Registered and Updated as\n-- (bytes32 indexed serviceType, address indexed node, address indexed safe,\n-- bytes metadata, uint48 registeredAt, uint256 burned) and Deregistered as\n-- (bytes32 indexed serviceType, address indexed node, address indexed safe).\n-- The topics hold the type (topic 1), the node (2) and the safe (3); the data\n-- is the offset of the metadata, two words, then its length and its bytes.\n-- An entry stands from its latest event on: Updated replaces the metadata,\n-- Deregistered ends it. The service type is its name right-padded with zeros,\n-- here 'gvpn:exit'.\n--\n-- The metadata of a gvpn:exit entry is a JSON object that says where the exit\n-- is reached, for example\n--\n--   {\"version\": 1, \"gnosis_vpn_server\": \"host:8000\",\n--    \"wireguard_server\": \"host:51820\", \"meta\": {\"name\": \"GVPN-KR-1\"}}\n--\n-- The fields are picked out by pattern, so a malformed object, or one without\n-- a field, costs that field and not the entry.\nWITH latest AS (\n  SELECT DISTINCT ON (node) node, safe, deregistered, metadata\n  FROM (\n    SELECT\n      SUBSTRING(topics FROM 77 FOR 20) AS node,\n      SUBSTRING(topics FROM 109 FOR 20) AS safe,\n      SUBSTRING(topics FROM 1 FOR 32) = event_topic('Deregistered(bytes32,address,address)') AS deregistered,\n      CASE\n        WHEN OCTET_LENGTH(data) >= 128 THEN SUBSTRING(\n          data FROM 129\n          FOR LEAST(('x' || encode(SUBSTRING(data FROM 125 FOR 4), 'hex'))::bit(32)::bigint, 2048)::int\n        )\n      END AS metadata,\n      block_number,\n      tx_index,\n      log_index\n    FROM {{> event-logs(ARRAY[event_topic('Registered(bytes32,address,address,bytes,uint48,uint256)'), event_topic('Updated(bytes32,address,address,bytes,uint48,uint256)'), event_topic('Deregistered(bytes32,address,address)')])}} AS e\n    WHERE OCTET_LENGTH(topics) >= 128\n      AND SUBSTRING(topics FROM 33 FOR 32) = decode(rpad(encode('gvpn:exit'::bytea, 'hex'), 64, '0'), 'hex')\n  ) AS event\n  ORDER BY node, block_number DESC, tx_index DESC, log_index DESC\n),\ndescribed AS (\n  SELECT node, safe, encode(metadata, 'escape') AS metadata\n  FROM latest\n  WHERE NOT deregistered\n)\nSELECT\n  node AS address,\n  safe,\n  (regexp_match(metadata, '\"name\"\\s*:\\s*\"([^\"]*)\"'))[1] AS name,\n  (regexp_match(metadata, '\"gnosis_vpn_server\"\\s*:\\s*\"([^\"]*)\"'))[1] AS vpn_server,\n  (regexp_match(metadata, '\"wireguard_server\"\\s*:\\s*\"([^\"]*)\"'))[1] AS wireguard_server,\n  metadata\nFROM described",
+      "parameters": [],
+      "combine": "concat",
+      "timeoutSeconds": null
+    },
+    {
+      "slug": "exit-addresses",
+      "title": "Exit addresses",
+      "description": "The exits: registered ones plus those listed by hand.",
+      "kind": "fragment",
+      "sql": "-- The addresses of the network's Gnosis VPN exits: registry entries and\n-- the list \"exits\" (Settings → Lists). A manually configured name takes\n-- precedence over the registry name. If neither has a name, it is null.\n-- One row per address; in_registry and in_list identify its sources.\nWITH found AS (\n  SELECT address, NULLIF(name, '') AS name, 'registry' AS origin\n  FROM {{> registry-entries}} AS entry\n  UNION ALL\n  SELECT address, NULLIF(name, '') AS name, 'list' AS origin\n  FROM unnest({{list:exits:values}}, {{list:exits:names}}) AS listed(address, name)\n)\nSELECT\n  address,\n  COALESCE(\n    MAX(name) FILTER (WHERE origin = 'list'),\n    MAX(name) FILTER (WHERE origin = 'registry')\n  ) AS name,\n  BOOL_OR(origin = 'registry') AS in_registry,\n  BOOL_OR(origin = 'list') AS in_list\nFROM found\nGROUP BY address",
+      "parameters": [],
+      "combine": "concat",
+      "timeoutSeconds": null
+    },
+    {
+      "slug": "channel-events",
+      "title": "Channel events",
+      "description": "Fragment: every event on a payment channel, decoded — the channel's ends, and its status, epoch, ticket index and balance after the event.",
+      "kind": "fragment",
+      "sql": "-- Every event on a payment channel, decoded: the channel's two ends and its\n-- state after the event.\n--\n-- The Channels contract's ChannelOpened, ChannelBalanceIncreased and\n-- ChannelBalanceDecreased, TicketRedeemed, OutgoingChannelClosureInitiated\n-- and ChannelClosed each index the channel id (topic 1) and carry the whole\n-- channel, packed into one 32-byte word:\n--\n--   bytes 0-5 padding · 6 status · 7-9 epoch · 10-13 closure time ·\n--   14-19 ticket index · 20-31 balance (wei)\n--\n-- Status is 0 closed, 1 open, 2 closure initiated. Only ChannelOpened names\n-- the ends, as topics 2 (source, the payer) and 3 (destination), so every\n-- event takes them from its channel's opening, by a window over the channel\n-- rather than a join: the planner cannot estimate how many rows a byte\n-- pattern matches, and would run a join as a nested loop over the whole log.\n--\n-- Blokli records a channel only between two accounts, and marks an event on a\n-- channel it never saw opened as corrupted; both are left out here.\nWITH account AS MATERIALIZED {{> key-bindings}}\nSELECT\n  channel_id,\n  SUBSTRING(ends FROM 13 FOR 20) AS source,\n  SUBSTRING(ends FROM 45 FOR 20) AS destination,\n  event,\n  block_number,\n  tx_index,\n  log_index,\n  status,\n  epoch,\n  closure_time,\n  ticket_index,\n  balance\nFROM (\n  SELECT\n    decoded.*,\n    FIRST_VALUE(opening) OVER channel AS ends\n  FROM (\n    SELECT\n      SUBSTRING(topics FROM 33 FOR 32) AS channel_id,\n      CASE SUBSTRING(topics FROM 1 FOR 32)\n        WHEN event_topic('ChannelOpened(bytes32,address,address,bytes32)') THEN 'opened'\n        WHEN event_topic('ChannelBalanceIncreased(bytes32,bytes32)') THEN 'balance-increased'\n        WHEN event_topic('ChannelBalanceDecreased(bytes32,bytes32)') THEN 'balance-decreased'\n        WHEN event_topic('TicketRedeemed(bytes32,bytes32)') THEN 'ticket-redeemed'\n        WHEN event_topic('OutgoingChannelClosureInitiated(bytes32,bytes32)') THEN 'closure-initiated'\n        ELSE 'closed'\n      END AS event,\n      -- An opening between two accounts: its topics 2 and 3.\n      CASE\n        WHEN SUBSTRING(topics FROM 1 FOR 32) = event_topic('ChannelOpened(bytes32,address,address,bytes32)')\n          AND OCTET_LENGTH(topics) >= 128\n          AND SUBSTRING(topics FROM 77 FOR 20) IN (SELECT chain_key FROM account)\n          AND SUBSTRING(topics FROM 109 FOR 20) IN (SELECT chain_key FROM account)\n          THEN SUBSTRING(topics FROM 65 FOR 64)\n      END AS opening,\n      block_number,\n      tx_index,\n      log_index,\n      GET_BYTE(data, 6) AS status,\n      ('x' || encode(SUBSTRING(data FROM 8 FOR 3), 'hex'))::bit(24)::bigint AS epoch,\n      ('x' || encode(SUBSTRING(data FROM 11 FOR 4), 'hex'))::bit(32)::bigint AS closure_time,\n      ('x' || encode(SUBSTRING(data FROM 15 FOR 6), 'hex'))::bit(48)::bigint AS ticket_index,\n      SUBSTRING(data FROM 21 FOR 12) AS balance\n    FROM {{> event-logs(ARRAY[event_topic('ChannelOpened(bytes32,address,address,bytes32)'), event_topic('ChannelBalanceIncreased(bytes32,bytes32)'), event_topic('ChannelBalanceDecreased(bytes32,bytes32)'), event_topic('TicketRedeemed(bytes32,bytes32)'), event_topic('OutgoingChannelClosureInitiated(bytes32,bytes32)'), event_topic('ChannelClosed(bytes32,bytes32)')])}} AS e\n    WHERE OCTET_LENGTH(topics) >= 64\n      AND OCTET_LENGTH(data) >= 32\n  ) AS decoded\n  WINDOW channel AS (\n    PARTITION BY channel_id\n    ORDER BY opening IS NULL, block_number, tx_index, log_index\n    ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING\n  )\n) AS event\nWHERE ends IS NOT NULL",
+      "parameters": [],
+      "combine": "concat",
+      "timeoutSeconds": null
+    },
+    {
+      "slug": "vpn-redemptions",
+      "title": "VPN redemptions",
+      "description": "Fragment: every ticket redemption that carried VPN traffic, upstream or downstream, with its block and tickets.",
+      "kind": "fragment",
+      "sql": "-- Ticket redemptions that carried Gnosis VPN traffic, one row each.\n--\n-- Every channel event carries the channel's ticket index, and only a\n-- redemption advances it: an event whose index is above the previous event's,\n-- in the same epoch, marks a redemption on that channel. The jump is not the\n-- tickets redeemed: a client numbers a ticket for every packet and only\n-- winners are redeemed, so it estimates the packets paid for.\n--\n-- Payment follows the sender of each hop and a packet's destination is never\n-- paid, so one VPN session leaves two paid hops on chain:\n--\n--   upstream     a client — an account that never announced — paying a relay\n--   downstream   one of the network's configured exits paying a relay for\n--                the answer\n--\n-- Everything else on these channels is announced nodes probing each other,\n-- and is left out. The exits are those the service registry lists as gvpn:exit\n-- and those in the list \"exits\" (exit-addresses); neither means no downstream\n-- at all rather than a guess.\n--\n-- The qualifying channels are picked FIRST, so the window function runs over\n-- their events only: every predicate is a property of the channel, and the\n-- window partitions by channel, so dropping a channel cannot change the LAG of\n-- a row that survives.\nWITH node AS MATERIALIZED {{> vpn-nodes}},\nexit_node AS MATERIALIZED {{> exit-addresses}},\nvpn_event AS (\n  SELECT\n    e.*,\n    CASE\n      WHEN e.source NOT IN (SELECT address FROM node) THEN 'upstream'\n      ELSE 'downstream'\n    END AS direction\n  FROM {{> channel-events}} AS e\n  WHERE e.destination IN (SELECT address FROM node)\n    AND (\n      e.source NOT IN (SELECT address FROM node)\n      OR e.source IN (SELECT address FROM exit_node)\n    )\n),\nordered AS (\n  SELECT\n    direction,\n    source AS payer,\n    destination AS relay,\n    channel_id,\n    block_number,\n    tx_index,\n    log_index,\n    epoch,\n    ticket_index,\n    LAG(epoch) OVER w AS previous_epoch,\n    LAG(ticket_index) OVER w AS previous_ticket_index\n  FROM vpn_event\n  WINDOW w AS (\n    PARTITION BY channel_id\n    ORDER BY block_number, tx_index, log_index\n  )\n)\nSELECT\n  direction,\n  payer,\n  relay,\n  encode(channel_id, 'hex') AS channel,\n  block_number AS block,\n  tx_index,\n  log_index,\n  ticket_index - previous_ticket_index AS tickets\nFROM ordered\nWHERE previous_ticket_index IS NOT NULL\n  AND epoch = previous_epoch\n  AND ticket_index > previous_ticket_index",
+      "parameters": [],
+      "combine": "concat",
+      "timeoutSeconds": null
+    },
+    {
+      "slug": "hex",
+      "title": "Hex",
+      "description": "Expression fragment: bytes as a 0x-prefixed hex string. {{> hex(address)}}.",
+      "kind": "fragment",
+      "sql": "-- Bytes as 0x-prefixed hex text, the way addresses are read everywhere.\n--\n--   {{> hex(account.chain_key)}}   →   '0x6b3c…'\n'0x' || encode({{$value = '\\x00ff'::bytea}}, 'hex')",
+      "parameters": [],
+      "combine": "concat",
+      "timeoutSeconds": null
+    },
+    {
+      "slug": "indexed-block",
+      "title": "Indexed block",
+      "description": "Expression fragment: the last block the index has read — the head every block window counts back from.",
+      "kind": "fragment",
+      "sql": "-- The last block the index has read: the head of the chain as far as these\n-- dashboards know, and where every \"last N blocks\" window ends. Results carry\n-- it as `head_block`.\n--\n-- The one value read from Blokli's bookkeeping rather than the event log. An\n-- index that keeps only the log would read its own cursor here, or\n-- (SELECT MAX(block_number) FROM log), which lags while the chain is quiet.\n(SELECT last_indexed_block FROM chain_info ORDER BY id LIMIT 1)",
+      "parameters": [],
+      "combine": "concat",
+      "timeoutSeconds": null
+    },
+    {
+      "slug": "client-activity",
+      "title": "Client activity",
+      "description": "Each block in which each client was active — redeemed for or deployed — with its deployment block.",
+      "kind": "query",
+      "sql": "-- Each block in which each VPN client was active, with its deployment block.\n--\n-- A client (vpn-clients) is active in a block when a relay redeemed one of its\n-- tickets there, or when it was deployed there — so a new client counts at\n-- once rather than only after its first redemption. One row per client and\n-- block:\n--\n--   kind            `deployed` in its deployment block, `redeemed` otherwise\n--   redemptions     0 in a deployment block with no traffic\n--   deployed_block  the client's deployment block, on every row\n--   head_block      the last block indexed\n--\n-- Feeds the active-client counts and the deployment cohorts.\nWITH deployment AS (\n  SELECT client, deployed_block FROM {{> vpn-clients}} AS clients\n),\nredeemed AS (\n  SELECT r.payer AS client, r.block, COUNT(*) AS redemptions\n  FROM {{> vpn-redemptions}} AS r\n  WHERE r.direction = 'upstream'\n  GROUP BY 1, 2\n),\nactive AS (\n  SELECT client, block, redemptions FROM redeemed\n  UNION ALL\n  SELECT client, deployed_block, 0 FROM deployment\n)\nSELECT\n  {{> hex(active.client)}} AS client,\n  active.block,\n  deployment.deployed_block,\n  CASE WHEN active.block = deployment.deployed_block THEN 'deployed' ELSE 'redeemed' END AS kind,\n  SUM(active.redemptions)::integer AS redemptions,\n  {{> indexed-block}} AS head_block\nFROM active\nLEFT JOIN deployment ON deployment.client = active.client\nGROUP BY active.client, active.block, deployment.deployed_block\nORDER BY active.block, client",
+      "parameters": [],
+      "refreshSeconds": 900,
+      "rowLimit": null,
+      "combine": "concat",
+      "timeoutSeconds": null
+    },
+    {
+      "slug": "decode-win-prob",
+      "title": "Decode winning probability",
+      "description": "Expression fragment: the 7-byte encoded winning probability as a number between 0 and 1.",
+      "kind": "fragment",
+      "sql": "-- HOPR's 7-byte winning probability as a number from 0 to 1.\n--\n-- As hopr-types' WinningProbability::as_f64 does it: read big-endian, add\n-- one, and keep the top 52 bits as the mantissa of a float in [1, 2), less\n-- one. That is ((v + 1) >> 4) / 2^52 — exact in double precision, and 0 and 1\n-- for the all-zero and all-ones encodings.\n--\n--   {{> decode-win-prob(value)}}   →   0.2\n((('x' || encode({{$value = '\\xffffffffffffff'::bytea}}, 'hex'))::bit(56)::bigint + 1) >> 4)::float8\n  / 4503599627370496",
+      "parameters": [],
+      "combine": "concat",
+      "timeoutSeconds": null
+    },
+    {
+      "slug": "oracle-updates",
+      "title": "Oracle updates",
+      "description": "Fragment: every winning-probability and ticket-price update from the oracle events, raw value and position.",
+      "kind": "fragment",
+      "sql": "-- Every update of the two oracle values the dashboard prices traffic with,\n-- oldest first: `ticket-price` (value: the new price, 32 bytes, in wei) and\n-- `win-prob` (value: the new winning probability, 7 bytes; decode it with\n-- decode-win-prob).\n--\n--   TicketPriceUpdated(uint256,uint256)  d4c5e06b…f3fb\n--   WinProbUpdated(uint56,uint56)        02728c4a…3800\n--\n-- Neither event indexes its arguments, so data word 1 is the new value: the\n-- price is the whole word, at offset 33; a uint56 is right-aligned in its\n-- word, so the probability is its last 7 bytes, at offset 58.\nSELECT\n  block_number,\n  tx_index,\n  log_index,\n  CASE\n    WHEN SUBSTRING(topics FROM 1 FOR 32) = event_topic('WinProbUpdated(uint56,uint56)') THEN 'win-prob'\n    ELSE 'ticket-price'\n  END AS kind,\n  CASE\n    WHEN SUBSTRING(topics FROM 1 FOR 32) = event_topic('WinProbUpdated(uint56,uint56)') THEN SUBSTRING(data FROM 58 FOR 7)\n    ELSE SUBSTRING(data FROM 33 FOR 32)\n  END AS value\nFROM {{> event-logs(ARRAY[event_topic('TicketPriceUpdated(uint256,uint256)'), event_topic('WinProbUpdated(uint56,uint56)')])}} AS e\nWHERE OCTET_LENGTH(data) >= 64\nORDER BY block_number, tx_index, log_index",
+      "parameters": [],
+      "combine": "concat",
+      "timeoutSeconds": null
+    },
+    {
+      "slug": "win-probability",
+      "title": "Winning probability history",
+      "description": "Fragment: the winning probability in force over each range of blocks, from the oracle logs.",
+      "kind": "fragment",
+      "sql": "-- The winning probability in force over each range of blocks.\n--\n-- Each update in oracle-updates holds from its block until the next one's.\n-- Blocks before the first update have no probability on record: they match no\n-- row here, and the queries that join this price them at zero rather than\n-- guess.\nSELECT\n  block_number AS from_block,\n  COALESCE(\n    LEAD(block_number) OVER (ORDER BY block_number, tx_index, log_index),\n    9223372036854775807\n  ) AS to_block,\n  {{> decode-win-prob(value)}} AS probability\nFROM {{> oracle-updates}} AS oracle\nWHERE kind = 'win-prob'",
+      "parameters": [],
+      "combine": "concat",
+      "timeoutSeconds": null
+    },
+    {
+      "slug": "vpn-traffic",
+      "title": "VPN traffic",
+      "description": "Every VPN redemption, by block, with its direction, payer, relay and data volume.",
+      "kind": "query",
+      "sql": "-- Every Gnosis VPN redemption, by block, converted to data volume.\n--\n-- One row per redemption from vpn-redemptions: upstream (a client paying a\n-- relay) and downstream (a configured exit paying a relay for the answer).\n-- Most of the dashboard is drawn from this one result: volume, redemptions,\n-- the relay breakdowns, the client ranking and each client's own record.\n--\n-- Volume: a redemption pays for one winning ticket, and with winning\n-- probability p a winner stands for 1/p tickets of 650 bytes each, so it\n-- accounts for 650 / (2^30 × p) GB at the p in force at its block. Before the\n-- oracle's first update p is unknown, and the redemption counts with no volume.\n--\n-- Time is the block number. The event log keeps no block times, and a time\n-- estimated from block counts drifts, so none is given. `head_block`, the last\n-- block indexed, is where the dashboard's \"last N blocks\" windows end.\nSELECT\n  r.block,\n  {{> indexed-block}} AS head_block,\n  r.direction,\n  {{> hex(r.payer)}} AS payer,\n  {{> hex(r.relay)}} AS relay,\n  r.tickets,\n  COALESCE(w.probability, 0) AS win_probability,\n  CASE\n    WHEN w.probability > 0 THEN 650::float8 / 1073741824 / w.probability\n    ELSE 0\n  END AS gigabytes\nFROM {{> vpn-redemptions}} AS r\nLEFT JOIN {{> win-probability}} AS w\n  ON r.block >= w.from_block AND r.block < w.to_block\nORDER BY r.block, r.tx_index, r.log_index",
+      "parameters": [],
+      "refreshSeconds": 900,
+      "rowLimit": null,
+      "combine": "concat",
+      "timeoutSeconds": null
+    },
+    {
+      "slug": "client-deployments",
+      "title": "Client deployments",
+      "description": "Every VPN client deployment, by block, newest first.",
+      "kind": "query",
+      "sql": "-- Every VPN client deployment (vpn-clients), newest first: the block its key\n-- binding was made in.\nSELECT\n  deployed_block AS block,\n  {{> hex(client)}} AS client,\n  {{> indexed-block}} AS head_block\nFROM {{> vpn-clients}} AS clients\nORDER BY deployed_block DESC, account_id DESC",
+      "parameters": [],
+      "refreshSeconds": 900,
+      "rowLimit": null,
+      "combine": "concat",
+      "timeoutSeconds": null
+    },
+    {
+      "slug": "uint256",
+      "title": "uint256",
+      "description": "Expression fragment: a 32-byte big-endian integer as an exact numeric. {{> uint256(balance)}}.",
+      "kind": "fragment",
+      "sql": "-- An unsigned big-endian integer of up to 32 bytes — how Blokli stores token\n-- amounts — as an exact numeric. Read four bytes at a time, since no integer\n-- type holds 256 bits.\n--\n--   {{> uint256(balance)}}   →   171260453116000000000000\n(\n  SELECT SUM(\n    ('x' || SUBSTRING(LPAD(encode({{$value = '\\x0de0b6b3a7640000'::bytea}}, 'hex'), 64, '0') FROM 8 * i + 1 FOR 8))::bit(32)::bigint::numeric\n    * (4294967296::numeric ^ (7 - i))\n  )\n  FROM generate_series(0, 7) AS i\n)",
+      "parameters": [],
+      "combine": "concat",
+      "timeoutSeconds": null
+    },
+    {
+      "slug": "network-state",
+      "title": "Network state",
+      "description": "Accounts, safes, open channels and their balance at the last indexed block, from the event log.",
+      "kind": "query",
+      "sql": "-- The network as it stands at the last indexed block: one row.\n--\n-- All but the block is read from the event log: accounts from their key\n-- bindings, safes from the stake factory's NewHoprNodeStakeModuleForSafe\n-- (address module, address safe) — the safe is data word 1 — and each channel\n-- as its latest event left it. Balances are wei, as exact numerics.\nWITH latest AS (\n  SELECT DISTINCT ON (e.channel_id) e.status, e.balance\n  FROM {{> channel-events}} AS e\n  ORDER BY e.channel_id, e.block_number DESC, e.tx_index DESC, e.log_index DESC\n),\nopen_channel AS (\n  SELECT {{> uint256(balance)}} AS wei FROM latest WHERE status = 1\n),\nhead AS (\n  SELECT {{> indexed-block}} AS indexed_block\n)\nSELECT\n  head.indexed_block,\n  (SELECT COUNT(*) FROM {{> key-bindings}} AS account) AS accounts,\n  (\n    SELECT COUNT(DISTINCT SUBSTRING(data FROM 45 FOR 20))\n    FROM {{> event-logs(ARRAY[event_topic('NewHoprNodeStakeModuleForSafe(address,address)')])}} AS e\n    WHERE OCTET_LENGTH(data) >= 64\n  ) AS safes,\n  (SELECT COUNT(*) FROM open_channel) AS open_channels,\n  COALESCE((SELECT ROUND(SUM(wei)) FROM open_channel), 0) AS channel_balance\nFROM head",
+      "parameters": [],
+      "refreshSeconds": 900,
+      "rowLimit": null,
+      "combine": "concat",
+      "timeoutSeconds": null
+    },
+    {
+      "slug": "ticket-parameters",
+      "title": "Ticket parameters",
+      "description": "Current winning probability, ticket price and ticket value.",
+      "kind": "query",
+      "sql": "-- The oracle values as they stand: winning probability, ticket price, and\n-- what a ticket is worth for one remaining hop (price ÷ probability). One row.\n--\n-- The newest update of each in {{> oracle-updates}}, so the figures match the\n-- history the volume is priced with; both are null when the oracle has never\n-- been indexed. Per network only: each network sets its own price and\n-- probability, so a combined figure would be a fiction.\nWITH latest_probability AS (\n  SELECT {{> decode-win-prob(value)}} AS value\n  FROM {{> oracle-updates}} AS oracle\n  WHERE kind = 'win-prob'\n  ORDER BY block_number DESC, tx_index DESC, log_index DESC\n  LIMIT 1\n),\nlatest_price AS (\n  SELECT {{> uint256(value)}} AS wei\n  FROM {{> oracle-updates}} AS oracle\n  WHERE kind = 'ticket-price'\n  ORDER BY block_number DESC, tx_index DESC, log_index DESC\n  LIMIT 1\n)\nSELECT\n  (SELECT value FROM latest_probability) AS win_probability,\n  (SELECT ROUND(wei) FROM latest_price) AS ticket_price,\n  (\n    SELECT ROUND(latest_price.wei / latest_probability.value::numeric)\n    FROM latest_price, latest_probability\n    WHERE latest_probability.value > 0\n  ) AS ticket_value",
+      "parameters": [],
+      "refreshSeconds": 21600,
+      "rowLimit": null,
+      "combine": "hidden",
+      "timeoutSeconds": null
+    },
+    {
+      "slug": "exit-nodes",
+      "title": "Exits",
+      "description": "The network’s Gnosis VPN exits, where each is reached and the downstream volume it paid.",
+      "kind": "query",
+      "sql": "-- Every exit the dashboard knows, with the downstream volume it paid for.\n--\n-- The exits are those of exit-addresses, found in the service registry, the\n-- list \"exits\" or both. For a registered exit, the registry also says its name\n-- and where it is reached (the VPN server and the WireGuard server of its\n-- metadata) and which safe registered it. The list can supply or override the name. Volume is what the exit paid relays\n-- for the return path, all time, priced at the winning probability in force at\n-- each block as in vpn-traffic; an exit that never paid a relay has none.\nWITH registered AS MATERIALIZED {{> registry-entries}},\ntraffic AS (\n  SELECT\n    r.payer,\n    COUNT(*) AS redemptions,\n    MAX(r.block) AS last_active_block,\n    SUM(CASE WHEN w.probability > 0 THEN 650::float8 / 1073741824 / w.probability ELSE 0 END) AS gigabytes\n  FROM {{> vpn-redemptions}} AS r\n  LEFT JOIN {{> win-probability}} AS w\n    ON r.block >= w.from_block AND r.block < w.to_block\n  WHERE r.direction = 'downstream'\n  GROUP BY r.payer\n)\nSELECT\n  x.name,\n  {{> hex(x.address)}} AS exit,\n  CASE\n    WHEN x.in_registry AND x.in_list THEN 'registry and list'\n    WHEN x.in_registry THEN 'registry'\n    ELSE 'list'\n  END AS found_in,\n  reg.vpn_server,\n  reg.wireguard_server,\n  {{> hex(reg.safe)}} AS safe,\n  COALESCE(t.gigabytes, 0) AS gigabytes,\n  COALESCE(t.redemptions, 0) AS redemptions,\n  t.last_active_block\nFROM {{> exit-addresses}} AS x\nLEFT JOIN registered AS reg ON reg.address = x.address\nLEFT JOIN traffic AS t ON t.payer = x.address\nORDER BY gigabytes DESC, exit",
+      "parameters": [],
+      "refreshSeconds": 21600,
+      "rowLimit": null,
+      "combine": "concat",
+      "timeoutSeconds": null
+    },
+    {
+      "slug": "recent-redemptions",
+      "title": "Recent redemptions",
+      "description": "The 500 most recent client redemptions, with their channel.",
+      "kind": "query",
+      "sql": "-- The 500 most recent client redemptions, with the channel they were on.\n--\n-- The same population as the upstream rows of vpn-traffic — a client paying\n-- an announced relay — but read newest first and capped, because it is the\n-- only result that needs the channel id, and carrying a 64-character id on\n-- every row of the full history would cost far more than this feed shows.\nSELECT\n  r.block,\n  {{> hex(r.payer)}} AS client,\n  {{> hex(r.relay)}} AS relay,\n  '0x' || r.channel AS channel,\n  r.tickets\nFROM {{> vpn-redemptions}} AS r\nWHERE r.direction = 'upstream'\nORDER BY r.block DESC, r.tx_index DESC, r.log_index DESC\nLIMIT 500",
+      "parameters": [],
+      "refreshSeconds": 900,
+      "rowLimit": null,
+      "combine": "concat",
+      "timeoutSeconds": null
+    },
+    {
+      "slug": "indexed-contracts",
+      "title": "Indexed contracts",
+      "description": "The contracts this index subscribes to, by role.",
+      "kind": "query",
+      "sql": "-- The contracts this index subscribes to, named by the events they emit.\n--\n-- Blokli records one row per (contract, event topic) it watches, so the\n-- distinct addresses are the contracts indexed and the topics — 32-byte event\n-- signature hashes — say what each one is.\nWITH contract AS (\n  SELECT address, ARRAY_AGG(DISTINCT encode(topic, 'hex') ORDER BY encode(topic, 'hex')) AS topics\n  FROM log_topic_info\n  GROUP BY address\n)\nSELECT\n  {{> hex(contract.address)}} AS contract\nFROM contract\nORDER BY contract",
+      "parameters": [],
+      "refreshSeconds": 3600,
+      "rowLimit": null,
+      "combine": "concat",
+      "timeoutSeconds": null
+    }
+  ],
+  "charts": [
+    {
+      "key": "gnosis-vpn/monthly-active-users",
+      "query": "client-activity",
+      "title": "Active clients",
+      "description": "",
+      "type": "number",
+      "config": {
+        "steps": [
+          {
+            "op": "range",
+            "var": "range",
+            "anchor": "now",
+            "column": "block",
+            "anchorColumn": "head_block"
+          },
+          {
+            "op": "aggregate",
+            "groupBy": [],
+            "measures": [
+              {
+                "as": "clients",
+                "fn": "count_distinct",
+                "columns": [
+                  "network",
+                  "client"
+                ]
+              }
+            ]
+          }
+        ],
+        "builder": {
+          "window": {
+            "anchor": "head_block",
+            "column": "block"
+          },
+          "measures": [
+            {
+              "as": "clients",
+              "fn": "count_distinct",
+              "columns": [
+                "network",
+                "client"
+              ]
+            }
+          ]
+        },
+        "options": {},
+        "encoding": {
+          "y": [
+            "clients"
+          ]
+        }
+      }
+    },
+    {
+      "key": "gnosis-vpn/data-relayed",
+      "query": "vpn-traffic",
+      "title": "Data relayed",
+      "description": "",
+      "type": "number",
+      "config": {
+        "steps": [
+          {
+            "op": "range",
+            "var": "range",
+            "anchor": "now",
+            "column": "block",
+            "anchorColumn": "head_block"
+          },
+          {
+            "op": "aggregate",
+            "groupBy": [],
+            "measures": [
+              {
+                "as": "gigabytes",
+                "fn": "sum",
+                "columns": [
+                  "gigabytes"
+                ]
+              }
+            ]
+          }
+        ],
+        "builder": {
+          "window": {
+            "anchor": "head_block",
+            "column": "block"
+          },
+          "measures": [
+            {
+              "as": "gigabytes",
+              "fn": "sum",
+              "format": "gigabytes",
+              "columns": [
+                "gigabytes"
+              ]
+            }
+          ]
+        },
+        "options": {
+          "format": "gigabytes",
+          "formats": {
+            "gigabytes": "gigabytes"
+          }
+        },
+        "encoding": {
+          "y": [
+            "gigabytes"
+          ]
+        }
+      }
+    },
+    {
+      "key": "gnosis-vpn/redemptions",
+      "query": "vpn-traffic",
+      "title": "Redemptions",
+      "description": "",
+      "type": "number",
+      "config": {
+        "steps": [
+          {
+            "op": "filter",
+            "value": {
+              "literal": "upstream"
+            },
+            "column": "direction",
+            "operator": "="
+          },
+          {
+            "op": "range",
+            "var": "range",
+            "anchor": "now",
+            "column": "block",
+            "anchorColumn": "head_block"
+          },
+          {
+            "op": "aggregate",
+            "groupBy": [],
+            "measures": [
+              {
+                "as": "redemptions",
+                "fn": "count"
+              }
+            ]
+          }
+        ],
+        "builder": {
+          "window": {
+            "anchor": "head_block",
+            "column": "block"
+          },
+          "filters": [
+            {
+              "value": {
+                "literal": "upstream"
+              },
+              "column": "direction",
+              "operator": "="
+            }
+          ],
+          "measures": [
+            {
+              "as": "redemptions",
+              "fn": "count"
+            }
+          ]
+        },
+        "options": {},
+        "encoding": {
+          "y": [
+            "redemptions"
+          ]
+        }
+      }
+    },
+    {
+      "key": "gnosis-vpn/new-clients",
+      "query": "client-deployments",
+      "title": "New clients",
+      "description": "",
+      "type": "number",
+      "config": {
+        "steps": [
+          {
+            "op": "range",
+            "var": "range",
+            "anchor": "now",
+            "column": "block",
+            "anchorColumn": "head_block"
+          },
+          {
+            "op": "aggregate",
+            "groupBy": [],
+            "measures": [
+              {
+                "as": "clients",
+                "fn": "count"
+              }
+            ]
+          }
+        ],
+        "builder": {
+          "window": {
+            "anchor": "head_block",
+            "column": "block"
+          },
+          "measures": [
+            {
+              "as": "clients",
+              "fn": "count"
+            }
+          ]
+        },
+        "options": {},
+        "encoding": {
+          "y": [
+            "clients"
+          ]
+        }
+      }
+    },
+    {
+      "key": "gnosis-vpn/active-channels",
+      "query": "network-state",
+      "title": "Active channels",
+      "description": "",
+      "type": "number",
+      "config": {
+        "steps": [
+          {
+            "op": "aggregate",
+            "groupBy": [],
+            "measures": [
+              {
+                "as": "channels",
+                "fn": "sum",
+                "columns": [
+                  "open_channels"
+                ]
+              },
+              {
+                "as": "wei",
+                "fn": "sum",
+                "columns": [
+                  "channel_balance"
+                ]
+              }
+            ]
+          },
+          {
+            "as": "allocated",
+            "op": "compute",
+            "left": "wei",
+            "right": {
+              "literal": 1000000000000000000
+            },
+            "operator": "/"
+          }
+        ],
+        "options": {
+          "caption": "wxHOPR allocated",
+          "formats": {
+            "allocated": "compact"
+          }
+        },
+        "encoding": {
+          "y": [
+            "channels"
+          ],
+          "note": "allocated"
+        }
+      }
+    },
+    {
+      "key": "gnosis-vpn/active-users",
+      "query": "client-activity",
+      "title": "Active clients per bin",
+      "description": "",
+      "type": "bar",
+      "config": {
+        "steps": [
+          {
+            "op": "range",
+            "var": "range",
+            "anchor": "now",
+            "column": "block",
+            "anchorColumn": "head_block"
+          },
+          {
+            "as": "period",
+            "op": "bucket",
+            "unit": "auto",
+            "column": "block"
+          },
+          {
+            "op": "aggregate",
+            "groupBy": [
+              "period"
+            ],
+            "measures": [
+              {
+                "as": "clients",
+                "fn": "count_distinct",
+                "columns": [
+                  "network",
+                  "client"
+                ]
+              }
+            ]
+          },
+          {
+            "by": [
+              {
+                "column": "period"
+              }
+            ],
+            "op": "sort"
+          }
+        ],
+        "builder": {
+          "groups": [
+            {
+              "as": "period",
+              "unit": "auto",
+              "column": "block"
+            }
+          ],
+          "window": {
+            "anchor": "head_block",
+            "column": "block"
+          },
+          "measures": [
+            {
+              "as": "clients",
+              "fn": "count_distinct",
+              "columns": [
+                "network",
+                "client"
+              ]
+            }
+          ]
+        },
+        "options": {},
+        "encoding": {
+          "x": "period",
+          "y": [
+            "clients"
+          ]
+        }
+      }
+    },
+    {
+      "key": "gnosis-vpn/volume",
+      "query": "vpn-traffic",
+      "title": "Data volume",
+      "description": "",
+      "type": "bar",
+      "config": {
+        "steps": [
+          {
+            "op": "range",
+            "var": "range",
+            "anchor": "now",
+            "column": "block",
+            "anchorColumn": "head_block"
+          },
+          {
+            "as": "period",
+            "op": "bucket",
+            "unit": "auto",
+            "column": "block"
+          },
+          {
+            "op": "aggregate",
+            "groupBy": [
+              "period",
+              "direction"
+            ],
+            "measures": [
+              {
+                "as": "gigabytes",
+                "fn": "sum",
+                "columns": [
+                  "gigabytes"
+                ]
+              }
+            ]
+          },
+          {
+            "by": [
+              {
+                "column": "period"
+              },
+              {
+                "desc": true,
+                "column": "direction"
+              }
+            ],
+            "op": "sort"
+          }
+        ],
+        "builder": {
+          "split": {
+            "order": "za",
+            "column": "direction"
+          },
+          "groups": [
+            {
+              "as": "period",
+              "unit": "auto",
+              "column": "block"
+            }
+          ],
+          "window": {
+            "anchor": "head_block",
+            "column": "block"
+          },
+          "measures": [
+            {
+              "as": "gigabytes",
+              "fn": "sum",
+              "format": "gigabytes",
+              "columns": [
+                "gigabytes"
+              ]
+            }
+          ]
+        },
+        "options": {
+          "format": "gigabytes",
+          "formats": {
+            "gigabytes": "gigabytes"
+          },
+          "stacked": true,
+          "seriesOrder": "rows",
+          "legendPosition": "below"
+        },
+        "encoding": {
+          "x": "period",
+          "y": [
+            "gigabytes"
+          ],
+          "series": "direction"
+        }
+      }
+    },
+    {
+      "key": "gnosis-vpn/downstream-ratio",
+      "query": "vpn-traffic",
+      "title": "Downstream per upstream",
+      "description": "",
+      "type": "number",
+      "config": {
+        "sql": "SELECT SUM(gigabytes) FILTER (WHERE direction = 'downstream')\n       / NULLIF(SUM(gigabytes) FILTER (WHERE direction = 'upstream'), 0) AS ratio\nFROM {{result}}",
+        "steps": [],
+        "options": {
+          "format": "decimal",
+          "caption": "× upstream, all time"
+        },
+        "encoding": {
+          "y": [
+            "ratio"
+          ]
+        }
+      }
+    },
+    {
+      "key": "gnosis-vpn/exits-seen",
+      "query": "vpn-traffic",
+      "title": "Exits seen",
+      "description": "",
+      "type": "number",
+      "config": {
+        "steps": [
+          {
+            "op": "filter",
+            "value": {
+              "literal": "downstream"
+            },
+            "column": "direction",
+            "operator": "="
+          },
+          {
+            "op": "aggregate",
+            "groupBy": [],
+            "measures": [
+              {
+                "as": "exits",
+                "fn": "count_distinct",
+                "columns": [
+                  "network",
+                  "payer"
+                ]
+              }
+            ]
+          }
+        ],
+        "builder": {
+          "filters": [
+            {
+              "value": {
+                "literal": "downstream"
+              },
+              "column": "direction",
+              "operator": "="
+            }
+          ],
+          "measures": [
+            {
+              "as": "exits",
+              "fn": "count_distinct",
+              "columns": [
+                "network",
+                "payer"
+              ]
+            }
+          ]
+        },
+        "options": {
+          "caption": "exits seen paying a relay"
+        },
+        "encoding": {
+          "y": [
+            "exits"
+          ]
+        }
+      }
+    },
+    {
+      "key": "gnosis-vpn/daily-users",
+      "query": "client-deployments",
+      "title": "New clients per bin",
+      "description": "",
+      "type": "bar",
+      "config": {
+        "steps": [
+          {
+            "op": "range",
+            "var": "range",
+            "anchor": "now",
+            "column": "block",
+            "anchorColumn": "head_block"
+          },
+          {
+            "as": "period",
+            "op": "bucket",
+            "size": 500,
+            "unit": "auto",
+            "column": "block"
+          },
+          {
+            "op": "aggregate",
+            "groupBy": [
+              "period"
+            ],
+            "measures": [
+              {
+                "as": "clients",
+                "fn": "count"
+              }
+            ]
+          },
+          {
+            "by": [
+              {
+                "column": "period"
+              }
+            ],
+            "op": "sort"
+          }
+        ],
+        "builder": {
+          "groups": [
+            {
+              "size": 500,
+              "column": "block"
+            }
+          ],
+          "window": {
+            "anchor": "head_block",
+            "column": "block"
+          },
+          "measures": [
+            {
+              "as": "clients",
+              "fn": "count"
+            }
+          ]
+        },
+        "options": {},
+        "encoding": {
+          "x": "period",
+          "y": [
+            "clients"
+          ]
+        }
+      }
+    },
+    {
+      "key": "gnosis-vpn/relayer-share",
+      "query": "vpn-traffic",
+      "title": "Relayer concentration",
+      "description": "",
+      "type": "pie",
+      "config": {
+        "steps": [
+          {
+            "op": "filter",
+            "value": {
+              "literal": "upstream"
+            },
+            "column": "direction",
+            "operator": "="
+          },
+          {
+            "op": "range",
+            "var": "range",
+            "anchor": "now",
+            "column": "block",
+            "anchorColumn": "head_block"
+          },
+          {
+            "op": "aggregate",
+            "groupBy": [
+              "relay"
+            ],
+            "measures": [
+              {
+                "as": "gigabytes",
+                "fn": "sum",
+                "columns": [
+                  "gigabytes"
+                ]
+              }
+            ]
+          },
+          {
+            "by": [
+              {
+                "desc": true,
+                "column": "gigabytes"
+              }
+            ],
+            "op": "sort"
+          }
+        ],
+        "builder": {
+          "sort": [
+            {
+              "desc": true,
+              "column": "gigabytes"
+            }
+          ],
+          "groups": [
+            {
+              "column": "relay"
+            }
+          ],
+          "window": {
+            "anchor": "head_block",
+            "column": "block"
+          },
+          "filters": [
+            {
+              "value": {
+                "literal": "upstream"
+              },
+              "column": "direction",
+              "operator": "="
+            }
+          ],
+          "measures": [
+            {
+              "as": "gigabytes",
+              "fn": "sum",
+              "format": "gigabytes",
+              "columns": [
+                "gigabytes"
+              ]
+            }
+          ]
+        },
+        "options": {
+          "donut": true,
+          "format": "gigabytes",
+          "formats": {
+            "gigabytes": "gigabytes"
+          }
+        },
+        "encoding": {
+          "x": "relay",
+          "y": [
+            "gigabytes"
+          ]
+        }
+      }
+    },
+    {
+      "key": "gnosis-vpn/relayer-daily",
+      "query": "vpn-traffic",
+      "title": "Volume per relayer, per bin",
+      "description": "",
+      "type": "bar",
+      "config": {
+        "steps": [
+          {
+            "op": "filter",
+            "value": {
+              "var": "direction"
+            },
+            "column": "direction",
+            "operator": "="
+          },
+          {
+            "op": "range",
+            "var": "range",
+            "anchor": "now",
+            "column": "block",
+            "anchorColumn": "head_block"
+          },
+          {
+            "as": "period",
+            "op": "bucket",
+            "unit": "auto",
+            "column": "block"
+          },
+          {
+            "op": "aggregate",
+            "groupBy": [
+              "period",
+              "relay"
+            ],
+            "measures": [
+              {
+                "as": "gigabytes",
+                "fn": "sum",
+                "columns": [
+                  "gigabytes"
+                ]
+              }
+            ]
+          },
+          {
+            "by": [
+              {
+                "column": "period"
+              }
+            ],
+            "op": "sort"
+          }
+        ],
+        "builder": {
+          "split": {
+            "column": "relay"
+          },
+          "groups": [
+            {
+              "as": "period",
+              "unit": "auto",
+              "column": "block"
+            }
+          ],
+          "window": {
+            "anchor": "head_block",
+            "column": "block"
+          },
+          "filters": [
+            {
+              "value": {
+                "var": "direction"
+              },
+              "column": "direction",
+              "operator": "="
+            }
+          ],
+          "measures": [
+            {
+              "as": "gigabytes",
+              "fn": "sum",
+              "format": "gigabytes",
+              "columns": [
+                "gigabytes"
+              ]
+            }
+          ]
+        },
+        "options": {
+          "format": "gigabytes",
+          "formats": {
+            "gigabytes": "gigabytes"
+          },
+          "stacked": true
+        },
+        "encoding": {
+          "x": "period",
+          "y": [
+            "gigabytes"
+          ],
+          "series": "relay"
+        }
+      }
+    },
+    {
+      "key": "gnosis-vpn/winning-probability",
+      "query": "ticket-parameters",
+      "title": "Winning probability",
+      "description": "",
+      "type": "number",
+      "config": {
+        "steps": [],
+        "options": {
+          "format": "decimal"
+        },
+        "encoding": {
+          "y": [
+            "win_probability"
+          ]
+        }
+      }
+    },
+    {
+      "key": "gnosis-vpn/ticket-price",
+      "query": "ticket-parameters",
+      "title": "Ticket price",
+      "description": "",
+      "type": "number",
+      "config": {
+        "steps": [],
+        "options": {
+          "format": "token",
+          "caption": "wxHOPR"
+        },
+        "encoding": {
+          "y": [
+            "ticket_price"
+          ]
+        }
+      }
+    },
+    {
+      "key": "gnosis-vpn/ticket-value",
+      "query": "ticket-parameters",
+      "title": "Ticket value",
+      "description": "",
+      "type": "number",
+      "config": {
+        "steps": [],
+        "options": {
+          "format": "token",
+          "caption": "wxHOPR"
+        },
+        "encoding": {
+          "y": [
+            "ticket_value"
+          ]
+        }
+      }
+    },
+    {
+      "key": "gnosis-vpn/exits-registered",
+      "query": "exit-nodes",
+      "title": "Exits registered",
+      "description": "",
+      "type": "number",
+      "config": {
+        "sql": "SELECT COUNT(*) AS exits FROM {{result}} WHERE found_in LIKE 'registry%'",
+        "steps": [],
+        "options": {
+          "format": "number",
+          "caption": "gvpn:exit entries in the service registry"
+        },
+        "encoding": {
+          "y": [
+            "exits"
+          ]
+        }
+      }
+    },
+    {
+      "key": "gnosis-vpn/exits",
+      "query": "exit-nodes",
+      "title": "Exits",
+      "description": "",
+      "type": "table",
+      "config": {
+        "steps": [
+          {
+            "n": 500,
+            "op": "limit"
+          }
+        ],
+        "builder": {
+          "limit": 500
+        },
+        "options": {
+          "labels": {
+            "found_in": "found in",
+            "gigabytes": "downstream (GB)",
+            "vpn_server": "VPN server",
+            "wireguard_server": "WireGuard",
+            "last_active_block": "last paid in block"
+          },
+          "columns": [
+            "name",
+            "exit",
+            "found_in",
+            "network",
+            "gigabytes"
+          ],
+          "pageSize": 20,
+          "tableColumns": {
+            "exit": {
+              "text": true,
+              "monospace": true
+            },
+            "network": {
+              "width": 50
+            },
+            "gigabytes": {
+              "width": 50
+            }
+          }
+        },
+        "encoding": {}
+      }
+    },
+    {
+      "key": "gnosis-vpn/top-clients",
+      "query": "vpn-traffic",
+      "title": "Most active users",
+      "description": "",
+      "type": "table",
+      "config": {
+        "steps": [
+          {
+            "op": "filter",
+            "value": {
+              "literal": "upstream"
+            },
+            "column": "direction",
+            "operator": "="
+          },
+          {
+            "op": "range",
+            "var": "range",
+            "anchor": "now",
+            "column": "block",
+            "anchorColumn": "head_block"
+          },
+          {
+            "op": "aggregate",
+            "groupBy": [
+              "network",
+              "payer"
+            ],
+            "measures": [
+              {
+                "as": "redemptions",
+                "fn": "count"
+              },
+              {
+                "as": "gigabytes",
+                "fn": "sum",
+                "columns": [
+                  "gigabytes"
+                ]
+              }
+            ]
+          },
+          {
+            "op": "filter",
+            "value": {
+              "literal": 0
+            },
+            "column": "gigabytes",
+            "operator": ">"
+          },
+          {
+            "as": "rank",
+            "fn": "row_number",
+            "op": "window",
+            "orderBy": [
+              {
+                "desc": true,
+                "column": "gigabytes"
+              },
+              {
+                "column": "network"
+              },
+              {
+                "column": "payer"
+              }
+            ]
+          },
+          {
+            "by": [
+              {
+                "column": "rank"
+              }
+            ],
+            "op": "sort"
+          }
+        ],
+        "options": {
+          "labels": {
+            "gigabytes": "upstream"
+          },
+          "columns": [
+            "rank",
+            "payer",
+            "gigabytes"
+          ],
+          "formats": {
+            "gigabytes": "gigabytes"
+          },
+          "tableColumns": {
+            "payer": {
+              "text": true,
+              "monospace": true
+            }
+          }
+        },
+        "encoding": {}
+      }
+    },
+    {
+      "key": "gnosis-vpn/deployments",
+      "query": "client-deployments",
+      "title": "Client deployments",
+      "description": "",
+      "type": "table",
+      "config": {
+        "steps": [
+          {
+            "by": [
+              {
+                "desc": true,
+                "column": "block"
+              }
+            ],
+            "op": "sort"
+          }
+        ],
+        "builder": {
+          "sort": [
+            {
+              "desc": true,
+              "column": "block"
+            }
+          ]
+        },
+        "options": {
+          "columns": [
+            "block",
+            "client"
+          ],
+          "tableColumns": {
+            "block": {
+              "width": 100
+            },
+            "client": {
+              "text": true,
+              "monospace": true
+            }
+          }
+        },
+        "encoding": {}
+      }
+    },
+    {
+      "key": "gnosis-vpn/feed",
+      "query": "recent-redemptions",
+      "title": "Redemption feed",
+      "description": "",
+      "type": "table",
+      "config": {
+        "steps": [
+          {
+            "by": [
+              {
+                "desc": true,
+                "column": "block"
+              }
+            ],
+            "op": "sort"
+          },
+          {
+            "n": 500,
+            "op": "limit"
+          }
+        ],
+        "builder": {
+          "sort": [
+            {
+              "desc": true,
+              "column": "block"
+            }
+          ],
+          "limit": 500
+        },
+        "options": {
+          "columns": [
+            "block",
+            "client",
+            "relay",
+            "channel"
+          ],
+          "tableColumns": {
+            "block": {
+              "width": 100
+            },
+            "relay": {
+              "text": true,
+              "monospace": true
+            },
+            "client": {
+              "text": true,
+              "monospace": true
+            },
+            "channel": {
+              "text": true,
+              "condensed": true,
+              "monospace": true
+            }
+          }
+        },
+        "encoding": {}
+      }
+    },
+    {
+      "key": "gnosis-vpn/contracts",
+      "query": "indexed-contracts",
+      "title": "Indexed contracts",
+      "description": "",
+      "type": "table",
+      "config": {
+        "steps": [],
+        "builder": {},
+        "options": {
+          "columns": [
+            "network",
+            "contract"
+          ],
+          "pageSize": 20,
+          "tableColumns": {
+            "contract": {
+              "text": true,
+              "monospace": true
+            }
+          }
+        },
+        "encoding": {}
+      }
+    },
+    {
+      "key": "gnosis-vpn-client/deployed",
+      "query": "client-deployments",
+      "title": "Deployed",
+      "description": "",
+      "type": "number",
+      "config": {
+        "steps": [
+          {
+            "op": "filter",
+            "value": {
+              "var": "client"
+            },
+            "column": "client",
+            "operator": "="
+          },
+          {
+            "op": "aggregate",
+            "groupBy": [],
+            "measures": [
+              {
+                "as": "block",
+                "fn": "min",
+                "columns": [
+                  "block"
+                ]
+              }
+            ]
+          }
+        ],
+        "builder": {
+          "filters": [
+            {
+              "value": {
+                "var": "client"
+              },
+              "column": "client",
+              "operator": "="
+            }
+          ],
+          "measures": [
+            {
+              "as": "block",
+              "fn": "min",
+              "columns": [
+                "block"
+              ]
+            }
+          ]
+        },
+        "options": {
+          "caption": "block"
+        },
+        "encoding": {
+          "y": [
+            "block"
+          ]
+        }
+      }
+    },
+    {
+      "key": "gnosis-vpn-client/first-seen",
+      "query": "vpn-traffic",
+      "title": "First seen",
+      "description": "",
+      "type": "number",
+      "config": {
+        "steps": [
+          {
+            "op": "filter",
+            "value": {
+              "literal": "upstream"
+            },
+            "column": "direction",
+            "operator": "="
+          },
+          {
+            "op": "filter",
+            "value": {
+              "var": "client"
+            },
+            "column": "payer",
+            "operator": "="
+          },
+          {
+            "op": "aggregate",
+            "groupBy": [],
+            "measures": [
+              {
+                "as": "block",
+                "fn": "min",
+                "columns": [
+                  "block"
+                ]
+              }
+            ]
+          }
+        ],
+        "builder": {
+          "filters": [
+            {
+              "value": {
+                "literal": "upstream"
+              },
+              "column": "direction",
+              "operator": "="
+            },
+            {
+              "value": {
+                "var": "client"
+              },
+              "column": "payer",
+              "operator": "="
+            }
+          ],
+          "measures": [
+            {
+              "as": "block",
+              "fn": "min",
+              "columns": [
+                "block"
+              ]
+            }
+          ]
+        },
+        "options": {
+          "caption": "block"
+        },
+        "encoding": {
+          "y": [
+            "block"
+          ]
+        }
+      }
+    },
+    {
+      "key": "gnosis-vpn-client/last-seen",
+      "query": "vpn-traffic",
+      "title": "Last seen",
+      "description": "",
+      "type": "number",
+      "config": {
+        "steps": [
+          {
+            "op": "filter",
+            "value": {
+              "literal": "upstream"
+            },
+            "column": "direction",
+            "operator": "="
+          },
+          {
+            "op": "filter",
+            "value": {
+              "var": "client"
+            },
+            "column": "payer",
+            "operator": "="
+          },
+          {
+            "op": "aggregate",
+            "groupBy": [],
+            "measures": [
+              {
+                "as": "block",
+                "fn": "max",
+                "columns": [
+                  "block"
+                ]
+              }
+            ]
+          }
+        ],
+        "builder": {
+          "filters": [
+            {
+              "value": {
+                "literal": "upstream"
+              },
+              "column": "direction",
+              "operator": "="
+            },
+            {
+              "value": {
+                "var": "client"
+              },
+              "column": "payer",
+              "operator": "="
+            }
+          ],
+          "measures": [
+            {
+              "as": "block",
+              "fn": "max",
+              "columns": [
+                "block"
+              ]
+            }
+          ]
+        },
+        "options": {
+          "caption": "block"
+        },
+        "encoding": {
+          "y": [
+            "block"
+          ]
+        }
+      }
+    },
+    {
+      "key": "gnosis-vpn-client/volume",
+      "query": "vpn-traffic",
+      "title": "Upstream volume",
+      "description": "",
+      "type": "number",
+      "config": {
+        "steps": [
+          {
+            "op": "filter",
+            "value": {
+              "literal": "upstream"
+            },
+            "column": "direction",
+            "operator": "="
+          },
+          {
+            "op": "filter",
+            "value": {
+              "var": "client"
+            },
+            "column": "payer",
+            "operator": "="
+          },
+          {
+            "op": "aggregate",
+            "groupBy": [],
+            "measures": [
+              {
+                "as": "gigabytes",
+                "fn": "sum",
+                "columns": [
+                  "gigabytes"
+                ]
+              }
+            ]
+          }
+        ],
+        "builder": {
+          "filters": [
+            {
+              "value": {
+                "literal": "upstream"
+              },
+              "column": "direction",
+              "operator": "="
+            },
+            {
+              "value": {
+                "var": "client"
+              },
+              "column": "payer",
+              "operator": "="
+            }
+          ],
+          "measures": [
+            {
+              "as": "gigabytes",
+              "fn": "sum",
+              "format": "gigabytes",
+              "columns": [
+                "gigabytes"
+              ]
+            }
+          ]
+        },
+        "options": {
+          "format": "gigabytes",
+          "formats": {
+            "gigabytes": "gigabytes"
+          }
+        },
+        "encoding": {
+          "y": [
+            "gigabytes"
+          ]
+        }
+      }
+    },
+    {
+      "key": "gnosis-vpn-client/redemptions",
+      "query": "vpn-traffic",
+      "title": "Redemptions",
+      "description": "",
+      "type": "number",
+      "config": {
+        "steps": [
+          {
+            "op": "filter",
+            "value": {
+              "literal": "upstream"
+            },
+            "column": "direction",
+            "operator": "="
+          },
+          {
+            "op": "filter",
+            "value": {
+              "var": "client"
+            },
+            "column": "payer",
+            "operator": "="
+          },
+          {
+            "op": "aggregate",
+            "groupBy": [],
+            "measures": [
+              {
+                "as": "redemptions",
+                "fn": "count"
+              },
+              {
+                "as": "tickets",
+                "fn": "sum",
+                "columns": [
+                  "tickets"
+                ]
+              }
+            ]
+          }
+        ],
+        "builder": {
+          "filters": [
+            {
+              "value": {
+                "literal": "upstream"
+              },
+              "column": "direction",
+              "operator": "="
+            },
+            {
+              "value": {
+                "var": "client"
+              },
+              "column": "payer",
+              "operator": "="
+            }
+          ],
+          "measures": [
+            {
+              "as": "redemptions",
+              "fn": "count"
+            },
+            {
+              "as": "tickets",
+              "fn": "sum",
+              "format": "number",
+              "columns": [
+                "tickets"
+              ]
+            }
+          ]
+        },
+        "options": {
+          "caption": "tickets",
+          "formats": {
+            "tickets": "number"
+          }
+        },
+        "encoding": {
+          "y": [
+            "redemptions"
+          ],
+          "note": "tickets"
+        }
+      }
+    },
+    {
+      "key": "gnosis-vpn-client/daily",
+      "query": "vpn-traffic",
+      "title": "Volume per bin",
+      "description": "",
+      "type": "bar",
+      "config": {
+        "steps": [
+          {
+            "op": "filter",
+            "value": {
+              "literal": "upstream"
+            },
+            "column": "direction",
+            "operator": "="
+          },
+          {
+            "op": "filter",
+            "value": {
+              "var": "client"
+            },
+            "column": "payer",
+            "operator": "="
+          },
+          {
+            "op": "range",
+            "anchor": "now",
+            "column": "block",
+            "window": "2000000",
+            "anchorColumn": "head_block"
+          },
+          {
+            "as": "period",
+            "op": "bucket",
+            "unit": "auto",
+            "column": "block",
+            "window": "2000000"
+          },
+          {
+            "op": "aggregate",
+            "groupBy": [
+              "period"
+            ],
+            "measures": [
+              {
+                "as": "gigabytes",
+                "fn": "sum",
+                "columns": [
+                  "gigabytes"
+                ]
+              }
+            ]
+          },
+          {
+            "by": [
+              {
+                "column": "period"
+              }
+            ],
+            "op": "sort"
+          }
+        ],
+        "builder": {
+          "groups": [
+            {
+              "as": "period",
+              "unit": "auto",
+              "column": "block"
+            }
+          ],
+          "window": {
+            "fixed": "2000000",
+            "anchor": "head_block",
+            "column": "block"
+          },
+          "filters": [
+            {
+              "value": {
+                "literal": "upstream"
+              },
+              "column": "direction",
+              "operator": "="
+            },
+            {
+              "value": {
+                "var": "client"
+              },
+              "column": "payer",
+              "operator": "="
+            }
+          ],
+          "measures": [
+            {
+              "as": "gigabytes",
+              "fn": "sum",
+              "format": "gigabytes",
+              "columns": [
+                "gigabytes"
+              ]
+            }
+          ]
+        },
+        "options": {
+          "format": "gigabytes",
+          "formats": {
+            "gigabytes": "gigabytes"
+          }
+        },
+        "encoding": {
+          "x": "period",
+          "y": [
+            "gigabytes"
+          ]
+        }
+      }
+    },
+    {
+      "key": "gnosis-vpn-client/relays",
+      "query": "vpn-traffic",
+      "title": "Relays paid",
+      "description": "",
+      "type": "table",
+      "config": {
+        "steps": [
+          {
+            "op": "filter",
+            "value": {
+              "literal": "upstream"
+            },
+            "column": "direction",
+            "operator": "="
+          },
+          {
+            "op": "filter",
+            "value": {
+              "var": "client"
+            },
+            "column": "payer",
+            "operator": "="
+          },
+          {
+            "op": "aggregate",
+            "groupBy": [
+              "relay"
+            ],
+            "measures": [
+              {
+                "as": "redemptions",
+                "fn": "count"
+              },
+              {
+                "as": "gigabytes",
+                "fn": "sum",
+                "columns": [
+                  "gigabytes"
+                ]
+              }
+            ]
+          },
+          {
+            "as": "redemptions_total",
+            "fn": "sum",
+            "op": "window",
+            "column": "redemptions"
+          },
+          {
+            "as": "share",
+            "op": "compute",
+            "left": "redemptions",
+            "right": "redemptions_total",
+            "operator": "/"
+          },
+          {
+            "by": [
+              {
+                "desc": true,
+                "column": "gigabytes"
+              }
+            ],
+            "op": "sort"
+          }
+        ],
+        "options": {
+          "format": "number",
+          "labels": {
+            "gigabytes": "upstream"
+          },
+          "columns": [
+            "relay",
+            "redemptions",
+            "gigabytes",
+            "share"
+          ],
+          "formats": {
+            "share": "percent",
+            "gigabytes": "gigabytes"
+          }
+        },
+        "encoding": {}
+      }
+    }
+  ],
+  "dashboards": [
+    {
+      "slug": "gnosis-vpn",
+      "title": "Gnosis VPN",
+      "description": "Who uses Gnosis VPN, how much traffic it carries and where, read from the HOPR network’s on-chain ticket redemptions.",
+      "visibility": "public",
+      "variables": [
+        {
+          "name": "network",
+          "type": "network",
+          "label": "Network",
+          "default": "all",
+          "networks": [
+            "piz-palu-prod",
+            "jura-prod"
+          ],
+          "showLabel": false
+        },
+        {
+          "name": "range",
+          "type": "range",
+          "label": "Window",
+          "labels": {
+            "100000": "Last 100k",
+            "500000": "Last 500k",
+            "2000000": "Last 2M",
+            "all": "All blocks"
+          },
+          "default": "500000",
+          "options": [
+            "100000",
+            "500000",
+            "2000000",
+            "all"
+          ],
+          "showLabel": false
+        },
+        {
+          "name": "direction",
+          "type": "select",
+          "label": "Direction",
+          "labels": {
+            "upstream": "Upstream",
+            "downstream": "Downstream"
+          },
+          "default": "upstream",
+          "options": [
+            "upstream",
+            "downstream"
+          ],
+          "showLabel": false
+        }
+      ],
+      "widgets": [
+        {
+          "kind": "visualization",
+          "chart": "gnosis-vpn/monthly-active-users",
+          "width": 3,
+          "height": 80,
+          "options": {
+            "note": "Distinct clients, in the window",
+            "layout": {
+              "row": 0,
+              "rows": 2,
+              "unit": "cells",
+              "column": 0
+            }
+          }
+        },
+        {
+          "kind": "visualization",
+          "chart": "gnosis-vpn/data-relayed",
+          "width": 3,
+          "height": 80,
+          "options": {
+            "note": "Upstream and downstream combined, in the range",
+            "layout": {
+              "row": 0,
+              "rows": 2,
+              "unit": "cells",
+              "column": 3
+            }
+          }
+        },
+        {
+          "kind": "visualization",
+          "chart": "gnosis-vpn/redemptions",
+          "width": 2,
+          "height": 80,
+          "options": {
+            "note": "Client-channel redemptions, in the range",
+            "layout": {
+              "row": 0,
+              "rows": 2,
+              "unit": "cells",
+              "column": 6
+            }
+          }
+        },
+        {
+          "kind": "visualization",
+          "chart": "gnosis-vpn/new-clients",
+          "width": 2,
+          "height": 80,
+          "options": {
+            "note": "Client deployments, in the range",
+            "layout": {
+              "row": 0,
+              "rows": 2,
+              "unit": "cells",
+              "column": 8
+            }
+          }
+        },
+        {
+          "kind": "visualization",
+          "chart": "gnosis-vpn/active-channels",
+          "width": 2,
+          "height": 80,
+          "options": {
+            "layout": {
+              "row": 0,
+              "rows": 2,
+              "unit": "cells",
+              "column": 10
+            }
+          }
+        },
+        {
+          "kind": "text",
+          "text": "Users and traffic",
+          "width": 12,
+          "height": 80,
+          "options": {
+            "note": "A user is a VPN client — an account that bound a key but never announced an address, so it is not relay infrastructure. Upstream volume is derived from the redemptions on client channels, priced at the winning probability in force at each block; downstream is what the configured exits pay relays for the return path.",
+            "layout": {
+              "row": 2,
+              "unit": "cells",
+              "column": 0
+            }
+          }
+        },
+        {
+          "kind": "visualization",
+          "chart": "gnosis-vpn/active-users",
+          "width": 5,
+          "height": 322,
+          "options": {
+            "note": "Distinct clients active in each bin of blocks — redeemed for, or deployed.",
+            "layout": {
+              "row": 4,
+              "rows": 4,
+              "unit": "cells",
+              "column": 2
+            }
+          }
+        },
+        {
+          "kind": "visualization",
+          "chart": "gnosis-vpn/volume",
+          "width": 5,
+          "height": 201,
+          "options": {
+            "note": "About forty bins over the window. Upstream is paid for by the client and attributable to it; downstream is paid for by the exit, whose channels name no client.",
+            "layout": {
+              "row": 4,
+              "rows": 4,
+              "unit": "cells",
+              "column": 7
+            }
+          }
+        },
+        {
+          "kind": "visualization",
+          "chart": "gnosis-vpn/downstream-ratio",
+          "width": 2,
+          "height": 80,
+          "options": {
+            "layout": {
+              "row": 4,
+              "rows": 2,
+              "unit": "cells",
+              "column": 0
+            }
+          }
+        },
+        {
+          "kind": "visualization",
+          "chart": "gnosis-vpn/exits-seen",
+          "width": 2,
+          "height": 80,
+          "options": {
+            "layout": {
+              "row": 6,
+              "rows": 2,
+              "unit": "cells",
+              "column": 0
+            }
+          }
+        },
+        {
+          "kind": "text",
+          "text": "Activity over blocks",
+          "width": 12,
+          "height": 80,
+          "options": {
+            "note": "Who showed up, and when each client first appeared, block by block.",
+            "layout": {
+              "row": 8,
+              "unit": "cells",
+              "column": 0
+            }
+          }
+        },
+        {
+          "kind": "visualization",
+          "chart": "gnosis-vpn/daily-users",
+          "width": 12,
+          "height": 200,
+          "options": {
+            "note": "Client deployments in each bin of blocks.",
+            "layout": {
+              "row": 9,
+              "rows": 4,
+              "unit": "cells",
+              "column": 0
+            }
+          }
+        },
+        {
+          "kind": "text",
+          "text": "Data volume by relayer",
+          "width": 12,
+          "height": 80,
+          "options": {
+            "note": "Estimated client traffic carried by each relay.",
+            "layout": {
+              "row": 13,
+              "unit": "cells",
+              "column": 0
+            }
+          }
+        },
+        {
+          "kind": "visualization",
+          "chart": "gnosis-vpn/relayer-share",
+          "width": 3,
+          "height": 80,
+          "options": {
+            "note": "Upstream volume.",
+            "layout": {
+              "row": 14,
+              "rows": 4,
+              "unit": "cells",
+              "column": 0
+            }
+          }
+        },
+        {
+          "kind": "visualization",
+          "chart": "gnosis-vpn/relayer-daily",
+          "width": 9,
+          "height": 80,
+          "options": {
+            "note": "Split by the relay each client (upstream) or exit (downstream) paid. Downstream names no client, so it is a relay breakdown, never a client one.",
+            "layout": {
+              "row": 14,
+              "rows": 4,
+              "unit": "cells",
+              "column": 3
+            }
+          }
+        },
+        {
+          "kind": "text",
+          "text": "Ticket parameters",
+          "width": 12,
+          "height": 80,
+          "options": {
+            "note": "The oracle values that convert redemptions into traffic, as they stand now. Each network sets its own, so pick one network to see them.",
+            "layout": {
+              "row": 18,
+              "unit": "cells",
+              "column": 0
+            }
+          }
+        },
+        {
+          "kind": "visualization",
+          "chart": "gnosis-vpn/winning-probability",
+          "width": 4,
+          "height": 80,
+          "options": {
+            "note": "Current network minimum",
+            "layout": {
+              "row": 20,
+              "rows": 2,
+              "unit": "cells",
+              "column": 0
+            },
+            "requires": "network"
+          }
+        },
+        {
+          "kind": "visualization",
+          "chart": "gnosis-vpn/ticket-price",
+          "width": 4,
+          "height": 80,
+          "options": {
+            "note": "Cost of relaying one packet, one hop",
+            "layout": {
+              "row": 20,
+              "rows": 2,
+              "unit": "cells",
+              "column": 4
+            },
+            "requires": "network"
+          }
+        },
+        {
+          "kind": "visualization",
+          "chart": "gnosis-vpn/ticket-value",
+          "width": 4,
+          "height": 80,
+          "options": {
+            "note": "Price ÷ probability, for one remaining hop",
+            "layout": {
+              "row": 20,
+              "rows": 2,
+              "unit": "cells",
+              "column": 8
+            },
+            "requires": "network"
+          }
+        },
+        {
+          "kind": "text",
+          "text": "Exits",
+          "width": 12,
+          "height": 80,
+          "options": {
+            "note": "Exits are detected from the service registry: every node registered there as gvpn:exit, until it deregisters. Its metadata names it and says where it is reached. Add an address to the list “exits” (Settings → Lists) for a network without a registry. Volume is what each exit paid relays for the return path, all time.",
+            "layout": {
+              "row": 22,
+              "unit": "cells",
+              "column": 0
+            }
+          }
+        },
+        {
+          "kind": "visualization",
+          "chart": "gnosis-vpn/exits-registered",
+          "width": 2,
+          "height": 346,
+          "options": {
+            "note": "Detected automatically",
+            "layout": {
+              "row": 24,
+              "rows": 5,
+              "unit": "cells",
+              "column": 0
+            }
+          }
+        },
+        {
+          "kind": "visualization",
+          "chart": "gnosis-vpn/exits",
+          "width": 10,
+          "height": 346,
+          "options": {
+            "layout": {
+              "row": 24,
+              "rows": 5,
+              "unit": "cells",
+              "column": 2
+            }
+          }
+        },
+        {
+          "kind": "text",
+          "text": "Clients",
+          "width": 12,
+          "height": 80,
+          "options": {
+            "note": "Who used the network and when each client first appeared. Volume is upstream only — the traffic the client itself paid for. Pick a client to open its record.",
+            "layout": {
+              "row": 29,
+              "unit": "cells",
+              "column": 0
+            }
+          }
+        },
+        {
+          "kind": "visualization",
+          "chart": "gnosis-vpn/top-clients",
+          "width": 6,
+          "height": 178,
+          "options": {
+            "link": {
+              "var": "client",
+              "column": "payer",
+              "dashboard": "gnosis-vpn-client"
+            },
+            "layout": {
+              "row": 30,
+              "rows": 5,
+              "unit": "cells",
+              "column": 0
+            }
+          }
+        },
+        {
+          "kind": "visualization",
+          "chart": "gnosis-vpn/deployments",
+          "width": 6,
+          "height": 178,
+          "options": {
+            "link": {
+              "var": "client",
+              "column": "client",
+              "dashboard": "gnosis-vpn-client"
+            },
+            "layout": {
+              "row": 30,
+              "rows": 5,
+              "unit": "cells",
+              "column": 6
+            }
+          }
+        },
+        {
+          "kind": "text",
+          "text": "Most recent redemptions",
+          "width": 12,
+          "height": 80,
+          "options": {
+            "note": "The latest client redemptions, newest first. Upstream only — a downstream redemption is paid by an exit and names no client.",
+            "layout": {
+              "row": 35,
+              "unit": "cells",
+              "column": 0
+            }
+          }
+        },
+        {
+          "kind": "visualization",
+          "chart": "gnosis-vpn/feed",
+          "width": 12,
+          "height": 178,
+          "options": {
+            "link": {
+              "var": "client",
+              "column": "client",
+              "dashboard": "gnosis-vpn-client"
+            },
+            "layout": {
+              "row": 37,
+              "rows": 5,
+              "unit": "cells",
+              "column": 0
+            }
+          }
+        },
+        {
+          "kind": "text",
+          "text": "Data sources",
+          "width": 12,
+          "height": 80,
+          "options": {
+            "layout": {
+              "row": 42,
+              "unit": "cells",
+              "column": 0
+            }
+          }
+        },
+        {
+          "kind": "visualization",
+          "chart": "gnosis-vpn/contracts",
+          "width": 12,
+          "height": 230,
+          "options": {
+            "layout": {
+              "row": 43,
+              "rows": 5,
+              "unit": "cells",
+              "column": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "slug": "gnosis-vpn-client",
+      "title": "Gnosis VPN client",
+      "description": "One VPN client’s record: when it was deployed, what it used, and which relays it paid.",
+      "visibility": "public",
+      "variables": [
+        {
+          "name": "network",
+          "type": "network",
+          "label": "Network",
+          "default": "all",
+          "networks": [
+            "piz-palu-prod",
+            "jura-prod"
+          ],
+          "showLabel": false
+        },
+        {
+          "name": "client",
+          "type": "text",
+          "label": "Client"
+        }
+      ],
+      "widgets": [
+        {
+          "kind": "text",
+          "text": "Client record",
+          "width": 12,
+          "height": 80,
+          "options": {
+            "note": "A client leaves no trace of its own on chain: what is visible is a relay redeeming a ticket the client issued. First and last seen are the blocks that bound that trace.",
+            "layout": {
+              "row": 0,
+              "unit": "cells",
+              "column": 0
+            }
+          }
+        },
+        {
+          "kind": "visualization",
+          "chart": "gnosis-vpn-client/deployed",
+          "width": 4,
+          "height": 80,
+          "options": {
+            "note": "Key binding on chain",
+            "layout": {
+              "row": 1,
+              "rows": 2,
+              "unit": "cells",
+              "column": 0
+            },
+            "requires": "client"
+          }
+        },
+        {
+          "kind": "visualization",
+          "chart": "gnosis-vpn-client/first-seen",
+          "width": 4,
+          "height": 80,
+          "options": {
+            "note": "First redemption",
+            "layout": {
+              "row": 1,
+              "rows": 2,
+              "unit": "cells",
+              "column": 4
+            },
+            "requires": "client"
+          }
+        },
+        {
+          "kind": "visualization",
+          "chart": "gnosis-vpn-client/last-seen",
+          "width": 4,
+          "height": 80,
+          "options": {
+            "note": "Latest redemption",
+            "layout": {
+              "row": 1,
+              "rows": 2,
+              "unit": "cells",
+              "column": 8
+            },
+            "requires": "client"
+          }
+        },
+        {
+          "kind": "visualization",
+          "chart": "gnosis-vpn-client/volume",
+          "width": 4,
+          "height": 155,
+          "options": {
+            "layout": {
+              "row": 3,
+              "rows": 2,
+              "unit": "cells",
+              "column": 0
+            },
+            "requires": "client"
+          }
+        },
+        {
+          "kind": "visualization",
+          "chart": "gnosis-vpn-client/redemptions",
+          "width": 4,
+          "height": 155,
+          "options": {
+            "layout": {
+              "row": 5,
+              "rows": 2,
+              "unit": "cells",
+              "column": 0
+            },
+            "requires": "client"
+          }
+        },
+        {
+          "kind": "visualization",
+          "chart": "gnosis-vpn-client/daily",
+          "width": 8,
+          "height": 230,
+          "options": {
+            "note": "Upstream volume over the last 2,000,000 blocks.",
+            "layout": {
+              "row": 3,
+              "rows": 4,
+              "unit": "cells",
+              "column": 4
+            },
+            "requires": "client"
+          }
+        },
+        {
+          "kind": "visualization",
+          "chart": "gnosis-vpn-client/relays",
+          "width": 12,
+          "height": 80,
+          "options": {
+            "layout": {
+              "row": 7,
+              "rows": 3,
+              "unit": "cells",
+              "column": 0
+            },
+            "requires": "client"
+          }
+        }
+      ]
+    }
+  ]
+}

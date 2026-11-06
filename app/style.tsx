@@ -1,15 +1,22 @@
 'use client';
 
-import { useCallback, useMemo, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react';
+import { Monitor, Moon, Sun } from 'lucide-react';
 
 import {
   DEFAULT_STYLE,
-  PALETTES,
+  DEFAULT_THEME,
   STYLES,
   STYLE_STORAGE_KEY,
+  THEMES,
+  THEME_STORAGE_KEY,
   isStyle,
+  isThemeChoice,
+  paletteOf,
   type Palette,
   type StyleName,
+  type Theme,
+  type ThemeChoice,
 } from './chart-theme';
 
 /**
@@ -56,20 +63,96 @@ function apply(style: StyleName) {
   for (const listener of listeners) listener();
 }
 
+/**
+ * Light or dark: `data-theme` on <html>, resolved from the visitor's choice
+ * (light, dark, or the system's) by the same pre-paint script, and kept in
+ * step here when the choice or the system's setting changes.
+ */
+function getTheme(): Theme {
+  return document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
+}
+
+function getThemeChoice(): ThemeChoice {
+  const chosen = document.documentElement.dataset.themeChoice;
+  return isThemeChoice(chosen) ? chosen : DEFAULT_THEME;
+}
+
+const systemDark = () =>
+  typeof window !== 'undefined' &&
+  window.matchMedia('(prefers-color-scheme: dark)').matches;
+
+function applyTheme(choice: ThemeChoice, remember: boolean) {
+  const root = document.documentElement;
+  root.dataset.themeChoice = choice;
+  root.dataset.theme =
+    choice === 'dark' || (choice === 'system' && systemDark())
+      ? 'dark'
+      : 'light';
+  if (remember) {
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, choice);
+    } catch {
+      // Applied for this visit only.
+    }
+  }
+  for (const listener of listeners) listener();
+}
+
 export function useStyle() {
   const style = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+  const theme = useSyncExternalStore<Theme>(subscribe, getTheme, () => 'light');
   const setStyle = useCallback((next: StyleName) => apply(next), []);
   return useMemo(
-    () => ({ style, palette: PALETTES[style], setStyle }),
-    [style, setStyle],
+    () => ({ style, palette: paletteOf(style, theme), setStyle }),
+    [style, theme, setStyle],
   );
 }
 
 /** The colours and mark weights the charts draw with under the current style. */
 export function usePalette(): Palette {
-  return PALETTES[
-    useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot)
-  ];
+  const style = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+  const theme = useSyncExternalStore<Theme>(subscribe, getTheme, () => 'light');
+  return paletteOf(style, theme);
+}
+
+/** Light, dark, or as the system says; only the editorial style has a dark. */
+export function ThemeSwitch() {
+  const style = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+  const choice = useSyncExternalStore(
+    subscribe,
+    getThemeChoice,
+    () => DEFAULT_THEME,
+  );
+  // Following the system: a change there applies at once.
+  useEffect(() => {
+    if (choice !== 'system') return;
+    const query = window.matchMedia('(prefers-color-scheme: dark)');
+    const onChange = () => applyTheme('system', false);
+    query.addEventListener('change', onChange);
+    return () => query.removeEventListener('change', onChange);
+  }, [choice]);
+  if (style !== 'editorial') return null;
+  const icons = { light: Sun, dark: Moon, system: Monitor };
+  return (
+    <fieldset className="theme-switch">
+      <legend className="sr-only">Light or dark</legend>
+      {THEMES.map((entry) => {
+        const Icon = icons[entry.id];
+        return (
+          <button
+            key={entry.id}
+            type="button"
+            aria-pressed={choice === entry.id}
+            title={entry.id === 'system' ? 'As the system is set' : entry.label}
+            aria-label={entry.label}
+            onClick={() => applyTheme(entry.id, true)}
+          >
+            <Icon size={14} aria-hidden="true" />
+          </button>
+        );
+      })}
+    </fieldset>
+  );
 }
 
 export function StyleSwitch() {
