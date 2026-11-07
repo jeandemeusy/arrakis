@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { api, ApiError } from '../../api';
-import { took } from '../../time';
+import { RunTimes } from './run-times';
 
 type Source = {
   id: string;
@@ -18,27 +18,13 @@ type Health = {
   networks: Source[];
   dashboards: { slug: string; title: string }[];
 };
-type History = {
-  id: string;
-  slug: string;
-  network: string;
-  status: string;
-  startedAt: string;
-  durationMs: number | null;
-  rowCount: string | null;
-  error: string | null;
-};
-
 export function QueryHealth({ enabled }: { enabled: boolean }) {
-  const [data, setData] = useState<{
-    health: Health[];
-    history: History[];
-  } | null>(null);
+  const [data, setData] = useState<{ health: Health[] } | null>(null);
   const [error, setError] = useState('');
   useEffect(() => {
     if (!enabled) return;
     let live = true;
-    api<{ health: Health[]; history: History[] }>('/api/v1/runs/health')
+    api<{ health: Health[] }>('/api/v1/runs/health')
       .then((result) => {
         if (live) setData(result);
       })
@@ -118,49 +104,7 @@ export function QueryHealth({ enabled }: { enabled: boolean }) {
             No problems found for default parameter values.
           </p>
         ))}
-      <h2>Recent stored runs</h2>
-      <p className="studio-muted">
-        Up to 100 runs recorded since run history was enabled. Previews are not
-        stored here.
-      </p>
-      {data &&
-        (data.history.length ? (
-          <div className="studio-card runs-card">
-            <table className="query-table">
-              <thead>
-                <tr>
-                  <th>Query</th>
-                  <th>Source</th>
-                  <th>Started</th>
-                  <th>Status</th>
-                  <th>Duration</th>
-                  <th>Rows</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.history.map((run) => (
-                  <tr key={run.id}>
-                    <td>
-                      <Link href={`/queries/${run.slug}`}>{run.slug}</Link>
-                    </td>
-                    <td>{run.network}</td>
-                    <td>{new Date(run.startedAt).toLocaleString()}</td>
-                    <td title={run.error ?? undefined}>
-                      {run.status}
-                      {run.error ? `: ${run.error}` : ''}
-                    </td>
-                    <td>
-                      {run.durationMs === null ? '—' : took(run.durationMs)}
-                    </td>
-                    <td>{run.rowCount ?? '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <p className="studio-muted">No runs recorded yet.</p>
-        ))}
+      <RunTimes />
     </section>
   );
 }

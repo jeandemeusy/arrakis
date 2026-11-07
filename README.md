@@ -231,8 +231,12 @@ records the error on it. At most `ARRAKIS_SCHEDULER_CONCURRENCY` scheduled runs
 are in flight at once.
 
 **Query health** under Settings shows active runs, problems with default
-parameter values on each source, affected dashboards, and the 100 most recent
-stored runs recorded since history was enabled. Preview runs are not included.
+parameter values on each source, affected dashboards, and how long runs take:
+each query's median and 95th-percentile run time over the last day, week or
+month, slowest first, and any one query's runs over time against its time
+limit (`/api/v1/runs/times`). **All runs** lists every recorded run, filterable
+by query, source and status and paged as far back as history goes
+(`/api/v1/runs/history`). Preview runs are not recorded.
 
 **Several data sources.** A query runs on one, or on all of them with their
 rows stacked under a `network` column — useful when they share a schema, like

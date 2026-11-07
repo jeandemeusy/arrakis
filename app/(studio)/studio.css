@@ -5246,6 +5246,17 @@ a.settings-card:focus-visible {
   font-size: 12px;
 }
 
+/* Running now: heading and table spaced like the Query health sections below. */
+.runs-now {
+  display: grid;
+  gap: 12px;
+}
+
+.runs-now h2,
+.runs-now p {
+  margin: 0;
+}
+
 .runs-card {
   padding: 0;
   overflow: hidden;
@@ -6358,5 +6369,166 @@ a.settings-card:focus-visible {
   .studio select:not([multiple], .chip select) {
     appearance: auto;
     background-image: none;
+  }
+}
+
+/* Query health: run time per query, and the runs behind it. */
+
+.run-times {
+  display: grid;
+  gap: 12px;
+}
+
+.run-times-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.run-times-head h2 {
+  margin-right: auto;
+}
+
+.run-times-card {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+}
+
+.run-times-query {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.run-times-query select {
+  max-width: 100%;
+}
+
+.run-times-figures {
+  margin: 0;
+  font-size: 12px;
+}
+
+.run-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.run-filters label {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.run-history-more {
+  justify-self: start;
+  margin-top: 12px;
+}
+
+.run-bars-legend {
+  display: flex;
+  gap: 16px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.run-bars-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.run-bars-legend i {
+  width: 12px;
+  height: 8px;
+  box-sizing: border-box;
+}
+
+.run-bars {
+  display: grid;
+  gap: 2px;
+  max-height: 420px;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+
+.run-bar {
+  display: grid;
+  grid-template-columns: minmax(0, 14rem) minmax(0, 1fr) minmax(0, 11rem);
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.run-bar:hover {
+  background: var(--hover);
+}
+
+/* A plain tint, not the style's pressed colour, which in one style is a
+   series colour and would hide that series' bar. */
+.run-bar[aria-pressed='true'] {
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+  font-weight: 600;
+}
+
+.run-bar-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-bar-track {
+  display: grid;
+  gap: 3px;
+}
+
+.run-bar-track i {
+  display: block;
+  height: 8px;
+  box-sizing: border-box;
+}
+
+.run-bar-value {
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.run-bar-failed {
+  color: var(--warn-ink);
+}
+
+@media (width <= 640px) {
+  .run-bar {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
   }
 }

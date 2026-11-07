@@ -141,6 +141,9 @@ export function DashboardView({
     useState<Record<string, string | undefined>>(initialVars);
   const requestedRef = useRef(requested);
   const [data, setData] = useState<DataResponse | null>(null);
+  // Why the dashboard's data could not be read, for every tile to say so
+  // rather than wait forever.
+  const [dataError, setDataError] = useState<WidgetPayload | null>(null);
   // Which request the data on screen answers; while it differs from the one
   // asked for, the charts that read a changed variable say they are updating.
   const [loadedKey, setLoadedKey] = useState<string | null>(null);
@@ -311,12 +314,20 @@ export function DashboardView({
         // changed redraw, and a newer choice interrupts it.
         startTransition(() => {
           setData((previous) => keepUnchanged(previous, response));
+          setDataError(null);
           setLoadedKey(requestKey);
         }),
       )
       .catch((error: Error) => {
         if (error.name === 'AbortError') return;
         setData(null);
+        setDataError({
+          state: 'error',
+          error: {
+            status: (error as ApiError).status ?? 500,
+            message: error.message,
+          },
+        });
         setLoadedKey(requestKey);
       });
     return () => controller.abort();
@@ -568,7 +579,7 @@ export function DashboardView({
   const payloadOf = (widget: DraftWidget): WidgetPayload | null => {
     if (editing) return null;
     const entry = data?.widgets.find((candidate) => candidate.id === widget.id);
-    if (!entry) return LOADING;
+    if (!entry) return dataError ?? LOADING;
     if (
       entry.state !== 'ok' &&
       entry.state !== 'error' &&
