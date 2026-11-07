@@ -49,6 +49,12 @@ export type Run = {
 /** Runs drawn for one query: the newest this many, in its window. */
 const RUNS_DRAWN = 500;
 const LIMIT_SERIES = 'Time limit';
+/**
+ * The limit is drawn only once a run reaches this share of it. Below, it
+ * would set the scale and flatten the runs into a line along the bottom;
+ * the figures above the chart still say what it is.
+ */
+const LIMIT_SHOWN_FROM = 0.5;
 const FAILED_COLOR = '#c2410c';
 
 const seconds = (ms: number | null) => (ms === null ? null : ms / 1000);
@@ -219,8 +225,8 @@ function RunTimeBars({
 }
 
 /**
- * One query's runs over the window against its time limit: a line per data
- * source, failed runs as bars, the limit as a line above.
+ * One query's runs over the window: a line per data source, failed runs as
+ * bars, and its time limit as a line once runs come near it.
  */
 function QueryRuns({
   query,
@@ -262,8 +268,11 @@ function QueryRuns({
   );
   const several = sources.length > 1;
   // Long form: one row per run, under its source (and whether it failed),
-  // and one per run for the limit, drawn as a line over the bars.
+  // and, when runs come near it, one per run for the limit, drawn as a line.
   const rows = useMemo(() => {
+    const nearLimit = (runs ?? []).some(
+      (run) => (run.durationMs ?? 0) >= run.limitMs * LIMIT_SHOWN_FROM,
+    );
     const label = (run: Run) =>
       run.status === 'failed'
         ? several
@@ -276,7 +285,9 @@ function QueryRuns({
       .sort((a, b) => a.startedAt.localeCompare(b.startedAt))
       .flatMap((run) => [
         [run.startedAt, label(run), seconds(run.durationMs)],
-        [run.startedAt, LIMIT_SERIES, seconds(run.limitMs)],
+        ...(nearLimit
+          ? [[run.startedAt, LIMIT_SERIES, seconds(run.limitMs)]]
+          : []),
       ]);
   }, [runs, several]);
   const options = useMemo<Options>(() => {
