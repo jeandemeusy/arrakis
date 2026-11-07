@@ -28,7 +28,7 @@ export const SETTINGS_PAGES: SettingsPage[] = [
     href: '/settings/runs',
     icon: Activity,
     title: 'Query health',
-    text: 'Monitor active and recent runs, stale results and the dashboards they affect.',
+    text: 'What is running now, how long each query takes to run, stale results and the dashboards they affect.',
     editorOnly: true,
   },
 ];

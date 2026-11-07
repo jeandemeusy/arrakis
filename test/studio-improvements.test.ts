@@ -23,6 +23,8 @@ describe(
       testRun: typeof import('../app/api/v1/queries/[slug]/tests/run/route');
       run: typeof import('../app/api/v1/queries/[slug]/run/route');
       health: typeof import('../app/api/v1/runs/health/route');
+      times: typeof import('../app/api/v1/runs/times/route');
+      history: typeof import('../app/api/v1/runs/history/route');
     };
     before(async () => {
       const databases = await createTestDatabases('arrakis_improve');
@@ -44,6 +46,8 @@ describe(
         testRun: await import('../app/api/v1/queries/[slug]/tests/run/route'),
         run: await import('../app/api/v1/queries/[slug]/run/route'),
         health: await import('../app/api/v1/runs/health/route'),
+        times: await import('../app/api/v1/runs/times/route'),
+        history: await import('../app/api/v1/runs/history/route'),
       };
       const login = await (
         await import('../app/api/v1/auth/login/route')
@@ -189,7 +193,7 @@ describe(
       assert.equal((await fail.json()).passed, false);
     });
 
-    it('records repeated stored runs and serves health only to editors', async () => {
+    it('records repeated stored runs and serves their times only to editors', async () => {
       const created = await routes.queries.POST(
         request('POST', '/api/v1/queries', {
           cookie,
@@ -226,16 +230,72 @@ describe(
         undefined,
       );
       assert.equal(health.status, 200, await health.clone().text());
-      const result = (await health.json()) as {
-        history: Array<{ slug: string; status: string }>;
-      };
+
+      // Run time per query, over a window.
+      for (const path of ['/api/v1/runs/times', '/api/v1/runs/history']) {
+        const handler = path.endsWith('times') ? routes.times : routes.history;
+        assert.equal((await handler.GET(request('GET', path), undefined)).status, 401);
+      }
       assert.equal(
-        result.history.filter(
-          (entry) =>
-            entry.slug === 'run-history' && entry.status === 'succeeded',
-        ).length,
-        2,
+        (
+          await routes.times.GET(
+            request('GET', '/api/v1/runs/times?window=1y', { cookie }),
+            undefined,
+          )
+        ).status,
+        400,
       );
+      const times = (await (
+        await routes.times.GET(
+          request('GET', '/api/v1/runs/times?window=24h', { cookie }),
+          undefined,
+        )
+      ).json()) as {
+        window: string;
+        queries: Array<{
+          slug: string;
+          runs: number;
+          failures: number;
+          medianMs: number | null;
+          p95Ms: number | null;
+          limitMs: number;
+        }>;
+      };
+      assert.equal(times.window, '24h');
+      const mine = times.queries.find((entry) => entry.slug === 'run-history');
+      assert.ok(mine, JSON.stringify(times));
+      assert.equal(mine.runs, 2);
+      assert.equal(mine.failures, 0);
+      assert.equal(typeof mine.medianMs, 'number');
+      assert.ok((mine.p95Ms ?? 0) >= (mine.medianMs ?? 0));
+      // Without a limit of its own, a stored run stops at the server's.
+      assert.equal(mine.limitMs, 120_000);
+
+      // The runs themselves, a page at a time.
+      type Page = {
+        runs: Array<{ id: string; slug: string; status: string; trigger: string | null }>;
+        next: string | null;
+      };
+      const pageOf = async (search: string) =>
+        (await (
+          await routes.history.GET(
+            request('GET', `/api/v1/runs/history?${search}`, { cookie }),
+            undefined,
+          )
+        ).json()) as Page;
+      const first = await pageOf('query=run-history&limit=1');
+      assert.equal(first.runs.length, 1);
+      assert.ok(first.next);
+      const second = await pageOf(`query=run-history&limit=1&before=${first.next}`);
+      assert.equal(second.runs.length, 1);
+      assert.notEqual(second.runs[0].id, first.runs[0].id);
+      const third = await pageOf(`query=run-history&limit=1&before=${second.next}`);
+      assert.deepEqual(third, { runs: [], next: null });
+      const all = await pageOf('query=run-history&window=7d');
+      assert.equal(all.runs.length, 2);
+      assert.ok(all.runs.every((run) => run.status === 'succeeded'));
+      assert.equal(all.next, null);
+      assert.deepEqual((await pageOf('query=run-history&status=failed')).runs, []);
       const db = await app.appDb();
       await db.query(`DELETE FROM query_results WHERE query_version_id = (SELECT current_version_id FROM queries WHERE slug = 'run-history')`);
       const preserved = await db.query<{ count: string }>(`SELECT count(*)::text AS count FROM query_run_history h JOIN query_versions v ON v.id = h.query_version_id JOIN queries q ON q.id = v.query_id WHERE q.slug = 'run-history'`);
