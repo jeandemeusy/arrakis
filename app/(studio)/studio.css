@@ -5246,6 +5246,17 @@ a.settings-card:focus-visible {
   font-size: 12px;
 }
 
+/* Running now: heading and table spaced like the Query health sections below. */
+.runs-now {
+  display: grid;
+  gap: 12px;
+}
+
+.runs-now h2,
+.runs-now p {
+  margin: 0;
+}
+
 .runs-card {
   padding: 0;
   overflow: hidden;

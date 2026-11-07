@@ -106,75 +106,77 @@ export function RunsMonitor() {
           </p>
         </div>
       </header>
-      {user && <h2>Running now</h2>}
-      {user === null && (
-        <p className="studio-muted">
-          <Link href="/login?next=/settings/runs">Sign in</Link> to see
-          what is running.
-        </p>
-      )}
-      {error && <p className="studio-error">{error}</p>}
-      {user && runs && (
-        <div className="studio-card runs-card">
-          {runs.length === 0 ? (
-            <p className="runs-empty">
-              <Activity size={18} aria-hidden="true" />
-              Nothing is running.
-            </p>
-          ) : (
-            <table className="query-table">
-              <thead>
-                <tr>
-                  <th scope="col">Query</th>
-                  <th scope="col">Kind</th>
-                  <th scope="col">Source</th>
-                  <th scope="col">By</th>
-                  <th scope="col">Running for</th>
-                  <th scope="col">
-                    <span className="sr-only">Cancel</span>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {runs.map((run) => (
-                  <tr key={run.id}>
-                    <td>
-                      {run.query ? (
-                        <Link href={`/queries/${run.query}`}>
-                          <strong>{run.query}</strong>
-                        </Link>
-                      ) : (
-                        <span className="studio-muted">Unsaved SQL</span>
-                      )}
-                    </td>
-                    <td className="quiet-cell">{KIND[run.kind]}</td>
-                    <td className="quiet-cell">{run.network}</td>
-                    <td className="quiet-cell">{run.startedBy ?? '—'}</td>
-                    <td className="nowrap">
-                      {took(Math.max(0, now - Date.parse(run.startedAt)))}
-                    </td>
-                    <td className="row-actions">
-                      <button
-                        type="button"
-                        className="studio-button cancel-run"
-                        disabled={cancelling === run.id}
-                        onClick={() => void cancel(run.id)}
-                      >
-                        <Square
-                          size={11}
-                          aria-hidden="true"
-                          fill="currentColor"
-                        />
-                        {cancelling === run.id ? 'Cancelling…' : 'Cancel'}
-                      </button>
-                    </td>
+      <section className="runs-now">
+        {user && <h2>Running now</h2>}
+        {user === null && (
+          <p className="studio-muted">
+            <Link href="/login?next=/settings/runs">Sign in</Link> to see
+            what is running.
+          </p>
+        )}
+        {error && <p className="studio-error">{error}</p>}
+        {user && runs && (
+          <div className="studio-card runs-card">
+            {runs.length === 0 ? (
+              <p className="runs-empty">
+                <Activity size={18} aria-hidden="true" />
+                Nothing is running.
+              </p>
+            ) : (
+              <table className="query-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Query</th>
+                    <th scope="col">Kind</th>
+                    <th scope="col">Source</th>
+                    <th scope="col">By</th>
+                    <th scope="col">Running for</th>
+                    <th scope="col">
+                      <span className="sr-only">Cancel</span>
+                    </th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      )}
+                </thead>
+                <tbody>
+                  {runs.map((run) => (
+                    <tr key={run.id}>
+                      <td>
+                        {run.query ? (
+                          <Link href={`/queries/${run.query}`}>
+                            <strong>{run.query}</strong>
+                          </Link>
+                        ) : (
+                          <span className="studio-muted">Unsaved SQL</span>
+                        )}
+                      </td>
+                      <td className="quiet-cell">{KIND[run.kind]}</td>
+                      <td className="quiet-cell">{run.network}</td>
+                      <td className="quiet-cell">{run.startedBy ?? '—'}</td>
+                      <td className="nowrap">
+                        {took(Math.max(0, now - Date.parse(run.startedAt)))}
+                      </td>
+                      <td className="row-actions">
+                        <button
+                          type="button"
+                          className="studio-button cancel-run"
+                          disabled={cancelling === run.id}
+                          onClick={() => void cancel(run.id)}
+                        >
+                          <Square
+                            size={11}
+                            aria-hidden="true"
+                            fill="currentColor"
+                          />
+                          {cancelling === run.id ? 'Cancelling…' : 'Cancel'}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        )}
+      </section>
       <QueryHealth enabled={Boolean(user)} />
     </main>
   );
