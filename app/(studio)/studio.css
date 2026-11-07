@@ -6480,11 +6480,10 @@ a.settings-card:focus-visible {
   background: var(--hover);
 }
 
-/* Marked at its edge, not filled: a style whose pressed colour is a series
-   colour would hide that series' bar. */
+/* A plain tint, not the style's pressed colour, which in one style is a
+   series colour and would hide that series' bar. */
 .run-bar[aria-pressed='true'] {
   background: color-mix(in srgb, var(--ink) 6%, transparent);
-  box-shadow: inset 3px 0 0 var(--ink);
   font-weight: 600;
 }
 
