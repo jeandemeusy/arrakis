@@ -102,7 +102,7 @@ function guardedLookup(
     if (error) return callback(error, []);
     if (!addresses.length || !addresses.every((entry) => publicAddress(entry.address))) {
       return callback(
-        Object.assign(privateRefusal(hostname), { code: 'EARRAKISPRIVATE' }),
+        Object.assign(privateRefusal(hostname), { code: 'ECAIRNPRIVATE' }),
         [],
       );
     }
@@ -145,7 +145,7 @@ function get(url: URL, signal: AbortSignal): Promise<Answer> {
   return new Promise((resolve, reject) => {
     const fail = (error: unknown) =>
       reject(
-        (error as { code?: string }).code === 'EARRAKISPRIVATE'
+        (error as { code?: string }).code === 'ECAIRNPRIVATE'
           ? error
           : badRequest(
               `Could not download the bundle: ${(error as Error).message}`,

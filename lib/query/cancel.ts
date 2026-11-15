@@ -94,7 +94,7 @@ export async function cancelRuns(filter: {
       // very runs being cancelled.
       const client = new Client({
         connectionString: network.queryDatabaseUrl,
-        application_name: 'arrakis-cancel',
+        application_name: 'cairn-cancel',
         connectionTimeoutMillis: 5_000,
       });
       try {

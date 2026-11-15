@@ -59,7 +59,7 @@ export function ShareButton({
   viewLabel?: string;
   canEdit: boolean;
   onVisibility?: (next: Visibility) => Promise<void>;
-  /** Where to download it as a bundle, for another Arrakis; editors only. */
+  /** Where to download it as a bundle, for another Cairn; editors only. */
   bundleHref?: string;
 }) {
   const [open, setOpen] = useState(false);
@@ -205,7 +205,7 @@ export function ShareButton({
           {bundleHref && (
             <div className="share-bundle">
               <p className="studio-muted">
-                For another Arrakis: the {what}, its charts and their queries,
+                For another Cairn: the {what}, its charts and their queries,
                 as one file to import there.
               </p>
               <a className="studio-button" href={bundleHref} download>

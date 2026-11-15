@@ -15,7 +15,7 @@ import type { BindValue } from './params';
 
 /**
  * Runs SQL against a data source, read-only, bounded in time, rows and
- * concurrency. Every query in Arrakis — an editor's experiment, a scheduled
+ * concurrency. Every query in Cairn — an editor's experiment, a scheduled
  * refresh, a system lookup — goes through `runReadOnly`; there is no second
  * path to a data source for saved queries.
  *
@@ -43,10 +43,10 @@ function settings() {
     return Number.isFinite(value) && value > 0 ? value : fallback;
   };
   return {
-    timeoutMs: integer('ARRAKIS_QUERY_TIMEOUT_MS', 30_000),
-    concurrency: integer('ARRAKIS_QUERY_CONCURRENCY', 3),
-    queue: integer('ARRAKIS_QUERY_QUEUE', 10),
-    allowWritableRole: process.env.ARRAKIS_UNSAFE_ALLOW_WRITABLE_ROLE === '1',
+    timeoutMs: integer('CAIRN_QUERY_TIMEOUT_MS', 30_000),
+    concurrency: integer('CAIRN_QUERY_CONCURRENCY', 3),
+    queue: integer('CAIRN_QUERY_QUEUE', 10),
+    allowWritableRole: process.env.CAIRN_UNSAFE_ALLOW_WRITABLE_ROLE === '1',
   };
 }
 
@@ -75,7 +75,7 @@ function poolFor(network: NetworkConfig): Pool {
       // its whole duration, so at most this many run on one network at once.
       max: settings().concurrency,
       idleTimeoutMillis: 30_000,
-      application_name: 'arrakis-query',
+      application_name: 'cairn-query',
     });
     // An idle client losing its connection must not crash the process.
     pool.on('error', (error) => {
@@ -338,7 +338,7 @@ export async function runReadOnly(request: RunRequest): Promise<RunOutcome> {
     // only a query can be explained, never anything else.
     if (request.explain) {
       const plan: QueryConfig<BindValue[]> & { queryMode: 'extended' } = {
-        text: `EXPLAIN (${request.explain === 'analyze' ? 'ANALYZE, BUFFERS, ' : ''}FORMAT TEXT) SELECT * FROM (\n${text}\n) AS arrakis_query`,
+        text: `EXPLAIN (${request.explain === 'analyze' ? 'ANALYZE, BUFFERS, ' : ''}FORMAT TEXT) SELECT * FROM (\n${text}\n) AS cairn_query`,
         values,
         queryMode: 'extended',
       };
@@ -358,7 +358,7 @@ export async function runReadOnly(request: RunRequest): Promise<RunOutcome> {
     // Extended mode even without values: the simple protocol would accept a
     // second statement.
     const declare: QueryConfig<BindValue[]> & { queryMode: 'extended' } = {
-      text: `DECLARE arrakis_cursor NO SCROLL CURSOR FOR SELECT * FROM (\n${text}\n) AS arrakis_query`,
+      text: `DECLARE cairn_cursor NO SCROLL CURSOR FOR SELECT * FROM (\n${text}\n) AS cairn_query`,
       values,
       queryMode: 'extended',
     };
@@ -377,7 +377,7 @@ export async function runReadOnly(request: RunRequest): Promise<RunOutcome> {
       await client.query(`SET LOCAL statement_timeout = ${remaining}`);
       const wanted = Math.min(BATCH_ROWS, rowLimit + 1 - rowCount);
       const batch = await client.query<unknown[]>({
-        text: `FETCH FORWARD ${wanted} FROM arrakis_cursor`,
+        text: `FETCH FORWARD ${wanted} FROM cairn_cursor`,
         rowMode: 'array',
         types: TYPES,
       });

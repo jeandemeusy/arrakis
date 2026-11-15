@@ -4,11 +4,11 @@
  * Needs a PostgreSQL superuser connection in TEST_ADMIN_DATABASE_URL; without
  * it the integration suites skip. It creates, from scratch on every run:
  *
- *   arrakis_t_app          the application database, owned by arrakis_t
- *   arrakis_t_charts       the role chart SQL logs in as, holding nothing
- *   arrakis_t_jura/_dev    two Blokli indexes loaded from fixtures/blokli.sql
- *   arrakis_t_ro           a role that can only SELECT them
- *   arrakis_t_rw           a role that can also INSERT into `log`
+ *   cairn_t_app          the application database, owned by cairn_t
+ *   cairn_t_charts       the role chart SQL logs in as, holding nothing
+ *   cairn_t_jura/_dev    two Blokli indexes loaded from fixtures/blokli.sql
+ *   cairn_t_ro           a role that can only SELECT them
+ *   cairn_t_rw           a role that can also INSERT into `log`
  */
 
 import { readFile } from 'node:fs/promises';
@@ -60,7 +60,7 @@ export type TestDatabases = {
  * processes each get their own set.
  */
 export async function createTestDatabases(
-  prefix = 'arrakis_t',
+  prefix = 'cairn_t',
 ): Promise<TestDatabases> {
   if (!adminUrl) throw new Error('TEST_ADMIN_DATABASE_URL is not set');
   const fixture = await readFile(
@@ -165,15 +165,15 @@ export function request(
     ip?: string;
   } = {},
 ): Request {
-  const headers = new Headers({ host: 'arrakis.test' });
+  const headers = new Headers({ host: 'cairn.test' });
   if (options.body !== undefined)
     headers.set('content-type', 'application/json');
   if (options.cookie) headers.set('cookie', options.cookie);
   if (options.origin !== null && method !== 'GET') {
-    headers.set('origin', options.origin ?? 'https://arrakis.test');
+    headers.set('origin', options.origin ?? 'https://cairn.test');
   }
   headers.set('x-forwarded-for', options.ip ?? '203.0.113.7');
-  return new Request(`https://arrakis.test${url}`, {
+  return new Request(`https://cairn.test${url}`, {
     method,
     headers,
     body: options.body === undefined ? undefined : JSON.stringify(options.body),

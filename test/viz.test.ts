@@ -79,7 +79,7 @@ describe(
     };
 
     before(async () => {
-      const databases = await createTestDatabases('arrakis_v');
+      const databases = await createTestDatabases('cairn_v');
       const password = await import('../lib/auth/password');
       process.env.APP_DATABASE_URL = databases.appUrl;
       process.env.APP_CHARTS_DATABASE_URL = databases.chartsUrl;
@@ -87,7 +87,7 @@ describe(
         { id: 'jura', label: 'Jura', databaseUrl: databases.readOnly.jura },
         { id: 'dev', label: 'Dev', databaseUrl: databases.readOnly.dev },
       ]);
-      process.env.ARRAKIS_EDITOR_PASSWORD_HASH =
+      process.env.CAIRN_EDITOR_PASSWORD_HASH =
         await password.hashPassword(PASSWORD);
       lib = {
         app: await import('../lib/db/app'),
@@ -502,12 +502,12 @@ describe(
 
       it('leaves nothing on its connection for the next run', async () => {
         const set = await preview({
-          sql: `SELECT set_config('arrakis.leak', 'left behind', false) AS v FROM {{result}} LIMIT 1`,
+          sql: `SELECT set_config('cairn.leak', 'left behind', false) AS v FROM {{result}} LIMIT 1`,
         });
         assert.equal(set.status, 200, JSON.stringify(set.data));
         for (let run = 0; run < 3; run += 1) {
           const { data } = await preview({
-            sql: `SELECT current_setting('arrakis.leak', true) AS v FROM {{result}} LIMIT 1`,
+            sql: `SELECT current_setting('cairn.leak', true) AS v FROM {{result}} LIMIT 1`,
           });
           assert.notEqual(data.rows?.[0]?.[0], 'left behind');
         }
@@ -1025,7 +1025,7 @@ describe(
 
       it('limits how often one address may read, signed out', async () => {
         const limits = await import('../lib/api/rate-limit');
-        process.env.ARRAKIS_READ_RATE_LIMIT = '3';
+        process.env.CAIRN_READ_RATE_LIMIT = '3';
         limits.resetReadLimits();
         try {
           const read = (ip: string, cookieValue?: string) =>
@@ -1045,7 +1045,7 @@ describe(
           assert.equal((await read('198.51.100.71')).status, 200);
           assert.equal((await read('198.51.100.70', cookie)).status, 200);
         } finally {
-          delete process.env.ARRAKIS_READ_RATE_LIMIT;
+          delete process.env.CAIRN_READ_RATE_LIMIT;
           limits.resetReadLimits();
         }
       });
@@ -1063,7 +1063,7 @@ describe(
       });
 
       it('draws charts in turn when more are asked for than may run at once', async () => {
-        process.env.ARRAKIS_CHART_CONCURRENCY = '1';
+        process.env.CAIRN_CHART_CONCURRENCY = '1';
         try {
           const answers = await Promise.all(
             Array.from({ length: 6 }, (_, n) =>
@@ -1075,7 +1075,7 @@ describe(
             [200, 200, 200, 200, 200, 200],
           );
         } finally {
-          delete process.env.ARRAKIS_CHART_CONCURRENCY;
+          delete process.env.CAIRN_CHART_CONCURRENCY;
         }
       });
 

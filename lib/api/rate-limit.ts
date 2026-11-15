@@ -10,7 +10,7 @@ import { HttpError } from './errors';
  * stored results, and a chart whose variables were never seen before is
  * computed afresh. Without a limit, one client varying a text variable could
  * keep the app database busy for everyone. Each replica counts on its own, in
- * memory, over a sliding minute: ARRAKIS_READ_RATE_LIMIT requests per address
+ * memory, over a sliding minute: CAIRN_READ_RATE_LIMIT requests per address
  * (300 by default — a dashboard page makes a handful, then polls every 20 s).
  * Signed-in editors are not counted. An address the proxy did not report
  * (see clientIp) is not limited, since every caller would share it.
@@ -22,7 +22,7 @@ const MAX_TRACKED = 20_000;
 const hits = new Map<string, number[]>();
 
 function budget(): number {
-  const value = Number.parseInt(process.env.ARRAKIS_READ_RATE_LIMIT ?? '', 10);
+  const value = Number.parseInt(process.env.CAIRN_READ_RATE_LIMIT ?? '', 10);
   return Number.isFinite(value) && value > 0 ? value : 300;
 }
 

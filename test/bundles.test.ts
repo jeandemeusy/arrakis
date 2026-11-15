@@ -89,14 +89,14 @@ describe(
     };
 
     before(async () => {
-      const databases = await createTestDatabases('arrakis_b');
+      const databases = await createTestDatabases('cairn_b');
       const password = await import('../lib/auth/password');
       process.env.APP_DATABASE_URL = databases.appUrl;
       process.env.APP_CHARTS_DATABASE_URL = databases.chartsUrl;
       process.env.NETWORKS = JSON.stringify([
         { id: 'jura', label: 'Jura', databaseUrl: databases.readOnly.jura },
       ]);
-      process.env.ARRAKIS_EDITOR_PASSWORD_HASH =
+      process.env.CAIRN_EDITOR_PASSWORD_HASH =
         await password.hashPassword(PASSWORD);
       lib = {
         app: await import('../lib/db/app'),
@@ -464,7 +464,7 @@ describe(
       assert.equal(response.status, 200);
       assert.match(
         response.headers.get('content-disposition') ?? '',
-        /gnosis-vpn\.arrakis\.json/,
+        /gnosis-vpn\.cairn\.json/,
       );
       const exported = await body<{
         queries: Array<{ slug: string; kind: string; sql: string }>;
@@ -512,7 +512,7 @@ describe(
         sql: 'SELECT 1 AS one',
       });
       const other = {
-        format: 'arrakis-bundle',
+        format: 'cairn-bundle',
         version: 1,
         name: 'other',
         title: 'Other',

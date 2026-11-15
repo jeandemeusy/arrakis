@@ -98,7 +98,7 @@ function PlanSql({ sql }: { sql: { before: string | null; after: string } }) {
 
 /**
  * Bundles: dashboards with their charts and queries, as one file another
- * Arrakis made. Importing one, from a file or a URL, first shows what it would
+ * Cairn made. Importing one, from a file or a URL, first shows what it would
  * create, update or replace; importing it creates ordinary saved queries and
  * charts, edited like any other. Any dashboard can be exported as a bundle
  * from its Share menu. Removing a bundle archives what it created, except
@@ -281,7 +281,7 @@ export function BundleSettings() {
           <h1>Bundles</h1>
           <p className="studio-muted">
             A bundle is a dashboard with its charts and the queries behind them,
-            as one file, made on another Arrakis. Import one from a file or a
+            as one file, made on another Cairn. Import one from a file or a
             URL; export any of your dashboards from its Share menu.
           </p>
         </div>
@@ -329,7 +329,7 @@ export function BundleSettings() {
               <input
                 className="studio-input"
                 type="url"
-                placeholder="https://…/dashboard.arrakis.json"
+                placeholder="https://…/dashboard.cairn.json"
                 value={url}
                 onChange={(event) => setUrl(event.target.value)}
                 aria-label="Bundle URL"

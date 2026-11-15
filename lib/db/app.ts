@@ -12,7 +12,7 @@ import { HttpError } from '../api/errors';
  *
  * Configured with APP_DATABASE_URL. It is deliberately separate from every
  * data source — those are only ever read, through a read-only role, while
- * this one is the only place Arrakis writes.
+ * this one is the only place Cairn writes.
  *
  * Migrations run lazily, once per process, before the first query is handed a
  * pool, and under an advisory lock so two replicas starting together do not

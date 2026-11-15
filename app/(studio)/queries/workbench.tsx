@@ -188,8 +188,8 @@ export function Workbench({
   const [menuOpen, setMenuOpen] = useState(false);
   const [runMenu, setRunMenu] = useState(false);
   const [dashboards, setDashboards] = useState<ChartHost[]>([]);
-  const schemaOpen = usePreference('arrakis.workbench.schema', true);
-  const aboutOpen = usePreference('arrakis.workbench.about', true);
+  const schemaOpen = usePreference('cairn.workbench.schema', true);
+  const aboutOpen = usePreference('cairn.workbench.about', true);
   const [schemaResult, setSchemaResult] = useState<{ network: string; tables: SchemaTable[]; status: 'ready' | 'error' } | null>(null);
   const schemaNetwork = network === 'all' ? networks[0]?.id : network;
   const schema = useMemo(() => schemaResult && schemaResult.network === schemaNetwork ? schemaResult.tables : [], [schemaResult, schemaNetwork]);
@@ -1047,7 +1047,7 @@ export function Workbench({
                 title={aboutOpen ? 'Hide the details' : 'Show the details'}
                 aria-label="About this query"
                 onClick={() =>
-                  setPreference('arrakis.workbench.about', !aboutOpen)
+                  setPreference('cairn.workbench.about', !aboutOpen)
                 }
               >
                 <PanelRight size={15} aria-hidden="true" />
@@ -1141,7 +1141,7 @@ export function Workbench({
                   title={schemaOpen ? 'Hide the schema' : 'Show the schema'}
                   aria-label="Schema"
                   onClick={() =>
-                    setPreference('arrakis.workbench.schema', !schemaOpen)
+                    setPreference('cairn.workbench.schema', !schemaOpen)
                   }
                 >
                   <PanelLeft size={15} aria-hidden="true" />

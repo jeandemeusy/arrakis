@@ -11,7 +11,7 @@ export const dynamic = 'force-dynamic';
  * take the whole app out of rotation: the others still serve.
  *
  * Anyone can ask, and a check takes a connection on every data source, whose
- * pools are small (ARRAKIS_QUERY_CONCURRENCY). So the answer is computed at
+ * pools are small (CAIRN_QUERY_CONCURRENCY). So the answer is computed at
  * most once every few seconds and shared by every caller in between: a flood
  * of health checks cannot starve real queries of connections.
  */

@@ -7,7 +7,7 @@ type Context = { params: Promise<{ slug: string }> };
 
 /**
  * The dashboard as a bundle file — with the dashboards it links to, its
- * charts, their queries and the fragments those use — for another Arrakis to
+ * charts, their queries and the fragments those use — for another Cairn to
  * import. Editors only: a bundle carries the SQL of private queries too.
  */
 export const GET = route(async (request: Request, context: Context) => {
@@ -17,7 +17,7 @@ export const GET = route(async (request: Request, context: Context) => {
   return new Response(`${JSON.stringify(bundle, null, 2)}\n`, {
     headers: {
       'content-type': 'application/json; charset=utf-8',
-      'content-disposition': `attachment; filename="${slug}.arrakis.json"`,
+      'content-disposition': `attachment; filename="${slug}.cairn.json"`,
       'cache-control': 'no-store',
     },
   });

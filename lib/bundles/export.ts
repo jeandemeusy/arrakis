@@ -106,7 +106,7 @@ export async function exportDashboard(slug: string): Promise<Bundle> {
   for (const chart of charts.values()) await visit(chart.query, new Set());
 
   // The lists those queries read, as definitions: their values are this
-  // Arrakis's own (its exits, its accounts) and stay here.
+  // Cairn's own (its exits, its accounts) and stay here.
   const listNames = [
     ...new Set([...queries.values()].flatMap((query) => listsNamed(query.sql))),
   ];

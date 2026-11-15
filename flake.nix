@@ -1,5 +1,5 @@
 {
-  description = "Arrakis — SQL queries, charts and dashboards over read-only databases";
+  description = "Cairn — SQL queries, charts and dashboards over read-only databases";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -26,8 +26,8 @@
 
         # Built with Next's standalone output: `server.js` plus only the traced
         # dependencies, rather than the whole production dependency tree.
-        arrakis = pkgs.buildNpmPackage {
-          pname = "arrakis";
+        cairn = pkgs.buildNpmPackage {
+          pname = "cairn";
           inherit version;
 
           src = lib.cleanSourceWith {
@@ -63,7 +63,7 @@
           };
 
           # Refresh with: nix run nixpkgs#prefetch-npm-deps -- package-lock.json
-          npmDepsHash = "sha256-BvPGuJrKAXIjy4NBkx77tBgfwiQ5vx9PvZRBZZ8myFA=";
+          npmDepsHash = "sha256-dh1Kzb3g4u7PqGr+980aIqF9cq8sZ/kq+dJQSmpW9NY=";
 
           env = {
             NEXT_STANDALONE = "1";
@@ -84,26 +84,26 @@
           installPhase = ''
             runHook preInstall
 
-            mkdir -p $out/share/arrakis
-            cp -r .next/standalone/. $out/share/arrakis/
+            mkdir -p $out/share/cairn
+            cp -r .next/standalone/. $out/share/cairn/
             # Standalone omits these: static assets are served from disk, and
             # the app database migrations are read at runtime relative to the
             # working directory.
-            cp -r .next/static $out/share/arrakis/.next/static
-            cp -r public $out/share/arrakis/public
-            cp -r db $out/share/arrakis/db
+            cp -r .next/static $out/share/cairn/.next/static
+            cp -r public $out/share/cairn/public
+            cp -r db $out/share/cairn/db
 
             mkdir -p $out/bin
             # Next reads HOSTNAME for its bind address, but HOSTNAME is also a
             # standard shell variable, so --set-default would leave the server
             # trying to bind to the machine's name. Take the address from an
             # app-specific variable instead.
-            makeWrapper ${lib.getExe pkgs.nodejs-slim_22} $out/bin/arrakis \
-              --add-flags $out/share/arrakis/server.js \
+            makeWrapper ${lib.getExe pkgs.nodejs-slim_22} $out/bin/cairn \
+              --add-flags $out/share/cairn/server.js \
               --set-default NODE_ENV production \
               --set-default PORT 3000 \
               --run 'export HOSTNAME="''${BLOKLUNE_HOST:-0.0.0.0}"' \
-              --run "cd $out/share/arrakis"
+              --run "cd $out/share/cairn"
 
             runHook postInstall
           '';
@@ -114,7 +114,7 @@
         # dockerTools produces Linux images, so this is only meaningful when the
         # build itself targets Linux.
         container = pkgs.dockerTools.buildLayeredImage {
-          name = "ghcr.io/jeandemeusy/arrakis";
+          name = "ghcr.io/jeandemeusy/cairn";
           tag = "latest";
 
           # Reproducible by default: a fixed creation date keeps the image digest
@@ -122,7 +122,7 @@
           created = "1970-01-01T00:00:00Z";
 
           contents = [
-            arrakis
+            cairn
             # CA certificates for outbound HTTPS to the configured RPC endpoint.
             pkgs.cacert
           ];
@@ -134,7 +134,7 @@
           '';
 
           config = {
-            Cmd = [ "${arrakis}/bin/arrakis" ];
+            Cmd = [ "${cairn}/bin/cairn" ];
             # Not root: an unprivileged uid with no entry in /etc/passwd, which
             # Node does not need. It owns nothing in the image, so a compromised
             # server cannot rewrite the app it runs from.
@@ -148,14 +148,14 @@
               "TMPDIR=/tmp"
               "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
             ];
-            WorkingDir = "${arrakis}/share/arrakis";
+            WorkingDir = "${cairn}/share/cairn";
           };
         };
       in
       {
         packages = {
-          default = arrakis;
-          inherit arrakis;
+          default = cairn;
+          inherit cairn;
         }
         // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux { inherit container; };
 
@@ -176,7 +176,7 @@
 
           shellHook = ''
             linkNodeModulesHook
-            echo "arrakis · node $(node --version) · npm $(npm --version)"
+            echo "cairn · node $(node --version) · npm $(npm --version)"
             echo "  dependencies are linked from the Nix store"
             echo "  npm run dev           run against DATABASE_URL"
           '';

@@ -6,7 +6,7 @@ import { nudgeScheduler } from '@/lib/query/scheduler';
 
 export const dynamic = 'force-dynamic';
 
-/** The bundles this Arrakis has imported. Editors only. */
+/** The bundles this Cairn has imported. Editors only. */
 export const GET = route(async (request: Request) => {
   await requireEditor(request);
   return noStore(request, { bundles: await installedBundles() });

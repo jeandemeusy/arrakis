@@ -4,11 +4,11 @@ import 'server-only';
  * How long a run may take and how much it may keep: the server's defaults and
  * ceilings, from the environment, and a query's own settings within them.
  *
- *   ARRAKIS_QUERY_TIMEOUT_MS        a preview's default            30 s
- *   ARRAKIS_MATERIALIZE_TIMEOUT_MS  a stored run's default         2 min
- *   ARRAKIS_QUERY_TIMEOUT_MAX_MS    the most a query may ask for   10 min
- *   ARRAKIS_RESULT_ROW_LIMIT        rows a stored result keeps     5,000,000
- *   ARRAKIS_SCHEDULER_CONCURRENCY   scheduled runs at once,
+ *   CAIRN_QUERY_TIMEOUT_MS        a preview's default            30 s
+ *   CAIRN_MATERIALIZE_TIMEOUT_MS  a stored run's default         2 min
+ *   CAIRN_QUERY_TIMEOUT_MAX_MS    the most a query may ask for   10 min
+ *   CAIRN_RESULT_ROW_LIMIT        rows a stored result keeps     5,000,000
+ *   CAIRN_SCHEDULER_CONCURRENCY   scheduled runs at once,
  *                                   across every data source       2
  */
 
@@ -19,11 +19,11 @@ function integer(name: string, fallback: number): number {
 
 export function limits() {
   return {
-    previewTimeoutMs: integer('ARRAKIS_QUERY_TIMEOUT_MS', 30_000),
-    storeTimeoutMs: integer('ARRAKIS_MATERIALIZE_TIMEOUT_MS', 120_000),
-    maxTimeoutMs: integer('ARRAKIS_QUERY_TIMEOUT_MAX_MS', 600_000),
-    resultRowLimit: integer('ARRAKIS_RESULT_ROW_LIMIT', 5_000_000),
-    schedulerConcurrency: integer('ARRAKIS_SCHEDULER_CONCURRENCY', 2),
+    previewTimeoutMs: integer('CAIRN_QUERY_TIMEOUT_MS', 30_000),
+    storeTimeoutMs: integer('CAIRN_MATERIALIZE_TIMEOUT_MS', 120_000),
+    maxTimeoutMs: integer('CAIRN_QUERY_TIMEOUT_MAX_MS', 600_000),
+    resultRowLimit: integer('CAIRN_RESULT_ROW_LIMIT', 5_000_000),
+    schedulerConcurrency: integer('CAIRN_SCHEDULER_CONCURRENCY', 2),
   };
 }
 

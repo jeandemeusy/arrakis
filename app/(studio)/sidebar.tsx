@@ -197,7 +197,7 @@ export function Sidebar() {
         </button>
         <Link className="sidebar-brand" href="/">
           <Logo />
-          <span>Arrakis</span>
+          <span>Cairn</span>
         </Link>
       </header>
 
@@ -209,7 +209,7 @@ export function Sidebar() {
         <div className="sidebar-head">
           <Link className="sidebar-brand" href="/" onClick={close} title="Home">
             <Logo />
-            <span>Arrakis</span>
+            <span>Cairn</span>
           </Link>
           <button
             type="button"

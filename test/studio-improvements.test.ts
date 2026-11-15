@@ -27,13 +27,13 @@ describe(
       history: typeof import('../app/api/v1/runs/history/route');
     };
     before(async () => {
-      const databases = await createTestDatabases('arrakis_improve');
+      const databases = await createTestDatabases('cairn_improve');
       process.env.APP_DATABASE_URL = databases.appUrl;
       process.env.APP_CHARTS_DATABASE_URL = databases.chartsUrl;
       process.env.NETWORKS = JSON.stringify([
         { id: 'jura', label: 'Jura', databaseUrl: databases.readOnly.jura },
       ]);
-      process.env.ARRAKIS_EDITOR_PASSWORD_HASH = await (
+      process.env.CAIRN_EDITOR_PASSWORD_HASH = await (
         await import('../lib/auth/password')
       ).hashPassword('test password');
       app = await import('../lib/db/app');

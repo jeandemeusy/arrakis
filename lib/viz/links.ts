@@ -19,9 +19,9 @@ export function tableLink(template: string, row: Record<string, unknown>): { hre
   });
   if (missing || /[{}]/.test(href)) return null;
   try {
-    const parsed = new URL(href, 'https://arrakis.invalid');
+    const parsed = new URL(href, 'https://cairn.invalid');
     if (external && !['http:', 'https:'].includes(parsed.protocol)) return null;
-    if (!external && parsed.origin !== 'https://arrakis.invalid') return null;
+    if (!external && parsed.origin !== 'https://cairn.invalid') return null;
     return { href, external };
   } catch {
     return null;

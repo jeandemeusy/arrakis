@@ -7,7 +7,7 @@ import { Sidebar, StudioBanner } from './sidebar';
 import './studio.css';
 
 export const metadata: Metadata = {
-  title: { template: '%s · Arrakis', default: 'Arrakis' },
+  title: { template: '%s · Cairn', default: 'Cairn' },
 };
 
 /**

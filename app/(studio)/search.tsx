@@ -89,7 +89,7 @@ function pages(editor: boolean): Item[] {
     page('/queries', 'Queries', 'Every saved query'),
     ...(editor ? [page('/queries/new', 'New query')] : []),
     page('/lineage', 'Lineage', 'What reads what'),
-    page('/guide', 'Guide', 'How Arrakis works, and questions'),
+    page('/guide', 'Guide', 'How Cairn works, and questions'),
     page('/settings', 'Settings'),
     ...(editor
       ? [

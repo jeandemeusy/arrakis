@@ -14,7 +14,7 @@ export type GuideTopic = {
 export const GUIDE_TOPICS = [
   {
     id: 'start',
-    title: 'How Arrakis works',
+    title: 'How Cairn works',
     summary:
       'Queries read a data source and store their result; charts shape a stored result; dashboards arrange charts. Reading a chart never runs a query.',
   },
@@ -22,7 +22,7 @@ export const GUIDE_TOPICS = [
     id: 'sources',
     title: 'Data sources',
     summary:
-      'The databases Arrakis reads, each through a read-only role, set in the deployment. A query runs on one, or on all of them stacked.',
+      'The databases Cairn reads, each through a read-only role, set in the deployment. A query runs on one, or on all of them stacked.',
   },
   {
     id: 'queries',
@@ -82,7 +82,7 @@ export const GUIDE_TOPICS = [
     id: 'bundles',
     title: 'Bundles',
     summary:
-      'A dashboard with its charts and queries as one file: export it from Share, import it on another Arrakis from a file or a URL.',
+      'A dashboard with its charts and queries as one file: export it from Share, import it on another Cairn from a file or a URL.',
   },
   {
     id: 'lineage',

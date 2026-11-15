@@ -1,5 +1,5 @@
 /**
- * The data sources Arrakis queries: PostgreSQL databases (or anything that
+ * The data sources Cairn queries: PostgreSQL databases (or anything that
  * speaks its protocol — Supabase, Neon, RDS, Timescale…), each reached through
  * a role that can only read.
  *
@@ -11,7 +11,7 @@
  * `queryDatabaseUrl`, optional, is where saved queries actually run: a read
  * replica, or the same database under a stricter role. A lone `DATABASE_URL`
  * still works and is read as one source, and `NETWORKS` — this variable's
- * name before Arrakis read more than one kind of database — is read as
+ * name before Cairn read more than one kind of database — is read as
  * `DATA_SOURCES`.
  *
  * Internally a data source is still a "network" in names and columns: that is

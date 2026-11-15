@@ -3,7 +3,7 @@ import { segments } from '../query/scan';
 
 /**
  * A bundle: dashboards, the charts on them and the queries behind those
- * charts, as one JSON file another Arrakis can import.
+ * charts, as one JSON file another Cairn can import.
  *
  * Exported from any dashboard, imported from a file or a URL. Everything in it
  * is what the studio would have created by hand — queries with their SQL,
@@ -13,7 +13,9 @@ import { segments } from '../query/scan';
  * updates what the last import created instead of duplicating it.
  */
 
-export const BUNDLE_FORMAT = 'arrakis-bundle';
+export const BUNDLE_FORMAT = 'cairn-bundle';
+/** The name bundles went by before the rename; still accepted on import. */
+const LEGACY_BUNDLE_FORMAT = 'arrakis-bundle';
 export const BUNDLE_VERSION = 1;
 
 export type BundleQuery = {
@@ -168,13 +170,11 @@ function oneOf<T extends string>(
  */
 export function parseBundle(input: unknown): Bundle {
   const raw = object(input, 'bundle');
-  if (raw.format !== BUNDLE_FORMAT)
-    throw badRequest(
-      `Not an Arrakis bundle: "format" must be "${BUNDLE_FORMAT}"`,
-    );
+  if (raw.format !== BUNDLE_FORMAT && raw.format !== LEGACY_BUNDLE_FORMAT)
+    throw badRequest(`Not a Cairn bundle: "format" must be "${BUNDLE_FORMAT}"`);
   if (raw.version !== BUNDLE_VERSION)
     throw badRequest(
-      `This Arrakis reads bundle version ${BUNDLE_VERSION}; the file is version ${String(raw.version)}`,
+      `This Cairn reads bundle version ${BUNDLE_VERSION}; the file is version ${String(raw.version)}`,
     );
 
   const lists = (
@@ -347,7 +347,9 @@ export function listsNamed(sql: string): string[] {
   return [
     ...new Set(
       [
-        ...code.matchAll(/\{\{\s*(?:list:([a-z_][a-z0-9_]*)(?::(?:values|names))?|(exits))\s*\}\}/g),
+        ...code.matchAll(
+          /\{\{\s*(?:list:([a-z_][a-z0-9_]*)(?::(?:values|names))?|(exits))\s*\}\}/g,
+        ),
       ].map((match) => match[1] ?? match[2]),
     ),
   ];

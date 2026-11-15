@@ -6,7 +6,7 @@ import { GUIDE_TOPICS } from './topics';
 export const metadata: Metadata = { title: 'Guide' };
 
 /**
- * The guide: how Arrakis works, the placeholders queries can use, charts and
+ * The guide: how Cairn works, the placeholders queries can use, charts and
  * dashboards, and the questions that come up. Every section has an anchor,
  * which help tips and the search palette link to.
  */
@@ -51,7 +51,7 @@ export default function GuidePage() {
         <div>
           <h1>Guide</h1>
           <p className="studio-muted">
-            How Arrakis turns SQL into charts and dashboards, the placeholders a
+            How Cairn turns SQL into charts and dashboards, the placeholders a
             query can use, and answers to the questions that come up. Press{' '}
             <kbd>⌘K</kbd> anywhere to search.
           </p>
@@ -72,14 +72,14 @@ export default function GuidePage() {
         <article className="guide-body">
           <Section id="start">
             <p>
-              Arrakis is a place to ask questions of a database in SQL and keep
+              Cairn is a place to ask questions of a database in SQL and keep
               the answers as charts. It connects to each data source through a
               read-only role, so nothing it runs can change the data.
             </p>
             <ol className="guide-flow">
               <li>
                 <strong>Queries</strong> are SQL, saved and versioned. Running
-                one and storing it copies its rows into Arrakis&apos;s own
+                one and storing it copies its rows into Cairn&apos;s own
                 database: its <em>stored result</em>.
               </li>
               <li>
@@ -110,9 +110,9 @@ export default function GuidePage() {
           <Section id="sources">
             <p>
               A data source is a PostgreSQL database, or one that speaks its
-              protocol (Supabase, Neon, RDS, Timescale…). Arrakis reaches each
+              protocol (Supabase, Neon, RDS, Timescale…). Cairn reaches each
               through a role that can only read, and refuses one that can write.
-              Sources are set where Arrakis is deployed, in{' '}
+              Sources are set where Cairn is deployed, in{' '}
               <code>DATA_SOURCES</code>, not from this page.
             </p>
             <p>
@@ -241,7 +241,7 @@ export default function GuidePage() {
                 <tr>
                   <td><code>{"event_topic('Transfer(address,address,uint256)')"}</code></td>
                   <td>
-                    The Keccak-256 event topic as bytes, calculated by Arrakis
+                    The Keccak-256 event topic as bytes, calculated by Cairn
                     before the query runs. Use a literal canonical event signature
                     without parameter names, spaces, or <code>indexed</code>.
                   </td>
@@ -437,10 +437,10 @@ export default function GuidePage() {
 
           <Section id="bundles">
             <p>
-              A bundle carries a dashboard to another Arrakis: the dashboard,
+              A bundle carries a dashboard to another Cairn: the dashboard,
               those its charts link to, the charts, their queries, the fragments
               those use and the definitions of the lists they read (not the
-              values, which are each Arrakis&apos;s own). An editor downloads
+              values, which are each Cairn&apos;s own). An editor downloads
               one from a dashboard&apos;s <strong>Share</strong> menu.
             </p>
             <p>

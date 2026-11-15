@@ -1,10 +1,10 @@
-# Arrakis
+# Cairn
 
 Query a database in SQL, keep the answers as charts, and arrange the charts on
 dashboards — for anyone to read, with each figure traceable to the SQL behind
 it.
 
-Arrakis connects to any PostgreSQL database, or one that speaks its protocol
+Cairn connects to any PostgreSQL database, or one that speaks its protocol
 (Supabase, Neon, RDS/Aurora, Timescale, AlloyDB…), through a role that can only
 read. It keeps its own state — queries, their versions, stored results, charts,
 dashboards, sessions — in a database of its own.
@@ -14,14 +14,14 @@ dashboards, sessions — in a database of its own.
 `data source → saved, versioned SQL → stored result → charts → dashboards`
 
 - **Queries** are SQL with a few placeholders, saved and versioned. Running one
-  and storing it copies its rows into Arrakis's own database: its *stored
+  and storing it copies its rows into Cairn's own database: its *stored
   result*. A schedule refreshes it.
 - **Charts** shape a stored result — count, bucket by day, split into series —
   and never read the data source, so a dashboard stays fast however heavy the
   SQL behind it.
 - **Dashboards** arrange charts from any queries, with variables (a time range,
   a data source, a selected value) that viewers change.
-- **Bundles** carry a dashboard, its charts and its queries to another Arrakis
+- **Bundles** carry a dashboard, its charts and its queries to another Cairn
   as one file.
 
 Everyone can read what is public; editing needs the editor password. The
@@ -39,18 +39,18 @@ npm run hash-password        # choose the editor password; prints its hash
 Put what `dev:db` prints, and the hash, in `.env.local`:
 
 ```dotenv
-APP_DATABASE_URL=postgresql://arrakis:…@127.0.0.1:54329/arrakis
-APP_CHARTS_DATABASE_URL=postgresql://arrakis_charts:…@127.0.0.1:54329/arrakis
+APP_DATABASE_URL=postgresql://cairn:…@127.0.0.1:54329/cairn
+APP_CHARTS_DATABASE_URL=postgresql://cairn_charts:…@127.0.0.1:54329/cairn
 DATA_SOURCES='[{"id":"demo","label":"Demo","databaseUrl":"postgresql://blokli_reader:…@127.0.0.1:54329/blokli_demo"}]'
-ARRAKIS_EDITOR_PASSWORD_HASH=scrypt:15:8:1:…
+CAIRN_EDITOR_PASSWORD_HASH=scrypt:15:8:1:…
 ```
 
 The local database is set up like a real deployment: the app connects as
-`arrakis`, an ordinary role that owns its database, and every TCP connection
+`cairn`, an ordinary role that owns its database, and every TCP connection
 needs a password (generated once, kept in `.pgdata`, and printed again on each
 start). Only the socket in `.pgdata`, readable by you alone, lets the
 superuser in without one. A `.pgdata` made by an older `dev:db` is converted on
-its next start — its tables are handed to `arrakis` — so update `.env.local`
+its next start — its tables are handed to `cairn` — so update `.env.local`
 with the new URLs it prints.
 
 Then `npm run dev`, open <http://localhost:3000/>, sign in, import
@@ -74,9 +74,9 @@ DATA_SOURCES='[
   {"id":"staging","label":"Staging","databaseUrl":"postgresql://reader:…@staging-db:5432/app",
    "queryDatabaseUrl":"postgresql://reader:…@staging-replica:5432/app"}
 ]'
-APP_DATABASE_URL=postgresql://arrakis:…@app-db:5432/arrakis
-APP_CHARTS_DATABASE_URL=postgresql://arrakis_charts:…@app-db:5432/arrakis
-ARRAKIS_EDITOR_PASSWORD_HASH=scrypt:15:8:1:…
+APP_DATABASE_URL=postgresql://cairn:…@app-db:5432/cairn
+APP_CHARTS_DATABASE_URL=postgresql://cairn_charts:…@app-db:5432/cairn
+CAIRN_EDITOR_PASSWORD_HASH=scrypt:15:8:1:…
 ```
 
 - `id` is lowercase letters, digits and dashes, unique; `label` is what the
@@ -89,7 +89,7 @@ ARRAKIS_EDITOR_PASSWORD_HASH=scrypt:15:8:1:…
 - A malformed `DATA_SOURCES` is reported rather than ignored: a silent fallback
   would hide a deployment mistake behind empty dashboards.
 
-`APP_DATABASE_URL` is Arrakis's own database, separate from every data source.
+`APP_DATABASE_URL` is Cairn's own database, separate from every data source.
 The app migrates it itself on start (`db/migrations`). Without it, there is
 nothing to save queries in and the studio says so. Connect with a role that
 owns this database and nothing more — **never a superuser**, in any
@@ -97,7 +97,7 @@ environment: hand-written chart SQL runs inside this database, so whatever
 the role may do on the server, a chart may try.
 
 Signing in takes one password, which lets you edit: `npm run hash-password` prints the hash
-to put in `ARRAKIS_EDITOR_PASSWORD_HASH`; the password itself is never stored.
+to put in `CAIRN_EDITOR_PASSWORD_HASH`; the password itself is never stored.
 Changing the variable and restarting rotates it; unsetting it disables editing
 and ends every session. Underneath it is one `editor` account in a `users`
 table — sessions, authorship and rate limiting all key on a user — so more
@@ -110,12 +110,12 @@ logins for 15 minutes — except, for the second, from an address that signed in
 successfully in the last day, so an attack cannot lock the editors out.
 
 The address is the one the proxy in front saw: the entry
-`ARRAKIS_TRUSTED_PROXIES` places from the right of `X-Forwarded-For` (1 by
+`CAIRN_TRUSTED_PROXIES` places from the right of `X-Forwarded-For` (1 by
 default — one reverse proxy), never what the client wrote further left. Set
 it to the number of proxies the request crosses, or set
-`ARRAKIS_CLIENT_IP_HEADER` to a header your proxy sets itself (`x-real-ip`,
+`CAIRN_CLIENT_IP_HEADER` to a header your proxy sets itself (`x-real-ip`,
 `cf-connecting-ip`). State-changing requests from another origin are refused;
-set `ARRAKIS_ALLOWED_ORIGINS` if the studio is served from a second hostname.
+set `CAIRN_ALLOWED_ORIGINS` if the studio is served from a second hostname.
 Every response carries a Content Security Policy (scripts, styles, images and
 requests from the app's own origin only; no framing), `nosniff`, a strict
 referrer policy, `Cross-Origin-Opener-Policy` and, in production, HSTS
@@ -125,14 +125,14 @@ referrer policy, `Cross-Origin-Opener-Policy` and, in production, HSTS
 
 | Variable | Default | |
 |---|---|---|
-| `ARRAKIS_QUERY_TIMEOUT_MS` | `30000` | Time limit of a preview (an unsaved run). |
-| `ARRAKIS_MATERIALIZE_TIMEOUT_MS` | `120000` | Time limit of a stored run, by hand or scheduled. |
-| `ARRAKIS_QUERY_TIMEOUT_MAX_MS` | `600000` | Ceiling on any query's own time limit. |
-| `ARRAKIS_RESULT_ROW_LIMIT` | `5000000` | Most rows a stored result keeps; past it the result is marked cut. |
-| `ARRAKIS_SCHEDULER_CONCURRENCY` | `2` | Scheduled refreshes running at once, across every data source. |
-| `ARRAKIS_CHART_CONCURRENCY` | `4` | Charts computed at once on a replica; more wait. |
-| `ARRAKIS_CHART_QUEUE` | `32` | Charts waiting their turn before more are refused with `429`. |
-| `ARRAKIS_READ_RATE_LIMIT` | `300` | Requests a minute one address may make, signed out, for results, chart and dashboard data; then `429`. Per replica. |
+| `CAIRN_QUERY_TIMEOUT_MS` | `30000` | Time limit of a preview (an unsaved run). |
+| `CAIRN_MATERIALIZE_TIMEOUT_MS` | `120000` | Time limit of a stored run, by hand or scheduled. |
+| `CAIRN_QUERY_TIMEOUT_MAX_MS` | `600000` | Ceiling on any query's own time limit. |
+| `CAIRN_RESULT_ROW_LIMIT` | `5000000` | Most rows a stored result keeps; past it the result is marked cut. |
+| `CAIRN_SCHEDULER_CONCURRENCY` | `2` | Scheduled refreshes running at once, across every data source. |
+| `CAIRN_CHART_CONCURRENCY` | `4` | Charts computed at once on a replica; more wait. |
+| `CAIRN_CHART_QUEUE` | `32` | Charts waiting their turn before more are refused with `429`. |
+| `CAIRN_READ_RATE_LIMIT` | `300` | Requests a minute one address may make, signed out, for results, chart and dashboard data; then `429`. Per replica. |
 
 A query can set its own time limit and row cap under *Run limits* in its About
 panel; the server's ceilings above still apply. A run past its limit answers
@@ -227,7 +227,7 @@ reported `stale`.
 interval, and within one scheduler tick (10 s) of its inputs changing. One
 replica leads, through an advisory lock in the app database; the others take
 over if it goes away. A failed run keeps the previous result serving and
-records the error on it. At most `ARRAKIS_SCHEDULER_CONCURRENCY` scheduled runs
+records the error on it. At most `CAIRN_SCHEDULER_CONCURRENCY` scheduled runs
 are in flight at once.
 
 **Query health** under Settings shows active runs, problems with default
@@ -355,8 +355,8 @@ with the reason and step charts are unaffected.
 
 ```sql
 -- as a superuser, once
-CREATE ROLE arrakis_charts LOGIN NOINHERIT PASSWORD '…' CONNECTION LIMIT 8;
-ALTER ROLE arrakis_charts SET statement_timeout = '15s';
+CREATE ROLE cairn_charts LOGIN NOINHERIT PASSWORD '…' CONNECTION LIMIT 8;
+ALTER ROLE cairn_charts SET statement_timeout = '15s';
 ```
 
 Give it nothing else: no membership in any role, no grant on any table. It
@@ -406,7 +406,7 @@ traced to its SQL; charts on a private query only link for editors.
 A bundle is a dashboard with everything it needs, as one JSON file: the
 dashboard, those its charts link to, the charts, their queries, the fragments
 those use, and the definitions of the lists they read (never the values, which
-are each Arrakis's own). [`lib/bundles/format.ts`](./lib/bundles/format.ts)
+are each Cairn's own). [`lib/bundles/format.ts`](./lib/bundles/format.ts)
 describes the format.
 
 - **Export:** an editor downloads one from a dashboard's **Share** menu
@@ -545,12 +545,12 @@ nix build .#container   # Linux only; dockerTools does not run on macOS
 docker load < result
 ```
 
-`nix build .#arrakis` produces the same application tree without wrapping it in
-an image, and `result/bin/arrakis` runs it directly. Both use Next's standalone
+`nix build .#cairn` produces the same application tree without wrapping it in
+an image, and `result/bin/cairn` runs it directly. Both use Next's standalone
 output, so only the dependencies `next build` actually traced are shipped.
 
 The `Publish container` workflow type-checks and lints every pull request, and on
 a push to `main` or a `v*` tag builds the image and publishes it to
-`ghcr.io/jeandemeusy/arrakis`. Every build receives an immutable
+`ghcr.io/jeandemeusy/cairn`. Every build receives an immutable
 `sha-<full-commit-sha>` tag; version tags and the mutable `main` convenience tag
 are also published.

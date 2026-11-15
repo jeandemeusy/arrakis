@@ -89,7 +89,7 @@ describe(
       process.env.APP_DATABASE_URL = databases.appUrl;
       process.env.APP_CHARTS_DATABASE_URL = databases.chartsUrl;
       process.env.NETWORKS = networks();
-      process.env.ARRAKIS_EDITOR_PASSWORD_HASH =
+      process.env.CAIRN_EDITOR_PASSWORD_HASH =
         await lib.password.hashPassword(PASSWORD);
       delete process.env.EXITS;
       routes = {
@@ -312,14 +312,14 @@ describe(
       });
 
       it('stops a query at the time limit', async () => {
-        process.env.ARRAKIS_QUERY_TIMEOUT_MS = '500';
+        process.env.CAIRN_QUERY_TIMEOUT_MS = '500';
         try {
           const response = await adhoc('SELECT pg_sleep(3)', {
             network: 'jura',
           });
           assert.equal(response.status, 408);
         } finally {
-          delete process.env.ARRAKIS_QUERY_TIMEOUT_MS;
+          delete process.env.CAIRN_QUERY_TIMEOUT_MS;
         }
       });
 
@@ -463,14 +463,14 @@ describe(
           );
 
           // Even with the check overridden, the transaction stays read-only.
-          process.env.ARRAKIS_UNSAFE_ALLOW_WRITABLE_ROLE = '1';
+          process.env.CAIRN_UNSAFE_ALLOW_WRITABLE_ROLE = '1';
           const write = await adhoc(
             "SELECT * FROM (SELECT 1) AS x WHERE (SELECT set_config('transaction_read_only', 'off', true)) IS NULL",
             { network: 'unsafe' },
           );
           assert.equal(write.status, 400);
         } finally {
-          delete process.env.ARRAKIS_UNSAFE_ALLOW_WRITABLE_ROLE;
+          delete process.env.CAIRN_UNSAFE_ALLOW_WRITABLE_ROLE;
           process.env.NETWORKS = networks();
         }
       });
@@ -480,18 +480,18 @@ describe(
         const admin = new Client({ connectionString: adminUrl! });
         await admin.connect();
         const url = new URL(databases.readOnly.jura);
-        url.username = 'arrakis_t_switch';
+        url.username = 'cairn_t_switch';
         url.password = 'switch';
         try {
-          await admin.query('DROP ROLE IF EXISTS arrakis_t_switch');
-          await admin.query("CREATE ROLE arrakis_t_switch LOGIN PASSWORD 'switch'");
+          await admin.query('DROP ROLE IF EXISTS cairn_t_switch');
+          await admin.query("CREATE ROLE cairn_t_switch LOGIN PASSWORD 'switch'");
           // Not inherited, so its own privileges show nothing to write with;
           // a query could still SET ROLE to the writer.
           await admin.query(
-            'GRANT arrakis_t_rw TO arrakis_t_switch WITH INHERIT FALSE',
+            'GRANT cairn_t_rw TO cairn_t_switch WITH INHERIT FALSE',
           );
           await admin.query(
-            `GRANT CONNECT ON DATABASE ${new URL(databases.readOnly.jura).pathname.slice(1)} TO arrakis_t_switch`,
+            `GRANT CONNECT ON DATABASE ${new URL(databases.readOnly.jura).pathname.slice(1)} TO cairn_t_switch`,
           );
           process.env.NETWORKS = JSON.stringify([
             { id: 'switcher', label: 'Switcher', databaseUrl: url.toString() },
@@ -500,19 +500,19 @@ describe(
           assert.equal(response.status, 503);
           assert.match(
             String((await body(response)).error),
-            /can switch to role arrakis_t_rw/,
+            /can switch to role cairn_t_rw/,
           );
         } finally {
           process.env.NETWORKS = networks();
           await lib.runner.closeQueryPools();
-          await admin.query('DROP OWNED BY arrakis_t_switch').catch(() => undefined);
-          await admin.query('DROP ROLE IF EXISTS arrakis_t_switch');
+          await admin.query('DROP OWNED BY cairn_t_switch').catch(() => undefined);
+          await admin.query('DROP ROLE IF EXISTS cairn_t_switch');
           await admin.end();
         }
       });
 
       it('leaves no session state behind on the pooled connection', async () => {
-        process.env.ARRAKIS_QUERY_CONCURRENCY = '1';
+        process.env.CAIRN_QUERY_CONCURRENCY = '1';
         try {
           await adhoc(
             "SELECT pg_advisory_lock(42), set_config('application_name', 'tampered', false)",
@@ -525,9 +525,9 @@ describe(
               { network: 'dev' },
             ),
           );
-          assert.deepEqual(result.rows, [['arrakis-query', '0']]);
+          assert.deepEqual(result.rows, [['cairn-query', '0']]);
         } finally {
-          delete process.env.ARRAKIS_QUERY_CONCURRENCY;
+          delete process.env.CAIRN_QUERY_CONCURRENCY;
         }
       });
 
@@ -1078,8 +1078,8 @@ describe(
           undefined,
         );
         const fresh = cookieFrom(login);
-        const hash = process.env.ARRAKIS_EDITOR_PASSWORD_HASH;
-        delete process.env.ARRAKIS_EDITOR_PASSWORD_HASH;
+        const hash = process.env.CAIRN_EDITOR_PASSWORD_HASH;
+        delete process.env.CAIRN_EDITOR_PASSWORD_HASH;
         try {
           // What a restart does: the env account is re-synced.
           const { syncEnvUsers } = await import('../lib/auth/session');
@@ -1098,7 +1098,7 @@ describe(
           );
           assert.equal(again.status, 401);
         } finally {
-          process.env.ARRAKIS_EDITOR_PASSWORD_HASH = hash;
+          process.env.CAIRN_EDITOR_PASSWORD_HASH = hash;
         }
       });
     });
