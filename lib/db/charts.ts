@@ -45,7 +45,7 @@ function poolFor(connectionString: string): Pool {
     // is plenty, and keeps a burst of them from crowding out anything else.
     max: 4,
     idleTimeoutMillis: 30_000,
-    application_name: 'arrakis-charts',
+    application_name: 'cairn-charts',
   });
   pool.on('error', (error) => {
     console.error('Charts pool:', error.message);

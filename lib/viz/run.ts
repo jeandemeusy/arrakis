@@ -72,8 +72,8 @@ function remember(key: string, data: VisualizationData) {
  * Charts computed at once, on this replica. A chart that is not cached takes
  * a connection for up to ten seconds; without a bound, a burst of them —
  * someone cycling a text variable — would hold the app database's pool and
- * stall logins and saves with it. Beyond ARRAKIS_CHART_CONCURRENCY (4) running
- * and ARRAKIS_CHART_QUEUE (32) waiting, a chart answers 429.
+ * stall logins and saves with it. Beyond CAIRN_CHART_CONCURRENCY (4) running
+ * and CAIRN_CHART_QUEUE (32) waiting, a chart answers 429.
  */
 const computing = { running: 0, waiting: [] as Array<() => void> };
 
@@ -83,11 +83,11 @@ function chartSetting(name: string, fallback: number): number {
 }
 
 async function startComputing(): Promise<void> {
-  if (computing.running < chartSetting('ARRAKIS_CHART_CONCURRENCY', 4)) {
+  if (computing.running < chartSetting('CAIRN_CHART_CONCURRENCY', 4)) {
     computing.running += 1;
     return;
   }
-  if (computing.waiting.length >= chartSetting('ARRAKIS_CHART_QUEUE', 32)) {
+  if (computing.waiting.length >= chartSetting('CAIRN_CHART_QUEUE', 32)) {
     throw new HttpError(429, 'Too many charts are being drawn; try again shortly.', {
       headers: { 'retry-after': '5' },
     });
@@ -132,10 +132,10 @@ function ticketedRelation(
       if (!/^[a-z0-9-]+$/.test(entry.network)) {
         throw new Error(`Unexpected network id ${entry.network}`);
       }
-      return `SELECT ${multi ? `'${entry.network}'::text AS network, ${index} AS arrakis_network_order, ` : ''}arrakis_row, ${names.join(', ')} FROM chart_access.result_rows(${marker}${index}_) AS stored_${index}(${definition})`;
+      return `SELECT ${multi ? `'${entry.network}'::text AS network, ${index} AS cairn_network_order, ` : ''}arrakis_row, ${names.join(', ')} FROM chart_access.result_rows(${marker}${index}_) AS stored_${index}(${definition})`;
     })
     .join('\nUNION ALL\n');
-  return `SELECT ${multi ? 'network, ' : ''}${names.join(', ')} FROM (${select}) AS stored ORDER BY ${multi ? 'arrakis_network_order, ' : ''}arrakis_row`;
+  return `SELECT ${multi ? 'network, ' : ''}${names.join(', ')} FROM (${select}) AS stored ORDER BY ${multi ? 'cairn_network_order, ' : ''}arrakis_row`;
 }
 
 /**
@@ -247,7 +247,7 @@ export async function runVisualization(options: {
     const tickets: string[] = [];
     const ticketed: string[] = [];
     if (config.sql) {
-      const marker = `arrakis_ticket_${randomBytes(8).toString('hex')}_`;
+      const marker = `cairn_ticket_${randomBytes(8).toString('hex')}_`;
       ({ text, values } = expandSql(
         config.sql,
         ticketedRelation(located.tables, marker),

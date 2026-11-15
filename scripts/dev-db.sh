@@ -13,9 +13,9 @@
 # socket in that directory. For development only, but set up the way a real
 # deployment should be:
 #
-#  - Arrakis connects as `arrakis`, an ordinary role that owns the `arrakis`
+#  - Cairn connects as `cairn`, an ordinary role that owns the `cairn`
 #    database, never as the superuser. Hand-written chart SQL logs in as
-#    `arrakis_charts`, which holds nothing but what the app grants it.
+#    `cairn_charts`, which holds nothing but what the app grants it.
 #  - TCP connections need a password (scram-sha-256). Each role gets a random
 #    one, kept in .pgdata (mode 600) and printed below.
 #  - Only the socket trusts without a password, and it sits in .pgdata, which
@@ -88,31 +88,31 @@ else
     start >/dev/null
 fi
 
-APP_PASSWORD=$(password arrakis)
-CHARTS_PASSWORD=$(password arrakis_charts)
+APP_PASSWORD=$(password cairn)
+CHARTS_PASSWORD=$(password cairn_charts)
 
 # The app's role and database: not a superuser, no CREATEROLE. And the role
 # hand-written chart SQL logs in as, which holds nothing at all: the app
 # grants it the one function it may call (see lib/db/charts.ts).
 admin postgres -v app_password="$APP_PASSWORD" -v charts_password="$CHARTS_PASSWORD" <<'SQL'
 SET client_min_messages = warning;
-SELECT format('CREATE ROLE arrakis LOGIN PASSWORD %L', :'app_password')
-  WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'arrakis') \gexec
-ALTER ROLE arrakis LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD :'app_password';
-SELECT format('CREATE ROLE arrakis_charts LOGIN PASSWORD %L', :'charts_password')
-  WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'arrakis_charts') \gexec
-ALTER ROLE arrakis_charts LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE
+SELECT format('CREATE ROLE cairn LOGIN PASSWORD %L', :'app_password')
+  WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'cairn') \gexec
+ALTER ROLE cairn LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD :'app_password';
+SELECT format('CREATE ROLE cairn_charts LOGIN PASSWORD %L', :'charts_password')
+  WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'cairn_charts') \gexec
+ALTER ROLE cairn_charts LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE
   CONNECTION LIMIT 8 PASSWORD :'charts_password';
-ALTER ROLE arrakis_charts SET statement_timeout = '15s';
-SELECT 'CREATE DATABASE arrakis OWNER arrakis'
-  WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = 'arrakis') \gexec
-ALTER DATABASE arrakis OWNER TO arrakis;
+ALTER ROLE cairn_charts SET statement_timeout = '15s';
+SELECT 'CREATE DATABASE cairn OWNER cairn'
+  WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = 'cairn') \gexec
+ALTER DATABASE cairn OWNER TO cairn;
 SQL
 
 # A database made by an older version of this script belongs to the
-# superuser, tables and all. Hand everything in it to `arrakis`, so the app
+# superuser, tables and all. Hand everything in it to `cairn`, so the app
 # keeps its saved queries and dashboards under its new role.
-admin arrakis <<'SQL'
+admin cairn <<'SQL'
 SET client_min_messages = warning;
 DO $$
 DECLARE
@@ -123,7 +123,7 @@ BEGIN
     WHERE n.nspowner = 'postgres'::regrole
       AND n.nspname NOT LIKE 'pg\_%' AND n.nspname NOT IN ('information_schema', 'public')
   LOOP
-    EXECUTE format('ALTER SCHEMA %I OWNER TO arrakis', item.nspname);
+    EXECUTE format('ALTER SCHEMA %I OWNER TO cairn', item.nspname);
   END LOOP;
   -- Tables, views and free-standing sequences; a table's own sequences and
   -- indexes follow it.
@@ -139,7 +139,7 @@ BEGIN
           AND d.deptype IN ('a', 'i')))
   LOOP
     EXECUTE format(
-      'ALTER %s %s OWNER TO arrakis',
+      'ALTER %s %s OWNER TO cairn',
       CASE item.relkind
         WHEN 'v' THEN 'VIEW'
         WHEN 'm' THEN 'MATERIALIZED VIEW'
@@ -155,7 +155,7 @@ BEGIN
     WHERE p.proowner = 'postgres'::regrole
       AND n.nspname NOT LIKE 'pg\_%' AND n.nspname <> 'information_schema'
   LOOP
-    EXECUTE format('ALTER FUNCTION %s OWNER TO arrakis', item.name);
+    EXECUTE format('ALTER FUNCTION %s OWNER TO cairn', item.name);
   END LOOP;
 END
 $$;
@@ -201,8 +201,8 @@ fi
 
 echo "PostgreSQL is running on $HOST:$PORT. For .env.local:"
 echo
-echo "APP_DATABASE_URL=postgresql://arrakis:$APP_PASSWORD@$HOST:$PORT/arrakis"
-echo "APP_CHARTS_DATABASE_URL=postgresql://arrakis_charts:$CHARTS_PASSWORD@$HOST:$PORT/arrakis"
+echo "APP_DATABASE_URL=postgresql://cairn:$APP_PASSWORD@$HOST:$PORT/cairn"
+echo "APP_CHARTS_DATABASE_URL=postgresql://cairn_charts:$CHARTS_PASSWORD@$HOST:$PORT/cairn"
 if [ -n "$READER_PASSWORD" ]; then
   echo "DATA_SOURCES='[{\"id\":\"demo\",\"label\":\"Demo\",\"databaseUrl\":\"postgresql://blokli_reader:$READER_PASSWORD@$HOST:$PORT/blokli_demo\"}]'"
 fi

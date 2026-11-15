@@ -22,7 +22,7 @@ export type StyleName = (typeof STYLES)[number]['id'];
 export const DEFAULT_STYLE: StyleName = 'neubrutal';
 
 /** The key the choice is stored under, read by the pre-paint script in `layout.tsx`. */
-export const STYLE_STORAGE_KEY = 'arrakis:style';
+export const STYLE_STORAGE_KEY = 'cairn:style';
 
 /**
  * Light or dark, for the editorial style; the neubrutal style is always light.
@@ -38,7 +38,7 @@ export type ThemeChoice = (typeof THEMES)[number]['id'];
 export type Theme = 'light' | 'dark';
 
 export const DEFAULT_THEME: ThemeChoice = 'system';
-export const THEME_STORAGE_KEY = 'arrakis:theme';
+export const THEME_STORAGE_KEY = 'cairn:theme';
 
 export function isThemeChoice(value: unknown): value is ThemeChoice {
   return THEMES.some((entry) => entry.id === value);

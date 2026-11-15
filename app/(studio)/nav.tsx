@@ -80,7 +80,7 @@ export function useDashboardSections(slug: string, sections: NavSection[]) {
 
 // The folded state, read from local storage the way the visual style is:
 // through an external store, so the server render and hydration agree.
-const FOLDED_KEY = 'arrakis.sidebar.folded';
+const FOLDED_KEY = 'cairn.sidebar.folded';
 const listeners = new Set<() => void>();
 
 function readFolded(): boolean {

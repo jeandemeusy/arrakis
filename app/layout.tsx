@@ -12,12 +12,12 @@ import {
 } from './chart-theme';
 
 export const metadata: Metadata = {
-  title: 'Arrakis',
+  title: 'Cairn',
   description:
     'Query a database in SQL, keep the answers as charts, and arrange them on dashboards.',
   icons: { icon: '/favicon.svg' },
   openGraph: {
-    title: 'Arrakis',
+    title: 'Cairn',
     description: 'SQL in, charts and dashboards out.',
     type: 'website',
   },

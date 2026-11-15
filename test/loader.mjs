@@ -40,7 +40,7 @@ export async function resolve(specifier, context, next) {
   return next(specifier, context);
 }
 
-if (!globalThis.__arrakisLoader) {
-  globalThis.__arrakisLoader = true;
+if (!globalThis.__cairnLoader) {
+  globalThis.__cairnLoader = true;
   register(import.meta.url);
 }

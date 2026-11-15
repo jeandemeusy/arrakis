@@ -116,7 +116,7 @@ export async function planInstall(bundle: Bundle): Promise<Plan> {
     );
     if (rows[0] && rows[0].type !== list.type) {
       throw badRequest(
-        `The bundle needs a list "${list.name}" of ${list.type}; this Arrakis has one of ${rows[0].type}`,
+        `The bundle needs a list "${list.name}" of ${list.type}; this Cairn has one of ${rows[0].type}`,
       );
     }
     // An existing list is used as it is, values and all.
@@ -262,7 +262,7 @@ export async function installBundle(
           `${item.kind} "${item.name}"${item.action === 'restore' ? ' (archived)' : ''}`,
       );
     throw badRequest(
-      `This Arrakis already has ${names.join(', ')}, not from this bundle or archived. Import with "replace" to overwrite or restore them.`,
+      `This Cairn already has ${names.join(', ')}, not from this bundle or archived. Import with "replace" to overwrite or restore them.`,
       { conflicts: names },
     );
   }
@@ -280,7 +280,7 @@ export async function installBundle(
   const note = `Imported with the bundle ${bundle.title}`;
 
   // Lists first: queries that read them do not compile without them. They
-  // are created empty; their values are for this Arrakis's editors to keep.
+  // are created empty; their values are for this Cairn's editors to keep.
   for (const list of bundle.lists) {
     const { rowCount } = await db.query(
       `INSERT INTO lists (name, type, description, created_by)
@@ -457,7 +457,7 @@ export async function installBundle(
 }
 
 /**
- * Bundles this Arrakis has imported, with their dashboards: any bundle with
+ * Bundles this Cairn has imported, with their dashboards: any bundle with
  * something left that is not archived, so one whose dashboards were archived
  * by hand can still be removed.
  */

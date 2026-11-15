@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { Star } from 'lucide-react';
 
 export type PersonalItem = { kind: 'dashboard' | 'query'; slug: string };
-const key = (name: string) => `arrakis.${name}`;
+const key = (name: string) => `cairn.${name}`;
 export function readItems(name: string): PersonalItem[] {
   try {
     const value: unknown = JSON.parse(localStorage.getItem(key(name)) ?? '[]');
@@ -23,7 +23,7 @@ export function readItems(name: string): PersonalItem[] {
 function writeItems(name: string, items: PersonalItem[]) {
   try {
     localStorage.setItem(key(name), JSON.stringify(items));
-    window.dispatchEvent(new Event('arrakis-personal'));
+    window.dispatchEvent(new Event('cairn-personal'));
   } catch {
     /* Storage can be disabled. */
   }
@@ -35,10 +35,10 @@ export function usePersonal(name: string) {
   useEffect(() => {
     const update = () => setItems(readItems(name));
     update();
-    window.addEventListener('arrakis-personal', update);
+    window.addEventListener('cairn-personal', update);
     window.addEventListener('storage', update);
     return () => {
-      window.removeEventListener('arrakis-personal', update);
+      window.removeEventListener('cairn-personal', update);
       window.removeEventListener('storage', update);
     };
   }, [name]);

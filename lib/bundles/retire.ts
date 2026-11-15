@@ -11,7 +11,7 @@ import { fragmentsNamed } from './format';
  *
  * Retired items are archived, never deleted, as the studio archives them by
  * hand: an archived query keeps its versions, and can be restored. Lists are
- * left alone, values and all; they are this Arrakis's, not the bundle's.
+ * left alone, values and all; they are this Cairn's, not the bundle's.
  *
  * Something still in use outside what is retired is kept, with the reason: a
  * fragment that a query of yours inlines, a query a chart of yours reads, a

@@ -41,7 +41,7 @@ let lastPrune = 0;
 
 function tickMs(): number {
   const value = Number.parseInt(
-    process.env.ARRAKIS_SCHEDULER_TICK_MS ?? '',
+    process.env.CAIRN_SCHEDULER_TICK_MS ?? '',
     10,
   );
   return Number.isFinite(value) && value >= 1_000 ? value : 10_000;
@@ -51,7 +51,7 @@ async function holdLeadership(): Promise<boolean> {
   if (leader) return true;
   const client = new Client({
     connectionString: process.env.APP_DATABASE_URL,
-    application_name: 'arrakis-scheduler',
+    application_name: 'cairn-scheduler',
   });
   client.on('error', () => {
     // The lock went with the connection; contend again on the next tick.
@@ -148,7 +148,7 @@ async function runDue(): Promise<void> {
   }
   const jobs = await dueJobs(networks);
   // One scheduled run per data source at a time, sources in parallel but at
-  // most ARRAKIS_SCHEDULER_CONCURRENCY at once overall: refreshes never take
+  // most CAIRN_SCHEDULER_CONCURRENCY at once overall: refreshes never take
   // more than one of a source's query connections, leaving the rest to
   // editors, and many sources do not mean many heavy runs together.
   const slots = semaphore(limits().schedulerConcurrency);

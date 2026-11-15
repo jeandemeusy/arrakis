@@ -11,7 +11,7 @@ describe(
     let store: typeof import('../lib/viz/store');
 
     before(async () => {
-      const databases = await createTestDatabases('arrakis_folders');
+      const databases = await createTestDatabases('cairn_folders');
       process.env.APP_DATABASE_URL = databases.appUrl;
       process.env.APP_CHARTS_DATABASE_URL = databases.chartsUrl;
       db = await import('../lib/db/app');

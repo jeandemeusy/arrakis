@@ -105,7 +105,7 @@ function allowedHosts(request: Request): Set<string> {
   const host = request.headers.get('host');
   if (forwarded) hosts.add(forwarded.trim().toLowerCase());
   if (host) hosts.add(host.trim().toLowerCase());
-  for (const origin of (process.env.ARRAKIS_ALLOWED_ORIGINS ?? '').split(',')) {
+  for (const origin of (process.env.CAIRN_ALLOWED_ORIGINS ?? '').split(',')) {
     const trimmed = origin.trim();
     if (!trimmed) continue;
     try {

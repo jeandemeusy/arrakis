@@ -1,4 +1,4 @@
-/** Three streams meeting at a point: data becoming an insight. */
+/** A cairn: three stacked stones, the top one marked, a trail of figures built up from data. */
 export function Logo({ size = 28 }: { size?: number }) {
   return (
     <svg
@@ -9,14 +9,16 @@ export function Logo({ size = 28 }: { size?: number }) {
       aria-hidden="true"
       className="logo"
     >
-      <path
-        d="M5 7.5h3.2c6.1 0 7.5 6.4 13.3 6.4M5 16h16.5M5 24.5h3.2c6.1 0 7.5-6.4 13.3-6.4"
-        stroke="currentColor"
-        strokeWidth="2.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
+      <rect x="4" y="22" width="24" height="7" rx="3.5" fill="currentColor" />
+      <rect
+        x="8"
+        y="13.5"
+        width="16"
+        height="6.5"
+        rx="3.25"
+        fill="currentColor"
       />
-      <circle cx="25.5" cy="16" r="3.5" fill="#c7714c" />
+      <rect x="12" y="5" width="8" height="6.5" rx="3.25" fill="#c7714c" />
     </svg>
   );
 }

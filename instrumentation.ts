@@ -14,7 +14,7 @@ export async function register() {
     const { startScheduler } = await import('./lib/query/scheduler');
     if (
       process.env.APP_DATABASE_URL?.trim() &&
-      process.env.ARRAKIS_SCHEDULER !== '0'
+      process.env.CAIRN_SCHEDULER !== '0'
     ) {
       startScheduler();
     }

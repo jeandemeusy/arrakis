@@ -15,7 +15,7 @@ import { randomBytes, scrypt, timingSafeEqual } from 'node:crypto';
  * it arrives intact, e.g. from a real environment variable.
  *
  * `scripts/hash-password.mjs` produces the same format for
- * ARRAKIS_EDITOR_PASSWORD_HASH — keep the two in step.
+ * CAIRN_EDITOR_PASSWORD_HASH — keep the two in step.
  */
 
 const LOG_N = 15;

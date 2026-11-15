@@ -3,7 +3,7 @@ import type { Metadata } from 'next';
 import { Home } from './home';
 
 export const metadata: Metadata = {
-  title: { absolute: 'Arrakis' },
+  title: { absolute: 'Cairn' },
   description:
     'Dashboards, each figure traceable to the saved query behind it.',
 };

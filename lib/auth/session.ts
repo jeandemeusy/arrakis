@@ -11,7 +11,7 @@ import { parseHash, verifyNothing, verifyPassword } from './password';
  *
  * Editing is gated by a session, and a session is opened by `authenticate`.
  * Today there is a single account, `editor`, whose password hash is
- * ARRAKIS_EDITOR_PASSWORD_HASH, and the login form asks only for a password.
+ * CAIRN_EDITOR_PASSWORD_HASH, and the login form asks only for a password.
  * The model is already per-user — sessions, authorship and the rate limit all
  * key on a user row — so admitting more people means adding rows and a username
  * field, not reworking this module.
@@ -47,14 +47,14 @@ export function sessionCookieName(): string {
   // attribute, path `/`, Secure. Browsers refuse it over plain HTTP, so local
   // development uses an ordinary name.
   return process.env.NODE_ENV === 'production'
-    ? '__Host-arrakis_session'
-    : 'arrakis_session';
+    ? '__Host-cairn_session'
+    : 'cairn_session';
 }
 
 let bootstrapped: Promise<void> | undefined;
 
 /**
- * Keeps the `editor` account in step with ARRAKIS_EDITOR_PASSWORD_HASH.
+ * Keeps the `editor` account in step with CAIRN_EDITOR_PASSWORD_HASH.
  *
  * The environment is the source of truth for this one account: changing the
  * variable and restarting rotates the password, and unsetting it disables the
@@ -73,12 +73,12 @@ export function ensureEnvUsers(): Promise<void> {
 /** The unmemoized sync behind `ensureEnvUsers`, run once per process. */
 export async function syncEnvUsers(): Promise<void> {
   const db = await appDb();
-  const hash = process.env.ARRAKIS_EDITOR_PASSWORD_HASH?.trim() || null;
+  const hash = process.env.CAIRN_EDITOR_PASSWORD_HASH?.trim() || null;
   if (hash && !parseHash(hash)) {
     throw new Error(
       hash.startsWith('scrypt') && !hash.includes(':')
-        ? 'ARRAKIS_EDITOR_PASSWORD_HASH looks truncated: the old `scrypt$…` form gets its `$` parts expanded by the env loader. Generate a new one with `npm run hash-password`.'
-        : 'ARRAKIS_EDITOR_PASSWORD_HASH is not a valid hash; generate one with `npm run hash-password`',
+        ? 'CAIRN_EDITOR_PASSWORD_HASH looks truncated: the old `scrypt$…` form gets its `$` parts expanded by the env loader. Generate a new one with `npm run hash-password`.'
+        : 'CAIRN_EDITOR_PASSWORD_HASH is not a valid hash; generate one with `npm run hash-password`',
     );
   }
   await db.query(
@@ -111,20 +111,20 @@ function tokenHash(token: string): Buffer {
  * A route handler never sees the socket, so the address comes from headers,
  * and the client writes whatever it likes into them: only what a trusted
  * proxy added counts. Each proxy appends the address it received from to
- * X-Forwarded-For, so with ARRAKIS_TRUSTED_PROXIES proxies in front (1 by
+ * X-Forwarded-For, so with CAIRN_TRUSTED_PROXIES proxies in front (1 by
  * default) the caller is the entry that many places from the right; anything
- * further left came from the client. ARRAKIS_CLIENT_IP_HEADER instead names a
+ * further left came from the client. CAIRN_CLIENT_IP_HEADER instead names a
  * header the proxy sets outright (`x-real-ip`, `cf-connecting-ip`). With 0
  * proxies, or a header that is missing, every caller shares one bucket and
  * the per-address limit degrades into the global one.
  */
 export function clientIp(request: Request): string {
-  const named = process.env.ARRAKIS_CLIENT_IP_HEADER?.trim().toLowerCase();
+  const named = process.env.CAIRN_CLIENT_IP_HEADER?.trim().toLowerCase();
   let address: string | undefined;
   if (named) {
     address = request.headers.get(named)?.trim();
   } else {
-    const hops = Number.parseInt(process.env.ARRAKIS_TRUSTED_PROXIES ?? '1', 10);
+    const hops = Number.parseInt(process.env.CAIRN_TRUSTED_PROXIES ?? '1', 10);
     const entries = (request.headers.get('x-forwarded-for') ?? '')
       .split(',')
       .map((entry) => entry.trim())

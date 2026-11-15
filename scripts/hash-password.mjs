@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Prints a hash for ARRAKIS_EDITOR_PASSWORD_HASH.
+// Prints a hash for CAIRN_EDITOR_PASSWORD_HASH.
 //
 //   npm run hash-password            prompts, without echoing
 //   echo -n 'secret' | npm run hash-password

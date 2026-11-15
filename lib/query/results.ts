@@ -434,11 +434,11 @@ export function storedRelation(
       if (!/^[a-z0-9-]+$/.test(entry.network)) {
         throw new Error(`Unexpected network id ${entry.network}`);
       }
-      return `SELECT ${multi ? `'${entry.network}'::text AS network, ${index} AS arrakis_network_order, ` : ''}arrakis_row, ${names.join(', ')} FROM ${qualified(entry.table)}`;
+      return `SELECT ${multi ? `'${entry.network}'::text AS network, ${index} AS cairn_network_order, ` : ''}arrakis_row, ${names.join(', ')} FROM ${qualified(entry.table)}`;
     })
     .join('\nUNION ALL\n');
   return {
-    sql: `SELECT ${multi ? 'network, ' : ''}${names.join(', ')} FROM (${select}) AS stored ORDER BY ${multi ? 'arrakis_network_order, ' : ''}arrakis_row`,
+    sql: `SELECT ${multi ? 'network, ' : ''}${names.join(', ')} FROM (${select}) AS stored ORDER BY ${multi ? 'cairn_network_order, ' : ''}arrakis_row`,
     columns: [
       ...(multi ? [{ name: 'network', type: 'text' as const }] : []),
       ...columns.map((column) => ({
