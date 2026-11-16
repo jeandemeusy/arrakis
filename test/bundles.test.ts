@@ -368,7 +368,7 @@ describe(
         highest_probability: number;
       }>(
         `SELECT SUM(gigabytes)::float8 AS gigabytes,
-                SUM(CASE WHEN win_probability > 0 THEN 650::float8 / 1073741824 / win_probability ELSE 0 END)::float8 AS expected,
+                SUM(CASE WHEN win_probability > 0 THEN (CASE direction WHEN 'downstream' THEN 1068 ELSE 170 END)::float8 / 1073741824 / win_probability ELSE 0 END)::float8 AS expected,
                 MIN(win_probability)::float8 AS lowest_probability,
                 MAX(win_probability)::float8 AS highest_probability
            FROM results.${results[0].table_name}`,
